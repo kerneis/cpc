@@ -404,6 +404,9 @@ and varinfo = {
     (** Whether this varinfo is for an inline function. *)
     mutable vinline: bool;
 
+    (** Whether this varinfo is for a CPS function. *)
+    mutable vcps: bool;
+
     mutable vdecl: location;            (** Location of variable declaration *)
 
     mutable vid: int;  (** A unique integer identifier.  *)
@@ -3199,6 +3202,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
     let stom, rest = separateStorageModifiers v.vattr in
     (* First the storage modifiers *)
     text (if v.vinline then "__inline " else "")
+      ++ text (if v.vcps then "cps " else "")
       ++ d_storage () v.vstorage
       ++ (self#pAttrs () stom)
       ++ (self#pType (Some (text v.vname)) () v.vtype)
@@ -4754,6 +4758,7 @@ let makeVarinfo global name typ =
       vtype = if global then typ else typeRemoveAttributes ["const"] typ;
       vdecl = lu;
       vinline = false;
+      vcps = false;
       vattr = [];
       vstorage = NoStorage;
       vaddrof = false;

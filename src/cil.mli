@@ -488,6 +488,9 @@ and varinfo = {
     mutable vinline: bool;
     (** Whether this varinfo is for an inline function. *)
 
+    mutable vcps: bool;
+    (** Whether this varinfo is for a CPS function. *)
+
     mutable vdecl: location;            
     (** Location of variable declaration. *)
 
