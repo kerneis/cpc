@@ -222,7 +222,7 @@ and childrenTypeSpecifier vis ts =
         
 and childrenSpecElem (vis: cabsVisitor) (se: spec_elem) : spec_elem = 
   match se with
-    SpecTypedef | SpecInline | SpecStorage _ | SpecPattern _ -> se
+    SpecTypedef | SpecInline | SpecStorage _ | SpecPattern _ | SpecCPS -> se
   | SpecCV _ -> se    (* cop out *)
   | SpecAttr a -> begin
       let al' = visitCabsAttribute vis a in
@@ -464,6 +464,30 @@ and childrenStatement vis s =
       let b2' = visitCabsBlock vis b2 in
       if b1' != b1 || e' != e || b2' != b2 then TRY_EXCEPT(b1', e', b2', l) else s
       
+  (*** CPC ***)
+  | CPC_YIELD _ -> s
+  | CPC_DONE _ -> s
+  | CPC_SPAWN (s, l) ->
+      let s' = vs l s in
+      if s' != s then CPC_SPAWN (s', l) else s
+  | CPC_FORK (s, l) ->
+      let s' = vs l s in
+      if s' != s then CPC_FORK (s', l) else s
+  | CPC_WAIT (e, l) ->
+      let e' = ve e in
+      if e' != e then CPC_WAIT (e', l) else s
+  | CPC_SLEEP (e1, e2, e3, l) ->
+      let e1' = ve e1 in
+      let e2' = ve e2 in
+      let e3' = ve e3 in
+      if e1' != e1 || e2' != e2 || e3' != e3 then CPC_SLEEP (e1', e2', e3', l)
+      else s
+  | CPC_IO_WAIT (e1, e2, e3, l) ->
+      let e1' = ve e1 in
+      let e2' = ve e2 in
+      let e3' = ve e3 in
+      if e1' != e1 || e2' != e2 || e3' != e3 then CPC_IO_WAIT (e1', e2', e3', l)
+      else s
           
 and visitCabsExpression vis (e: expression) : expression = 
   doVisit vis vis#vexpr childrenExpression e

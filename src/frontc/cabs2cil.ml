@@ -2201,6 +2201,7 @@ let rec doSpecList (suggestedAnonName: string) (* This string will be part of
     | A.SpecAttr a -> attrs := a :: !attrs; acc
     | A.SpecType ts -> ts :: acc
     | A.SpecPattern _ -> E.s (E.bug "SpecPattern in cabs2cil input")
+    | A.SpecCPS -> acc (*** CPC: NOT IMPLEMENTED ***)
   in
   (* Now scan the list and collect the type specifiers. Preserve the order *)
   let tspecs = List.fold_right doSpecElem specs [] in
@@ -6255,6 +6256,16 @@ and doStatement (s : A.statement) : chunk =
           | _ -> E.s (error "Except expression contains too many statements")
         in
         s2c (mkStmt (TryExcept (c2block b', (il', e'), c2block h', loc')))
+
+    (*** CPC ***)
+     | CPC_YIELD _
+     | CPC_DONE _
+     | CPC_SPAWN (_,_)
+     | CPC_FORK (_,_)
+     | CPC_WAIT (_,_)
+     | CPC_SLEEP (_,_,_,_)
+     | CPC_IO_WAIT (_,_,_,_) -> skipChunk (*** NOT IMPLEMENTED ***)
+
 
   with e when continueOnError -> begin
     (ignore (E.log "Error in doStatement (%s)\n" (Printexc.to_string e)));

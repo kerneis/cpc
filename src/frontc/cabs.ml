@@ -98,6 +98,7 @@ and spec_elem =
   | SpecInline
   | SpecType of typeSpecifier
   | SpecPattern of string       (* specifier pattern variable *)
+  | SpecCPS                     (*** CPC ***)
 
 (* decided to go ahead and replace 'spec_elem list' with specifier *)
 and specifier = spec_elem list
@@ -225,6 +226,15 @@ and statement =
    (** MS SEH *)
  | TRY_EXCEPT of block * expression * block * cabsloc
  | TRY_FINALLY of block * block * cabsloc
+
+   (** CPC **)
+ | CPC_YIELD of cabsloc
+ | CPC_DONE of cabsloc
+ | CPC_SPAWN of statement * cabsloc
+ | CPC_FORK of statement * cabsloc
+ | CPC_WAIT of expression * cabsloc
+ | CPC_SLEEP of expression * expression * expression * cabsloc
+ | CPC_IO_WAIT of expression * expression * expression * cabsloc
  
 and for_clause = 
    FC_EXP of expression

@@ -161,6 +161,7 @@ let rec print_specifiers (specs: spec_elem list) =
     | SpecAttr al -> print_attribute al; space ()
     | SpecType bt -> print_type_spec bt
     | SpecPattern name -> printl ["@specifier";"(";name;")"]
+    | SpecCPS -> printu "cps"
   in
   List.iter print_spec_elem specs
   ;comprint ")"
@@ -711,6 +712,56 @@ and print_statement stat =
       print_block b;
       printl ["__except";"("]; print_expression e; print ")";
       print_block h
+
+  (*** CPC ***)
+  | CPC_YIELD (loc) ->
+      setLoc(loc);
+      print "cpc_yield ;" ;
+      new_line ()
+  | CPC_DONE (loc) ->
+      setLoc(loc);
+      print "cpc_done ;" ;
+      new_line ()
+  | CPC_SPAWN (stat, loc) ->
+      setLoc loc;
+      print "cpc_spawn";
+      new_line () ;
+      indent () ;
+      print_substatement stat;
+  | CPC_FORK (stat, loc)  ->
+      setLoc loc;
+      print "cpc_fork";
+      new_line () ;
+      indent () ;
+      print_substatement stat;
+  | CPC_WAIT (exp, loc) ->
+      printl ["cpc_wait";"("];
+      print_expression exp;
+      print ");"; new_line ()
+  | CPC_SLEEP (exp1, exp2, exp3, loc) ->
+      printl ["cpc_sleep";"("];
+      print_expression exp1;
+      if exp2 = NOTHING then ()
+      else begin
+        print ", ";
+        print_expression exp2;
+        if exp3 = NOTHING then ()
+        else begin
+          print ", ";
+          print_expression exp3;
+        end
+      end;
+      print ");"; new_line ()
+  | CPC_IO_WAIT (exp1, exp2, exp3, loc) ->
+      printl ["cpc_io_wait";"("];
+      print_expression exp1;
+      print ", "; print_expression exp2;
+      if exp3 = NOTHING then ()
+      else begin
+        print ", ";
+        print_expression exp3;
+      end;
+      print ");"; new_line ()
       
 and print_block blk = 
   new_line();

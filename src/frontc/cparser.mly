@@ -261,6 +261,8 @@ let transformOffsetOf (speclist, dtype) member =
 %token<Cabs.cabsloc> VOLATILE EXTERN STATIC CONST RESTRICT AUTO REGISTER
 %token<Cabs.cabsloc> THREAD
 
+%token<Cabs.cabsloc> CPC_CPS
+
 %token<Cabs.cabsloc> SIZEOF ALIGNOF
 
 %token EQ PLUS_EQ MINUS_EQ STAR_EQ SLASH_EQ PERCENT_EQ
@@ -290,6 +292,10 @@ let transformOffsetOf (speclist, dtype) member =
 %token<Cabs.cabsloc> WHILE DO FOR
 %token<Cabs.cabsloc> IF TRY EXCEPT FINALLY
 %token ELSE 
+
+/* CPC */
+%token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_SPAWN CPC_FORK
+%token<Cabs.cabsloc> CPC_WAIT CPC_SLEEP CPC_IO_WAIT
 
 %token<Cabs.cabsloc> ATTRIBUTE INLINE ASM TYPEOF FUNCTION__ PRETTY_FUNCTION__
 %token LABEL__
@@ -914,6 +920,23 @@ statement:
                             parse_error "try/finally in GCC code";
                           TRY_FINALLY (b, h, (*handleLoc*) $1) }
 
+|   CPC_YIELD SEMICOLON   { CPC_YIELD ((*handleLoc*) $1) }
+|   CPC_DONE SEMICOLON   { CPC_DONE ((*handleLoc*) $1) }
+|   CPC_SPAWN statement   { CPC_SPAWN ($2, (*handleLoc*) $1) }
+|   CPC_FORK statement   { CPC_FORK ($2, (*handleLoc*) $1)}
+|   CPC_WAIT LPAREN expression RPAREN SEMICOLON
+                        { CPC_WAIT(fst $3, (*handleLoc*) $1) }
+|   CPC_SLEEP LPAREN expression RPAREN SEMICOLON
+                        { CPC_SLEEP(fst $3, NOTHING, NOTHING, (*handleLoc*) $1) }
+|   CPC_SLEEP LPAREN expression COMMA expression RPAREN SEMICOLON
+                        { CPC_SLEEP(fst $3, fst $5, NOTHING, (*handleLoc*) $1) }
+|   CPC_SLEEP LPAREN expression COMMA expression COMMA expression RPAREN SEMICOLON
+                        { CPC_SLEEP(fst $3, fst $5, fst $7, (*handleLoc*) $1) }
+|   CPC_IO_WAIT LPAREN expression COMMA expression RPAREN SEMICOLON
+                        { CPC_IO_WAIT(fst $3, fst $5, NOTHING, (*handleLoc*) $1) }
+|   CPC_IO_WAIT LPAREN expression COMMA expression COMMA expression RPAREN SEMICOLON
+                        { CPC_IO_WAIT(fst $3, fst $5, fst $7, (*handleLoc*) $1) }
+
 |   error location   SEMICOLON   { (NOP $2)}
 ;
 
@@ -941,6 +964,8 @@ init_declarator:                             /* ISO 6.7 */
 ;
 
 decl_spec_list:                         /* ISO 6.7 */
+                                        /* CPC */
+|   CPC_CPS decl_spec_list_opt          { SpecCPS :: $2, $1 }
                                         /* ISO 6.7.1 */
 |   TYPEDEF decl_spec_list_opt          { SpecTypedef :: $2, $1  }    
 |   EXTERN decl_spec_list_opt           { SpecStorage EXTERN :: $2, $1 }
