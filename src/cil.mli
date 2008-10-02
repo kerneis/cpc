@@ -984,6 +984,15 @@ and stmtkind =
      *)      
   | TryExcept of block * (instr list * exp) * block * location
   
+  (** CPC statements *)
+
+  | CpcYield of location
+  | CpcDone of location
+  | CpcSpawn of stmt * location
+  | CpcFork of stmt * location
+  | CpcWait of exp * location
+  | CpcSleep of exp * (exp * exp option) option * location
+  | CpcIoWait of exp * exp * exp option * location
 
 (** {b Instructions}. 
  An instruction {!Cil.instr} is a statement that has no local

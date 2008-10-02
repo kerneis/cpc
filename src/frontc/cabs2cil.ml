@@ -5745,6 +5745,9 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockFallsThrough b
               | TryFinally (b, h, _) -> blockFallsThrough h
               | TryExcept (b, _, h, _) -> true (* Conservative *)
+              | CpcYield _ | CpcDone _ | CpcSpawn _
+              | CpcFork _ | CpcWait _
+              | CpcSleep _ | CpcIoWait _ -> true (* Very conservative *)
             and blockFallsThrough b = 
               let rec fall = function
                   [] -> true
@@ -5792,6 +5795,9 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockCanBreak b
               | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
               | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
+              | CpcYield _ | CpcDone _ | CpcSpawn _
+              | CpcFork _ | CpcWait _
+              | CpcSleep _ | CpcIoWait _ -> false
             and blockCanBreak b = 
               List.exists stmtCanBreak b.bstmts
             in
@@ -6264,13 +6270,60 @@ and doStatement (s : A.statement) : chunk =
         s2c (mkStmt (TryExcept (c2block b', (il', e'), c2block h', loc')))
 
     (*** CPC ***)
-     | CPC_YIELD _
-     | CPC_DONE _
-     | CPC_SPAWN (_,_)
-     | CPC_FORK (_,_)
-     | CPC_WAIT (_,_)
-     | CPC_SLEEP (_,_,_,_)
-     | CPC_IO_WAIT (_,_,_,_) -> skipChunk (*** NOT IMPLEMENTED ***)
+     | CPC_YIELD loc ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        s2c (mkStmt (CpcYield loc'))
+     | CPC_DONE loc ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        s2c (mkStmt (CpcDone loc'))
+     | CPC_SPAWN (s, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let s' = doStatement s in
+        s2c (mkStmt (CpcSpawn (mkStmt (Block (c2block s')), loc')))
+     | CPC_FORK (s, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let s' = doStatement s in
+        s2c (mkStmt (CpcFork (mkStmt (Block (c2block s')), loc')))
+     | CPC_WAIT (e, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let (_, e', _) = doExp false e (AExp None) in
+        s2c (mkStmt (CpcWait (e', loc')))
+     | CPC_SLEEP (e, A.NOTHING, A.NOTHING, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let (_, e', _) = doExp false e (AExp None) in
+        s2c (mkStmt (CpcSleep (e', None, loc')))
+     | CPC_SLEEP (e1, e2, A.NOTHING, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let (_, e1', _) = doExp false e1 (AExp None) in
+        let (_, e2', _) = doExp false e2 (AExp None) in
+        s2c (mkStmt (CpcSleep (e1', Some(e2',None), loc')))
+     | CPC_SLEEP (e1, e2, e3, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let (_, e1', _) = doExp false e1 (AExp None) in
+        let (_, e2', _) = doExp false e2 (AExp None) in
+        let (_, e3', _) = doExp false e3 (AExp None) in
+        s2c (mkStmt (CpcSleep (e1', Some(e2', Some e3'), loc')))
+     | CPC_IO_WAIT (e1, e2, A.NOTHING, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let (_, e1', _) = doExp false e1 (AExp None) in
+        let (_, e2', _) = doExp false e2 (AExp None) in
+        s2c (mkStmt (CpcIoWait (e1', e2', None, loc')))
+     | CPC_IO_WAIT (e1, e2, e3, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let (_, e1', _) = doExp false e1 (AExp None) in
+        let (_, e2', _) = doExp false e2 (AExp None) in
+        let (_, e3', _) = doExp false e3 (AExp None) in
+        s2c (mkStmt (CpcIoWait (e1', e2', Some e3', loc')))
 
 
   with e when continueOnError -> begin
