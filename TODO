@@ -1,0 +1,11 @@
+[src/frontc/cabs2cil.ml]
+* Check stmtFallsThrough and stmtCanBreak (needs semantics analysis)
+  => Goal: insert missing "return"
+* Do not make a block for every cpc_spawn and cpc_fork
+[src/cil.ml]
+* Check indentation in pStmtKind (for CPC constructs)
+  => should be quite good already.
+* Handle CPC constructs in computeCFGInfo (function succpred_stmt)
+  => needs careful analysis.
+[src/ext/...]
+* Many not exhaustive pattern-matching...
