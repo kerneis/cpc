@@ -773,7 +773,27 @@ and checkStmt (s: stmt) =
           checkExpType false e intType;
           checkBlock h
 
-      | Instr il -> List.iter checkInstr il)
+      | Instr il -> List.iter checkInstr il
+      | CpcYield _ | CpcDone _ -> ()
+      | CpcSpawn (s, _) | CpcFork (s, _) -> checkStmt s
+      | CpcWait (e, _) -> ignore(checkExp false e)
+                          (* do not check the type of condition variables *)
+      | CpcSleep (e, None, _) -> checkExpType false e intType
+      | CpcSleep (e, Some(e', None), _) ->
+          checkExpType false e intType;
+          checkExpType false e' intType
+      | CpcSleep (e, Some(e', Some e''), _) ->
+          checkExpType false e intType;
+          checkExpType false e' intType;
+          ignore(checkExp false e'')
+      | CpcIoWait (e, e', None, _) ->
+          ignore(checkExp false e);
+          ignore(checkExp false e')
+      | CpcIoWait (e, e', Some e'', _) ->
+          ignore(checkExp false e);
+          ignore(checkExp false e');
+          ignore(checkExp false e'')
+          )
     () (* argument of withContext *)
 
 and checkBlock (b: block) : unit = 

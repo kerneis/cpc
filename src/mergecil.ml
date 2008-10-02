@@ -1157,6 +1157,13 @@ begin
         67 + 83*(stmtListSum b.bstmts) + 97*(stmtListSum h.bstmts)
     | TryFinally (b, h, _) -> 
         103 + 113*(stmtListSum b.bstmts) + 119*(stmtListSum h.bstmts)
+    | CpcYield _ -> 127
+    | CpcDone _ -> 131
+    | CpcSpawn (s, _) -> 137 + 139*(stmtSum s)
+    | CpcFork (s, _) -> 149 + 151*(stmtSum s)
+    | CpcWait _ -> 157
+    | CpcSleep _ -> 163
+    | CpcIoWait _ -> 167
   in
   
   (* disabled 2nd and 3rd measure because they appear to get different
