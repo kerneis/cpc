@@ -467,12 +467,12 @@ and childrenStatement vis s =
   (*** CPC ***)
   | CPC_YIELD _ -> s
   | CPC_DONE _ -> s
-  | CPC_SPAWN (s, l) ->
-      let s' = vs l s in
-      if s' != s then CPC_SPAWN (s', l) else s
-  | CPC_FORK (s, l) ->
-      let s' = vs l s in
-      if s' != s then CPC_FORK (s', l) else s
+  | CPC_SPAWN (stmt, l) ->
+      let s' = vs l stmt in
+      if s' != stmt then CPC_SPAWN (s', l) else s
+  | CPC_FORK (stmt, l) ->
+      let s' = vs l stmt in
+      if s' != stmt then CPC_FORK (s', l) else s
   | CPC_WAIT (e, l) ->
       let e' = ve e in
       if e' != e then CPC_WAIT (e', l) else s
