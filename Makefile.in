@@ -80,7 +80,8 @@ CILLY_LIBRARY_MODULES = pretty inthash errormsg alpha trace stats util clist \
               availexpslv predabst\
               testcil \
 	      $(CILLY_FEATURES) \
-	      ciloptions feature_config
+	      ciloptions feature_config \
+		  cpc
 # ww: we don't want "main" in an external cil library (cil.cma),
 # otherwise every program that links against that library will get
 # main's argument checking and whatnot ...
