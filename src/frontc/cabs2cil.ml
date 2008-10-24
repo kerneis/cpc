@@ -183,7 +183,8 @@ let debugLoc = false
 let convLoc (l : cabsloc) =
   if debugLoc then 
     ignore (E.log "convLoc at %s: line %d, btye %d\n" l.filename l.lineno l.byteno);
-  {line = l.lineno; file = l.filename; byte = l.byteno;}
+  (* cps defaults to false and should be set to true by the cpc module *)
+  {line = l.lineno; file = l.filename; byte = l.byteno; cps = false;}
 
 
 let isOldStyleVarArgName n = 
