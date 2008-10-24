@@ -470,9 +470,9 @@ and childrenStatement vis s =
   | CPC_SPAWN (stmt, l) ->
       let s' = vs l stmt in
       if s' != stmt then CPC_SPAWN (s', l) else s
-  | CPC_FORK (stmt, l) ->
+  (*| CPC_FORK (stmt, l) ->
       let s' = vs l stmt in
-      if s' != stmt then CPC_FORK (s', l) else s
+      if s' != stmt then CPC_FORK (s', l) else s*)
   | CPC_WAIT (e, l) ->
       let e' = ve e in
       if e' != e then CPC_WAIT (e', l) else s

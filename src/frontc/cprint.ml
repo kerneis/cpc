@@ -728,12 +728,12 @@ and print_statement stat =
       new_line () ;
       indent () ;
       print_substatement stat;
-  | CPC_FORK (stat, loc)  ->
+  (*| CPC_FORK (stat, loc)  ->
       setLoc loc;
       print "cpc_fork";
       new_line () ;
       indent () ;
-      print_substatement stat;
+      print_substatement stat;*)
   | CPC_WAIT (exp, loc) ->
       printl ["cpc_wait";"("];
       print_expression exp;

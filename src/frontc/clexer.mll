@@ -219,7 +219,7 @@ let init_lexicon _ =
                          IDENT ("__thread", loc));
       (**** CPC ***)
       ("cps", fun loc -> CPC_CPS loc);
-      ("cpc_fork", fun loc -> CPC_FORK loc);
+      (*("cpc_fork", fun loc -> CPC_FORK loc);*)
       ("cpc_wait", fun loc -> CPC_WAIT loc);
       ("cpc_sleep", fun loc -> CPC_SLEEP loc);
       ("cpc_io_wait", fun loc -> CPC_IO_WAIT loc);

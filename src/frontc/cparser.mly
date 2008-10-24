@@ -294,7 +294,8 @@ let transformOffsetOf (speclist, dtype) member =
 %token ELSE 
 
 /* CPC */
-%token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_SPAWN CPC_FORK
+/* %token<Cabs.cabsloc> CPC_FORK */
+%token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_SPAWN
 %token<Cabs.cabsloc> CPC_WAIT CPC_SLEEP CPC_IO_WAIT
 
 %token<Cabs.cabsloc> ATTRIBUTE INLINE ASM TYPEOF FUNCTION__ PRETTY_FUNCTION__
@@ -923,7 +924,7 @@ statement:
 |   CPC_YIELD SEMICOLON   { CPC_YIELD ((*handleLoc*) $1) }
 |   CPC_DONE SEMICOLON   { CPC_DONE ((*handleLoc*) $1) }
 |   CPC_SPAWN statement   { CPC_SPAWN ($2, (*handleLoc*) $1) }
-|   CPC_FORK statement   { CPC_FORK ($2, (*handleLoc*) $1)}
+/*|   CPC_FORK statement   { CPC_FORK ($2, (*handleLoc*) $1)} */
 |   CPC_WAIT LPAREN expression RPAREN SEMICOLON
                         { CPC_WAIT(fst $3, (*handleLoc*) $1) }
 |   CPC_SLEEP LPAREN expression RPAREN SEMICOLON

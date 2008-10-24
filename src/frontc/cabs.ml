@@ -231,7 +231,7 @@ and statement =
  | CPC_YIELD of cabsloc
  | CPC_DONE of cabsloc
  | CPC_SPAWN of statement * cabsloc
- | CPC_FORK of statement * cabsloc
+ (*| CPC_FORK of statement * cabsloc*)
  | CPC_WAIT of expression * cabsloc
  | CPC_SLEEP of expression * expression * expression * cabsloc
  | CPC_IO_WAIT of expression * expression * expression * cabsloc

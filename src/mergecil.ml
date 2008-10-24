@@ -1160,7 +1160,7 @@ begin
     | CpcYield _ -> 127
     | CpcDone _ -> 131
     | CpcSpawn (s, _) -> 137 + 139*(stmtSum s)
-    | CpcFork (s, _) -> 149 + 151*(stmtSum s)
+    (*| CpcFork (s, _) -> 149 + 151*(stmtSum s)*)
     | CpcWait _ -> 157
     | CpcSleep _ -> 163
     | CpcIoWait _ -> 167

@@ -5747,7 +5747,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | TryFinally (b, h, _) -> blockFallsThrough h
               | TryExcept (b, _, h, _) -> true (* Conservative *)
               | CpcYield _ | CpcDone _ | CpcSpawn _
-              | CpcFork _ | CpcWait _ | CpcFun _
+              (*| CpcFork _*) | CpcWait _ | CpcFun _
               | CpcSleep _ | CpcIoWait _ -> true (* Very conservative *)
             and blockFallsThrough b = 
               let rec fall = function
@@ -5797,7 +5797,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
               | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
               | CpcYield _ | CpcDone _ | CpcSpawn _
-              | CpcFork _ | CpcWait _ | CpcFun _
+              (*| CpcFork _*) | CpcWait _ | CpcFun _
               | CpcSleep _ | CpcIoWait _ -> false
             and blockCanBreak b = 
               List.exists stmtCanBreak b.bstmts
@@ -6284,11 +6284,11 @@ and doStatement (s : A.statement) : chunk =
         currentLoc := loc';
         let s' = doStatement s in
         s2c (mkStmt (CpcSpawn (mkStmt (Block (c2block s')), loc')))
-     | CPC_FORK (s, loc) ->
+     (*| CPC_FORK (s, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let s' = doStatement s in
-        s2c (mkStmt (CpcFork (mkStmt (Block (c2block s')), loc')))
+        s2c (mkStmt (CpcFork (mkStmt (Block (c2block s')), loc')))*)
      | CPC_WAIT (e, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
