@@ -779,6 +779,7 @@ and stmtkind =
   | CpcWait of exp * location
   | CpcSleep of exp * (exp * exp option) option * location
   | CpcIoWait of exp * exp * exp option * location
+  | CpcFun of fundec * location
 
 (** Instructions. They may cause effects directly but may not have control
     flow.*)
@@ -1113,6 +1114,7 @@ let rec get_stmtLoc (statement : stmtkind) =
     | CpcWait (_,l) -> l
     | CpcSleep (_, _, l) -> l
     | CpcIoWait (_, _, _, l) -> l
+    | CpcFun (_, l) -> l
 
 
 (* The next variable identifier to use. Counts up *)
@@ -3945,6 +3947,9 @@ class defaultCilPrinterClass : cilPrinter = object (self)
                 ++ self#pExp () e3
                 ++ text ");")
 
+    | CpcFun (fundec, l) ->
+        self#pGlobal () (GFun (fundec, l))
+
 
   (*** GLOBALS ***)
   method pGlobal () (g:global) : doc =       (* global (vars, types, etc.) *)
@@ -5437,6 +5442,11 @@ and childrenStmt (toPrepend: instr list ref) (vis:cilVisitor) (s:stmt): stmt =
         if e1' != e1 || e2' != e2 || e3' != e3 then
           CpcIoWait (e1', e2', Some e3', l)
         else s.skind
+    | CpcFun (f, l) ->
+        let f' = visitCilFunction vis f in
+        if f' != f then
+          CpcFun (f', l)
+        else s.skind
   in
   if skind' != s.skind then s.skind <- skind';
   (* Visit the labels *)
@@ -5594,7 +5604,7 @@ and childrenAttrparam (vis: cilVisitor) (aa: attrparam) : attrparam =
         then AQuestion (e1', e2', e3') else aa
  
 
-let rec visitCilFunction (vis : cilVisitor) (f : fundec) : fundec =
+and visitCilFunction (vis : cilVisitor) (f : fundec) : fundec =
   if debugVisit then ignore (E.log "Visiting function %s\n" f.svar.vname);
   assertEmptyQueue vis;
   let f = doVisit vis vis#vfunc childrenFunction f in
@@ -5935,7 +5945,8 @@ let rec peepHole1 (* Process one statement and possibly replace it *)
       | CpcYield _ | CpcDone _ | CpcWait _
       | CpcSleep _ | CpcIoWait _ -> ()
       | CpcSpawn (s, _) -> peepHole1 doone [s]
-      | CpcFork (s, _) -> peepHole1 doone [s])
+      | CpcFork (s, _) -> peepHole1 doone [s]
+      | CpcFun _ -> ())
     ss
 
 let rec peepHole2  (* Process two statements and possibly replace them both *)
@@ -5973,7 +5984,8 @@ let rec peepHole2  (* Process two statements and possibly replace them both *)
       | CpcYield _ | CpcDone _ | CpcWait _
       | CpcSleep _ | CpcIoWait _ -> ()
       | CpcSpawn (s, _) -> peepHole2 dotwo [s]
-      | CpcFork (s, _) -> peepHole2 dotwo [s])
+      | CpcFork (s, _) -> peepHole2 dotwo [s]
+      | CpcFun _ -> ())
     ss
 
 
@@ -6608,7 +6620,7 @@ and succpred_stmt s fallthrough =
                 end
   | TryExcept _ | TryFinally _ -> 
       failwith "computeCFGInfo: structured exception handling not implemented"
-  | CpcYield _ | CpcDone _
+  | CpcYield _ | CpcDone _ | CpcFun _
   | CpcSpawn _ | CpcFork _ | CpcWait _ | CpcSleep _ | CpcIoWait _ ->
       failwith "computeCFGInfo: CPC constructs handling not implemented"
 
@@ -6756,7 +6768,7 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
 
   | TryExcept _ | TryFinally _ -> 
       failwith "xform_switch_statement: structured exception handling not implemented"
-  | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _ -> ()
+  | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcFun _ -> ()
   | CpcSpawn (s, _) -> xform_switch_stmt s break_dest cont_dest label_index
   | CpcFork (s, _) -> xform_switch_stmt s break_dest cont_dest label_index
 

@@ -993,6 +993,7 @@ and stmtkind =
   | CpcWait of exp * location
   | CpcSleep of exp * (exp * exp option) option * location
   | CpcIoWait of exp * exp * exp option * location
+  | CpcFun of fundec * location
 
 (** {b Instructions}. 
  An instruction {!Cil.instr} is a statement that has no local

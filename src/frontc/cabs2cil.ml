@@ -5746,7 +5746,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | TryFinally (b, h, _) -> blockFallsThrough h
               | TryExcept (b, _, h, _) -> true (* Conservative *)
               | CpcYield _ | CpcDone _ | CpcSpawn _
-              | CpcFork _ | CpcWait _
+              | CpcFork _ | CpcWait _ | CpcFun _
               | CpcSleep _ | CpcIoWait _ -> true (* Very conservative *)
             and blockFallsThrough b = 
               let rec fall = function
@@ -5796,7 +5796,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
               | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
               | CpcYield _ | CpcDone _ | CpcSpawn _
-              | CpcFork _ | CpcWait _
+              | CpcFork _ | CpcWait _ | CpcFun _
               | CpcSleep _ | CpcIoWait _ -> false
             and blockCanBreak b = 
               List.exists stmtCanBreak b.bstmts

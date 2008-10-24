@@ -6,6 +6,9 @@
 * Check indentation in pStmtKind (for CPC constructs)
   => should be quite good already.
 * Handle CPC constructs in computeCFGInfo (function succpred_stmt)
-  => needs careful analysis.
+  => needs careful analysis. Handling in xform_switch_stmt is probably
+     broken too, btw.
+* peepHole doesn't dive into CpcFun
+  => I think one should lambda-lift CpcFun before using it anyway
 [src/ext/...]
 * Many not exhaustive pattern-matching...

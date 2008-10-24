@@ -1133,7 +1133,7 @@ let renameInlinesVisitor = new renameInlineVisitorClass
  * less accurate heuristic here.  It should be good enough for the
  * purpose I have in mind, which is doing duplicate removal of
  * multiply-instantiated template functions. *)
-let functionChecksum (dec: fundec) : int =
+let rec functionChecksum (dec: fundec) : int =
 begin
   (* checksum the structure of the statements (only) *)
   let rec stmtListSum (lst : stmt list) : int =
@@ -1164,6 +1164,7 @@ begin
     | CpcWait _ -> 157
     | CpcSleep _ -> 163
     | CpcIoWait _ -> 167
+    | CpcFun (f, _) -> 173*(functionChecksum f)
   in
   
   (* disabled 2nd and 3rd measure because they appear to get different

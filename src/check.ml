@@ -793,6 +793,12 @@ and checkStmt (s: stmt) =
           ignore(checkExp false e);
           ignore(checkExp false e');
           ignore(checkExp false e'')
+      | CpcFun (f, l) ->
+          if not f.svar.vcps then
+            E.s (warn "Internal function %s without cps tag"
+              f.svar.vname)
+          else
+            checkGlobal (GFun (f, l))
           )
     () (* argument of withContext *)
 
@@ -862,7 +868,7 @@ and checkInstr (i: instr) =
         
   | Asm _ -> ()  (* Not yet implemented *)
   
-let rec checkGlobal = function
+and checkGlobal = function
     GAsm _ -> ()
   | GPragma _ -> ()
   | GText _ -> ()
