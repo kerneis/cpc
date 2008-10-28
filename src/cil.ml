@@ -833,7 +833,6 @@ and location = {
     line: int;		   (** The line number. -1 means "do not know" *)
     file: string;          (** The name of the source file*)
     byte: int;             (** The byte position in the source file *)
-    cps: bool;         (** Whether this is a cps-convertible position *)
 }
 
 (* Type signatures. Two types are identical iff they have identical 
@@ -875,8 +874,7 @@ type featureDescr = {
 
 let locUnknown = { line = -1; 
 		   file = ""; 
-		   byte = -1;
-		   cps = false;}
+		   byte = -1;}
 
 (* A reference to the current location *)
 let currentLoc : location ref = ref locUnknown
@@ -3094,8 +3092,7 @@ let initMsvcBuiltins () : unit =
 (** This is used as the location of the prototypes of builtin functions. *)
 let builtinLoc: location = { line = 1; 
                              file = "<compiler builtins>"; 
-                             byte = 0;
-                             cps = false;}
+                             byte = 0;}
 
 
 
