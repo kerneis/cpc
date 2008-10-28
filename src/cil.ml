@@ -690,6 +690,8 @@ and stmt = {
                                            and the context in which this 
                                            statement appears *)
     mutable preds: stmt list;          (** The inverse of the succs function*)
+
+    mutable cps: bool;
   } 
 
 (** Labels *)
@@ -1307,7 +1309,7 @@ let isSigned = function
 let mkStmt (sk: stmtkind) : stmt = 
   { skind = sk;
     labels = [];
-    sid = -1; succs = []; preds = [] }
+    sid = -1; succs = []; preds = []; cps = false; }
 
 let mkBlock (slst: stmt list) : block = 
   { battrs = []; bstmts = slst; }

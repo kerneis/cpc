@@ -904,6 +904,8 @@ and stmt = {
      * the CFG is computed. *)
     mutable preds: stmt list;          
     (** The inverse of the succs function. *)
+
+    mutable cps: bool;
   } 
 
 (** Labels *)
