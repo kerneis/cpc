@@ -76,7 +76,9 @@ module E=Errormsg
 
 let numNodes = ref 0 (* number of nodes in the CFG *)
 let nodeList : stmt list ref = ref [] (* All the nodes in a flat list *) (* ab: Added to change dfs from quadratic to linear *)
-let start_id = ref 0 (* for unique ids across many functions *)
+let start_id = ref 0 (* for unique ids across many functions  -- but NOT local functions *)
+
+let local_fun : fundec list ref= ref []
 
 class caseLabeledStmtFinder slr = object(self)
     inherit nopCilVisitor
@@ -109,14 +111,21 @@ let rec cfgFun (fd : fundec): int =
   begin
     numNodes := !start_id;
     nodeList := [];
+    local_fun := [];
 
     cfgBlock fd.sbody None None None;
 
     fd.smaxstmtid <- Some(!numNodes);
     fd.sallstmts <- List.rev !nodeList;
     nodeList := [];
-
-    !numNodes - !start_id
+    
+    let locals = !local_fun in
+    let res = !numNodes - !start_id in
+    
+    local_fun := [];
+    (* Every local function uses the same start_id than fd *)
+    List.iter (fun f -> ignore (cfgFun f)) locals;
+    res
   end
 
 
@@ -208,6 +217,17 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option) 
          any direct successor to stmt following the loop *)
   | TryExcept _ | TryFinally _ -> 
       E.s (E.unimp "try/except/finally")
+  | CpcYield _ | CpcWait _ | CpcSleep _ | CpcIoWait _ -> 
+      addOptionSucc next
+  | CpcDone _ -> ()
+  | CpcSpawn (stmt, _) ->
+      addOptionSucc next;
+      cfgStmt stmt None None None
+  | CpcFun (fd, _) ->
+      (* Do not recurse into CpcFun --- this is done later *)
+      addOptionSucc next;
+      local_fun := fd :: !local_fun 
+
 
 (*------------------------------------------------------------*)
 
@@ -230,8 +250,11 @@ and fasStmt (todo) (s : stmt) =
       | If (_, tb, fb, _) -> (fasBlock todo tb; fasBlock todo fb)
       | Switch (_, b, _, _) -> fasBlock todo b
       | Loop (b, _, _, _) -> fasBlock todo b
+      | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _
       | (Return _ | Break _ | Continue _ | Goto _ | Instr _) -> ()
       | TryExcept _ | TryFinally _ -> E.s (E.unimp "try/except/finally")
+      | CpcSpawn (s, _) -> fasStmt todo s
+      | CpcFun (fd, _) -> forallStmts todo fd
   end
 ;;
 
@@ -256,6 +279,13 @@ let d_cfgnodelabel () (s : stmt) =
       | Return _ -> "return"
       | TryExcept _ -> "try-except"
       | TryFinally _ -> "try-finally"
+      | CpcYield _ -> "cpc-yield"
+      | CpcDone _ -> "cpc-done"
+      | CpcSpawn _ -> "cpc-spawn"
+      | CpcWait _ -> "cpc-wait"
+      | CpcSleep _ -> "cpc-sleep"
+      | CpcIoWait _ -> "cpc-io-wait"
+      | CpcFun _ -> "cpc-fun"
   end in
     dprintf "%d: %s" s.sid label
 
