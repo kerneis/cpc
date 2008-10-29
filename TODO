@@ -1,14 +1,21 @@
 [src/frontc/cabs2cil.ml]
 * Check stmtFallsThrough and stmtCanBreak (needs semantics analysis)
   => Goal: insert missing "return"
-* Do not make a block for every cpc_spawn and cpc_fork
+* Do not make a block for every cpc_spawn
 [src/cil.ml]
 * Check indentation in pStmtKind (for CPC constructs)
   => should be quite good already.
 * Handle CPC constructs in computeCFGInfo (function succpred_stmt)
   => needs careful analysis. Handling in xform_switch_stmt is probably
-     broken too, btw.
+     broken too, btw. Anyway, this is now done in src/ext/cfg.ml.
 * peepHole doesn't dive into CpcFun
-  => I think one should lambda-lift CpcFun before using it anyway
+  => I think one should lambda-lift CpcFun before using it anyway.
+     It is used in src/frontc/cabs2cil.ml too, but there is not
+     local functions at this stage.
 [src/ext/...]
 * Many not exhaustive pattern-matching...
+[src/ext/cfg.ml]
+* Check local functions support.
+[src/ext/cpc.ml]
+* Handle y = f(...) (when f is a cps function)
+* Take vcps into account
