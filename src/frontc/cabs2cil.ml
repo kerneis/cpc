@@ -6281,9 +6281,13 @@ and doStatement (s : A.statement) : chunk =
         s2c (mkStmt (CpcDone loc'))
      | CPC_SPAWN (s, loc) ->
         let loc' = convLoc loc in
+        let mkSpawn s = s2c (mkStmt (CpcSpawn (s, loc'))) in
         currentLoc := loc';
-        let s' = doStatement s in
-        s2c (mkStmt (CpcSpawn (mkStmt (Block (c2block s')), loc')))
+        begin match compactStmts (pushPostIns (doStatement s)) with
+        | [] -> skipChunk
+        | [s'] -> mkSpawn s'
+        | l -> mkSpawn (mkStmt (Block (mkBlock l)))
+        end
      (*| CPC_FORK (s, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';

@@ -1,5 +1,3 @@
-[src/frontc/cabs2cil.ml]
-* Do not make a block for every cpc_spawn
 [src/cil.ml]
 * Check indentation in pStmtKind (for CPC constructs)
   => should be quite good already.
