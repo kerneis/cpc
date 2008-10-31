@@ -5745,9 +5745,10 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockFallsThrough b
               | TryFinally (b, h, _) -> blockFallsThrough h
               | TryExcept (b, _, h, _) -> true (* Conservative *)
-              | CpcYield _ | CpcDone _ | CpcSpawn _
+              | CpcDone _ -> false
+              | CpcYield _ | CpcSpawn _
               (*| CpcFork _*) | CpcWait _ | CpcFun _
-              | CpcSleep _ | CpcIoWait _ -> true (* Very conservative *)
+              | CpcSleep _ | CpcIoWait _ -> true
             and blockFallsThrough b = 
               let rec fall = function
                   [] -> true
