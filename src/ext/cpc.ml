@@ -83,10 +83,13 @@ let do_check (s:stmt) =
 class markCps = object(self)
   inherit nopCilVisitor
 
+  method vstmt (s: stmt) : stmt visitAction =
+    do_check s;
+    DoChildren
+
   method vfunc (f:fundec) : fundec visitAction =
     ignore(Cfg.cfgFun f);
     List.iter do_mark f.sallstmts;
-    List.iter do_check f.sallstmts;
     DoChildren
 
 end
