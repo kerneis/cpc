@@ -18,6 +18,10 @@ let isCps (i: instr) = match i with
         dn_instr i;
       false
 
+let isCpcSpawn s = match s.skind with
+| CpcSpawn _ -> true
+| _ -> false
+
 let rec check_instr_list l =
   List.fold_left
     (fun sort i -> match sort with
@@ -89,7 +93,11 @@ class markCps = object(self)
 
   method vfunc (f:fundec) : fundec visitAction =
     ignore(Cfg.cfgFun f);
-    List.iter do_mark f.sallstmts;
+    if
+      f.svar.vcps ||
+      List.exists isCpcSpawn f.sallstmts
+    then
+      List.iter do_mark f.sallstmts;
     DoChildren
 
 end
