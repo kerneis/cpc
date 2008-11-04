@@ -149,9 +149,17 @@ let do_check (s:stmt) =
 class markCps = object(self)
   inherit nopCilVisitor
 
+  val mutable checking = false;
+
   method vstmt (s: stmt) : stmt visitAction =
-    do_check s;
-    DoChildren
+    if checking then do_check s;
+    if isCpcSpawn s
+    then
+      let c = checking in
+      ChangeDoChildrenPost
+        ((checking <- true;s), fun s -> checking <- c; s)
+    else
+      DoChildren
 
   method vfunc (f:fundec) : fundec visitAction =
     ignore(Cfg.cfgFun f);
@@ -160,7 +168,9 @@ class markCps = object(self)
       List.exists isCpcSpawn f.sallstmts
     then
       List.iter do_mark f.sallstmts;
-    DoChildren
+    let c = checking in
+    ChangeDoChildrenPost
+      ((checking <- f.svar.vcps;f), fun f -> checking <- c; f)
 
 end
 
