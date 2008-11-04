@@ -13,10 +13,13 @@
 [src/ext/cfg.ml]
 * Check local functions support.
 [src/ext/cpc.ml]
-* Check support of y = f(...) (when f is a cps function)
+* Improve support of y = f(...) (when f is a cps function)
 
 QUESTIONS
 =========
 * quand je fonctionnalise un GOTO, est-ce que je supprime le code
   correspondant (et je le remplace par un appel de fonction) ou
   est-ce que je le duplique dans le corps de la fonction associée.
+* cpc_spawn, c'est pas clair du tout à quel niveau le gérer
+* Problème avec les labels quand on convertit (interdire les labels
+  en contexte cps ?)
