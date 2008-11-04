@@ -1,20 +1,37 @@
 open Cil
 module E = Errormsg
 
-type instr_sort = PlainC | FullCps | PlainThenCps | Mixed
+type instr_sort =
+    PlainC
+  | FullCps of varinfo option
+  | PlainThenCps of varinfo option
+  | Mixed
 
-let isCps (i: instr) = match i with
+exception CpsAssign of varinfo
+
+let isCps ?var (i: instr) =
+  let check_var args = match var with
+  | None -> true
+  | Some v ->
+    match args with
+    | Lval (Var v', NoOffset)::_ -> v = v'
+    | [] -> false
+    | e::_ -> E.warn "%a should be a variable" dn_exp e; false
+  in match i with
   | Set _ | Asm _ -> false
-  | Call (None, Lval (Var f, NoOffset), _, _) -> f.vcps
-  | Call (Some _, Lval (Var f, NoOffset), _, _) ->
-      if f.vcps
-      then
-        E.s (E.unimp "assignement of a cps function's return value")
-      else
-        false
-  | _ ->
+  (* Non cps call *)
+  | Call (_, Lval (Var f, NoOffset), _, _) when not f.vcps -> false
+  (* Cps call without assignment *)
+  | Call (None, Lval (Var f, NoOffset), args, _) -> check_var args
+  (* Cps call with assignment *)
+  | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
+      check_var args && raise (CpsAssign v)
+  | Call (Some l, Lval (Var f, NoOffset), _, _) ->
+      E.warn "%a should be a variable" dn_lval l; false
+  (* Weird call *)
+  | Call _ ->
       E.warn
-        "I hope this has nothing to do with a cps function call: %a"
+        "I hope this has nothing to do with a cps call: %a"
         dn_instr i;
       false
 
@@ -25,37 +42,80 @@ let isCpcSpawn s = match s.skind with
 let rec check_instr_list l =
   List.fold_left
     (fun sort i -> match sort with
-    | PlainC ->
-        if isCps i
-        then PlainThenCps
-        else PlainC
-    | FullCps
-    | PlainThenCps ->
-        if isCps i
-        then sort
-        else Mixed
+    | PlainC -> begin
+        try
+          if isCps i
+          then PlainThenCps None
+          else PlainC
+        with
+          CpsAssign v' -> PlainThenCps (Some v')
+        end
+    | FullCps v -> begin
+        try
+          if isCps ?var:v i
+          then FullCps None
+          else Mixed
+        with
+          CpsAssign v' -> FullCps (Some v')
+        end
+    | PlainThenCps v -> begin
+        try
+          if isCps ?var:v i
+          then PlainThenCps None
+          else Mixed
+        with
+          CpsAssign v' -> PlainThenCps (Some v')
+        end
     | Mixed -> Mixed)
-    (if isCps (List.hd l) then FullCps else PlainC)
+    (try
+      if isCps (List.hd l)
+      then FullCps None
+      else PlainC
+     with
+      CpsAssign v -> FullCps (Some v))
     (List.tl l)
 
 
+let last_var = ref None
+
 let mark_cps s =
-  match s.skind with
+  let extract_first_arg = function
+  | Call(_,_,[],_) -> None
+  | Call(_,_,Lval(Var v,NoOffset)::_,_) -> Some v
+  | Call(_,_,e::_,_) ->
+      E.warn "%a should be a variable" dn_exp e;
+      None
+  | _ -> assert false
+  in match s.skind with
   | CpcYield _ | CpcDone _
   | CpcWait _ | CpcSleep _
-  | CpcIoWait _ | Instr []
-  | Return _ ->
+  | CpcIoWait _ ->
+      if !last_var = None
+      then (s.cps <- true; true)
+      else false
+  | Instr []
+  | Return (None, _) ->
+      last_var := None;
       s.cps <- true;
       true
+  | Return (Some (Lval (Var v, NoOffset)), _) ->
+      last_var := Some v;
+      s.cps <- true;
+      true
+  | Return (Some e, _) ->
+      E.warn "%a should be a variable" dn_exp e;
+      false
   | Instr l -> begin
     match check_instr_list l with
-      | PlainC | Mixed -> false
-      | FullCps ->
+      | FullCps v when !last_var = v ->
           s.cps <- true;
+          last_var := extract_first_arg (List.hd l);
           true
-      | PlainThenCps ->
+      | PlainThenCps v when !last_var = v ->
           s.cps <- true;
           false
+      | PlainC | Mixed
+      | FullCps _ | PlainThenCps _ -> false
       end
   | _ -> false
 
@@ -69,7 +129,9 @@ let rec do_mark (s:stmt) =
   then match s.preds with
     | [s'] ->
         do_mark s'
-    | _ -> ()
+    | _ -> last_var := None
+    else
+      last_var := None
 
 let do_check (s:stmt) =
   match s.skind with
