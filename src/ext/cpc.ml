@@ -174,6 +174,35 @@ class markCps = object(self)
 
 end
 
+let do_convert return s =
+  (* dummy converter, just reverse the stack *)
+  mkStmt (Block (mkBlock (s@[return])))
+
+class cpsConverter = object(self)
+  inherit nopCilVisitor
+
+  val mutable stack = []
+
+  method vstmt (s: stmt) : stmt visitAction =
+    if s.cps
+    then begin match s.skind with
+    | CpcYield _ | CpcDone _
+    | CpcWait _ | CpcSleep _
+    | CpcIoWait _ | Instr _
+    | CpcSpawn _ ->
+        stack <- s::stack;
+        s.skind <- Instr [];
+        SkipChildren
+    | Return _ ->
+        let res = do_convert s stack in
+        stack <- [];
+        ChangeTo res
+    | _ -> assert false
+    end
+    else DoChildren
+
+end
+
 let doit (f: file) =
   visitCilFileSameGlobals (new markCps) f
 
