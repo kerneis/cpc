@@ -6770,9 +6770,8 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
 
   | TryExcept _ | TryFinally _ -> 
       failwith "xform_switch_statement: structured exception handling not implemented"
-  | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcFun _ -> ()
-  | CpcSpawn (s, _) -> xform_switch_stmt s break_dest cont_dest label_index
-  (*| CpcFork (s, _) -> xform_switch_stmt s break_dest cont_dest label_index*)
+  | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcFun _
+  | CpcSpawn _ -> ()
 
 end and xform_switch_block b break_dest cont_dest label_index = 
   try 

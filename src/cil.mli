@@ -1216,6 +1216,9 @@ val findOrCreateFunc: file -> string -> typ -> varinfo
 
 val new_sid : unit -> int
 
+val xform_switch_stmt : stmt -> (unit -> stmt ref) -> (unit -> stmt ref) -> int -> unit
+val xform_switch_block : block -> (unit -> stmt ref) -> (unit -> stmt ref) -> int -> unit
+
 (** Prepare a function for CFG information computation by
   * {!Cil.computeCFGInfo}. This function converts all [Break], [Switch],
   * [Default] and [Continue] {!Cil.stmtkind}s and {!Cil.label}s into [If]s
