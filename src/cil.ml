@@ -6647,7 +6647,8 @@ let get_switch_count () =
 
 let switch_label = ref (-1)
 
-let rec xform_switch_stmt s break_dest cont_dest label_index = begin
+let rec xform_switch_stmt s ?remove_loops
+  break_dest cont_dest label_index = begin
   s.labels <- List.map (fun lab -> match lab with
     Label _ -> lab
   | Case(e,l) ->
@@ -6682,8 +6683,8 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
                   ignore (error "prepareCFG: continue: %a@!" d_stmt s) ;
                   raise e
                 end
-  | If(e,b1,b2,l) -> xform_switch_block b1 break_dest cont_dest label_index ;
-                     xform_switch_block b2 break_dest cont_dest label_index
+  | If(e,b1,b2,l) -> xform_switch_block b1 ?remove_loops break_dest cont_dest label_index ;
+                     xform_switch_block b2 ?remove_loops break_dest cont_dest label_index
   | Switch(e,b,sl,l) -> begin
       (* change 
        * switch (se) {
@@ -6747,8 +6748,21 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
         handle_labels stmt_hd.labels
       end in
       s.skind <- handle_choices (List.sort compare_choices sl) ;
-      xform_switch_block b (fun () -> ref break_stmt) cont_dest i 
+      xform_switch_block b ?remove_loops (fun () -> ref break_stmt) cont_dest i
     end
+  | Loop(b,l,_,_) when remove_loops = Some true ->
+          let i = get_switch_count () in
+          let break_stmt = mkStmt (Instr []) in
+          break_stmt.labels <-
+						[Label((Printf.sprintf "while_%d_break" i),l,false)] ;
+          let cont_stmt = mkStmt (Instr []) in
+          cont_stmt.labels <-
+						[Label((Printf.sprintf "while_%d_continue" i),l,false)] ;
+          b.bstmts <- cont_stmt :: b.bstmts @ [mkStmt(Continue l); break_stmt] ;
+          let break_dest () = ref break_stmt in
+          let cont_dest () = ref cont_stmt in
+          xform_switch_block b ?remove_loops break_dest cont_dest label_index ;
+          s.skind <- Block b
   | Loop(b,l,_,_) -> 
           let i = get_switch_count () in 
           let break_stmt = mkStmt (Instr []) in
@@ -6762,18 +6776,18 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
             (Loop(b,l,Some(cont_stmt),Some(break_stmt))) in 
           let break_dest () = ref break_stmt in
           let cont_dest () = ref cont_stmt in 
-          xform_switch_block b break_dest cont_dest label_index ;
+          xform_switch_block b ?remove_loops break_dest cont_dest label_index ;
           break_stmt.succs <- s.succs ; 
           let new_block = mkBlock [ this_stmt ; break_stmt ] in
           s.skind <- Block new_block
-  | Block(b) -> xform_switch_block b break_dest cont_dest label_index
+  | Block(b) -> xform_switch_block b ?remove_loops break_dest cont_dest label_index
 
   | TryExcept _ | TryFinally _ -> 
       failwith "xform_switch_statement: structured exception handling not implemented"
   | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcFun _
   | CpcSpawn _ -> ()
 
-end and xform_switch_block b break_dest cont_dest label_index = 
+end and xform_switch_block b ?remove_loops break_dest cont_dest label_index =
   try 
     let rec link_succs sl = match sl with
     | [] -> ()
@@ -6781,7 +6795,7 @@ end and xform_switch_block b break_dest cont_dest label_index =
     in 
     link_succs b.bstmts ;
     List.iter (fun stmt -> 
-      xform_switch_stmt stmt break_dest cont_dest label_index) b.bstmts ;
+      xform_switch_stmt stmt ?remove_loops break_dest cont_dest label_index) b.bstmts ;
   with e ->
     List.iter (fun stmt -> ignore
       (warn "prepareCFG: %a@!" d_stmt stmt)) b.bstmts ;
@@ -6791,7 +6805,7 @@ end and xform_switch_block b break_dest cont_dest label_index =
  * default and switch statements/labels and replacing them with Ifs and
  * Gotos. *)
 let prepareCFG (fd : fundec) : unit =
-  xform_switch_block fd.sbody 
+  xform_switch_block fd.sbody
       (fun () -> failwith "prepareCFG: break with no enclosing loop") 
       (fun () -> failwith "prepareCFG: continue with no enclosing loop") (-1)
 
