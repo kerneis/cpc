@@ -1,28 +1,59 @@
 open Cil
 module E = Errormsg
 
+(* Eliminate break and continue in a switch/loop *)
+exception TrivializeStmt of stmt
+
+let eliminate_switch_loop s =
+  xform_switch_stmt s ~remove_loops:true
+    (fun () -> failwith "break with no enclosing loop")
+    (fun () -> failwith "continue with no enclosing loop") (-1)
+
+let make_label =
+  let i = ref 0 in
+  fun () -> incr i; Printf.sprintf "cpc_label_%d" !i
+
+(*****************************************************************************)
+
+(* Context used in the markCps visitor *)
 type mark_context = {
   mutable cps_fun : bool; (* is it a cps function *)
   mutable cps_con : bool; (* is it in cps context *)
+  mutable last_stmt : stmt; (* last stmt in cps context *)
   mutable next_stmt : stmt; (* next stmt in cps context *)
+  mutable enclosing_stmt : stmt; (* nearest loop or switch *)
   mutable last_var : varinfo option; (* last (cps) assigned variable *)
   }
+
+let fresh_context () =
+  { cps_fun = false; cps_con = false;
+    last_stmt = dummyStmt;
+    next_stmt = dummyStmt;
+    enclosing_stmt = dummyStmt;
+    last_var = None}
 
 let copy c =
   {cps_fun = c.cps_fun;
    cps_con = c.cps_con;
+   last_stmt = c.last_stmt;
    next_stmt = c.next_stmt;
+   enclosing_stmt = c.enclosing_stmt;
    last_var = c.last_var}
+
+(* add a goto from last_stmt to next_stmt *)
+exception AddGoto of mark_context
+
 
 class markCps = object(self)
   inherit nopCilVisitor
 
-  val mutable c =
-    { cps_fun = false; cps_con = false;
-      next_stmt = dummyStmt; last_var = None}
+  val mutable c = fresh_context ()
 
   method private set_next (s: stmt) : unit =
-    if c.cps_con then match s.succs with
+      (* set next_stmt in cps context only *)
+    if c.cps_con then begin
+    c.last_stmt <- s;
+    match s.succs with
     | [] ->
         c.next_stmt <- dummyStmt;
         E.warn "return expected after %a" d_stmt s
@@ -32,15 +63,17 @@ class markCps = object(self)
     | _ -> c.next_stmt <- dummyStmt;
         E.s (E.bug "cpc construct with several successors.\
        Please report this bug with the file causing the error.")
+    end
 
   method private is_cps (i: instr) =
+      (* check that last_var is the first argument of args *)
     let check_var args = match c.last_var with
-    | None -> true
-    | Some v ->
-      match args with
-      | Lval (Var v', NoOffset)::_ -> v = v'
-      | [] -> false
-      | e::_ -> E.warn "%a should be a variable" dn_exp e; false
+      | None -> true
+      | Some v ->
+        match args with
+        | Lval (Var v', NoOffset)::_ -> v = v'
+        | [] -> false
+        | e::_ -> E.warn "%a should be a variable" dn_exp e; false
     in match i with
     | Set _ | Asm _ -> c.last_var <- None; false
     (* Non cps call *)
@@ -64,7 +97,7 @@ class markCps = object(self)
         false
 
   method vinst (i: instr) : instr list visitAction =
-    match (self#is_cps i, c.cps_fun) with
+    match self#is_cps i, c.cps_fun with
     | true, true ->
         c.cps_con <- true;
         SkipChildren
@@ -76,23 +109,18 @@ class markCps = object(self)
 
   method vstmt (s: stmt) : stmt visitAction =
     if c.cps_con && c.next_stmt != s
-    then E.s (
-      E.error "control flow broken in cps context: %a instead of %a"
+    then begin
+      (*E.log "control flow broken in cps context: %a\ninstead of: %a\n***\n"
       d_loc (get_stmtLoc s.skind)
-      d_loc (get_stmtLoc c.next_stmt.skind)
-    )
+      d_loc (get_stmtLoc c.next_stmt.skind);*)
+    raise (AddGoto c) end
     else match s.skind with
     (* XXX accepted even in cps context ? XXX*)
     | CpcSpawn _ ->
         let context = copy c in
+        c <- {(fresh_context ()) with cps_fun = true};
         self#set_next s;
-        ChangeDoChildrenPost (
-          (c.cps_fun <- true; c.cps_con <- false; s),
-          (fun s ->
-            c <- context;
-            s.cps <- c.cps_con;
-            s)
-        )
+        ChangeDoChildrenPost (s, fun s -> c <- context; s.cps <- c.cps_con; s)
     | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _
     | CpcIoWait _
         when c.cps_fun -> (* beware, order matters! *)
@@ -104,7 +132,8 @@ class markCps = object(self)
     | CpcIoWait _ ->
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
     | CpcFun _ ->
-        ChangeDoChildrenPost (s, fun s -> s.cps <- c.cps_con; self#set_next s; s)
+        ChangeDoChildrenPost
+          (s, fun s -> s.cps <- c.cps_con; self#set_next s; s)
     | Instr [] ->
         self#set_next s;
         s.cps <- c.cps_con;
@@ -115,30 +144,65 @@ class markCps = object(self)
           s.cps <- c.cps_con;
           s
         )
-    | Return _ when c.cps_fun ->
-        s.cps <- true;
-        c.cps_con <- false;
-        c.next_stmt <- dummyStmt;
+    | Return _ ->
+        if c.cps_fun
+        then begin
+          s.cps <- true;
+          c.cps_con <- false;
+          c.last_stmt <- dummyStmt;
+          c.next_stmt <- dummyStmt;
+        end;
         SkipChildren
-    | Block _ -> ChangeDoChildrenPost (s, fun s ->
-        s.cps <- c.cps_con; s)
-    | _ when c.cps_con ->
-        E.s (E.error "Not allowed in CPS context: %a" d_stmt s)
-    | _ -> ChangeDoChildrenPost (s, fun s ->
-        if c.next_stmt != dummyStmt then
-          E.s (E.error "escaping cps context in %a" dn_stmt s)
+
+    (* Control flow in cps context *)
+    | Goto _ when c.cps_con ->
+        E.s (E.error "functionnalize goto")
+    | Break _ | Continue _ when c.cps_con ->
+        raise (TrivializeStmt c.enclosing_stmt);
+    | If _ | Switch _ | Loop _ when c.cps_con ->
+        raise (AddGoto c)
+
+    (* Control flow otherwise *)
+    | Goto _ | Break _ | Continue _ -> SkipChildren
+    | If _ -> ChangeDoChildrenPost (s, fun s ->
+        if c.next_stmt != dummyStmt then begin
+          (*E.log "escaping cps context in if statement %a\n***\n" dn_stmt s;*)
+          raise (AddGoto c) end
         else s)
+    | Switch _ ->
+        c.enclosing_stmt <- s;
+        ChangeDoChildrenPost (s, fun s ->
+          if c.next_stmt != dummyStmt then begin
+            (* E.log "escaping cps context in switch statement %a\n***\n" dn_stmt s; *)
+            raise (AddGoto c) end
+          else s)
+    | Loop _ ->
+        c.enclosing_stmt <- s;
+        ChangeDoChildrenPost (s, fun s ->
+          if c.next_stmt != dummyStmt then begin
+            (* E.log "escaping cps context in loop statement %a\n***\n" dn_stmt s; *)
+            assert(c.next_stmt == s);
+            raise (TrivializeStmt s) end
+          else s)
+
+    | Block _ ->
+        ChangeDoChildrenPost
+          (s, fun s -> s.cps <- c.cps_con; s)
+
+    | TryFinally _ | TryExcept _ ->
+        E.s (E.unimp "try/except/finally not supported by CPC")
 
   method vfunc (f:fundec) : fundec visitAction =
+    Cfg.clearCFGinfo f;
     ignore(Cfg.cfgFun f);
-    c.next_stmt <- dummyStmt;
+    (*XXX c.next_stmt <- dummyStmt;*)
     let context = copy c in
-    ChangeDoChildrenPost (
-      (c.cps_fun <- f.svar.vcps; c.cps_con <- false; f),
-      (fun f -> c <- context; f)
-    )
+    c <- {(fresh_context ()) with cps_fun = f.svar.vcps};
+    ChangeDoChildrenPost (f, fun f -> c <- context; f)
 
 end
+
+(*****************************************************************************)
 
 let do_convert return s =
   (* dummy converter, just reverse the stack *)
@@ -169,8 +233,29 @@ class cpsConverter = object(self)
 
 end
 
-let doit (f: file) =
-  visitCilFileSameGlobals (new markCps) f
+(*****************************************************************************)
+
+let rec doit (f: file) =
+  try
+    visitCilFileSameGlobals (new markCps) f;
+    visitCilFile (new cpsConverter) f
+  with
+  | TrivializeStmt s when s = dummyStmt ->
+      E.s (E.error "break or continue with no enclosing loop")
+  | TrivializeStmt s ->
+      (*E.log "TrivializeStmt %a\n" d_stmt s;*)
+      eliminate_switch_loop s;
+      doit f
+  | AddGoto c ->
+      let (src,dst) = (c.last_stmt, c.next_stmt) in
+      assert (src != dummyStmt && dst != dummyStmt);
+      let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
+      let src' = mkStmt src.skind in
+      src.skind <- Block (mkBlock ([
+        src';
+        mkStmt (Goto (ref dst, src_loc))]));
+      dst.labels <- [Label (make_label(), dst_loc, false)];
+      doit f
 
 let feature : featureDescr =
   { fd_name = "cpc";
