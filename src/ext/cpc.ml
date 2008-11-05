@@ -1,17 +1,11 @@
 open Cil
 module E = Errormsg
 
+(* Split an instruction list given an instruction *)
+exception SplitInstr of stmt * instr
+
 (* Eliminate break and continue in a switch/loop *)
 exception TrivializeStmt of stmt
-
-let eliminate_switch_loop s =
-  xform_switch_stmt s ~remove_loops:true
-    (fun () -> failwith "break with no enclosing loop")
-    (fun () -> failwith "continue with no enclosing loop") (-1)
-
-let make_label =
-  let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "cpc_label_%d" !i
 
 (*****************************************************************************)
 
@@ -104,7 +98,7 @@ class markCps = object(self)
     | true, false ->
         E.s (E.error "cps call not allowed here: %a" d_instr i)
     | false, _ when c.cps_con ->
-        E.s (E.error "Not allowed in CPS context: %a" d_instr i)
+        raise (SplitInstr (c.last_stmt,i))
     | false, _ -> SkipChildren
 
   method vstmt (s: stmt) : stmt visitAction =
@@ -139,6 +133,7 @@ class markCps = object(self)
         s.cps <- c.cps_con;
         SkipChildren
     | Instr _ ->
+        c.last_stmt <- s;
         ChangeDoChildrenPost (s, fun s ->
           self#set_next s;
           s.cps <- c.cps_con;
@@ -156,7 +151,7 @@ class markCps = object(self)
 
     (* Control flow in cps context *)
     | Goto _ when c.cps_con ->
-        E.s (E.error "functionnalize goto")
+        E.s (E.unimp "functionnalize goto")
     | Break _ | Continue _ when c.cps_con ->
         raise (TrivializeStmt c.enclosing_stmt);
     | If _ | Switch _ | Loop _ when c.cps_con ->
@@ -235,6 +230,26 @@ end
 
 (*****************************************************************************)
 
+let eliminate_switch_loop s =
+  xform_switch_stmt s ~remove_loops:true
+    (fun () -> failwith "break with no enclosing loop")
+    (fun () -> failwith "continue with no enclosing loop") (-1)
+
+let make_label =
+  let i = ref 0 in
+  fun () -> incr i; Printf.sprintf "cpc_label_%d" !i
+
+let add_goto src dst =
+  assert (src != dummyStmt && dst != dummyStmt);
+  let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
+  let src' = mkStmt src.skind in
+  src.skind <- Block (mkBlock ([
+    src';
+    mkStmt (Goto (ref dst, src_loc))]));
+  dst.labels <- [Label (make_label(), dst_loc, false)]
+
+(*****************************************************************************)
+
 let rec doit (f: file) =
   try
     visitCilFileSameGlobals (new markCps) f;
@@ -248,14 +263,22 @@ let rec doit (f: file) =
       doit f
   | AddGoto c ->
       let (src,dst) = (c.last_stmt, c.next_stmt) in
-      assert (src != dummyStmt && dst != dummyStmt);
-      let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
-      let src' = mkStmt src.skind in
-      src.skind <- Block (mkBlock ([
-        src';
-        mkStmt (Goto (ref dst, src_loc))]));
-      dst.labels <- [Label (make_label(), dst_loc, false)];
+      add_goto src dst;
       doit f
+  | SplitInstr (s, i) -> begin match s.skind with
+    | Instr l ->
+        let rec split_instr acc = function
+          | [] -> raise Not_found
+          | t::q when t==i -> (List.rev acc, l)
+          | t::q -> split_instr (t::acc) q in
+        let (l1,l2) = split_instr [] l in
+        let (s1, s2) = (mkStmt (Instr l1), mkStmt (Instr l2)) in
+        (*E.log "SplitInstr %a\n" d_instr i;*)
+        s.skind <- Block (mkBlock ([s1; s2]));
+        add_goto s1 s2;
+        doit f
+    | _ -> E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
+  end
 
 let feature : featureDescr =
   { fd_name = "cpc";
