@@ -7,6 +7,10 @@ exception SplitInstr of stmt * instr
 (* Eliminate break and continue in a switch/loop *)
 exception TrivializeStmt of stmt
 
+(* Functionalize a statement with a label *)
+exception FunctionalizeGoto of stmt
+
+let is_label = function Label _ -> true | _ -> false
 (*****************************************************************************)
 
 (* Context used in the markCps visitor *)
@@ -26,7 +30,7 @@ let fresh_context () =
     enclosing_stmt = dummyStmt;
     last_var = None}
 
-let copy c =
+let copy_context c =
   {cps_fun = c.cps_fun;
    cps_con = c.cps_con;
    last_stmt = c.last_stmt;
@@ -43,14 +47,14 @@ class markCps = object(self)
 
   val mutable c = fresh_context ()
 
-  method private set_next (s: stmt) : unit =
+  method private set_next ?(set_last=true) (s: stmt) : unit =
       (* set next_stmt in cps context only *)
     if c.cps_con then begin
-    c.last_stmt <- s;
+    if set_last then c.last_stmt <- s;
     match s.succs with
     | [] ->
         c.next_stmt <- dummyStmt;
-        E.warn "return expected after %a" d_stmt s
+        (*E.warn "return expected after %a" d_stmt s*)
     | [x] ->
         (*E.log "set_next %a -> %a\n" dn_stmt s dn_stmt x;*)
         c.next_stmt <- x
@@ -67,7 +71,7 @@ class markCps = object(self)
         match args with
         | Lval (Var v', NoOffset)::_ -> v = v'
         | [] -> false
-        | e::_ -> E.warn "%a should be a variable" dn_exp e; false
+        | e::_ -> (*E.warn "%a should be a variable" dn_exp e;*) false
     in match i with
     | Set _ | Asm _ -> c.last_var <- None; false
     (* Non cps call *)
@@ -81,7 +85,7 @@ class markCps = object(self)
     | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
         check_var args && (c.last_var <- Some v; true)
     | Call (Some l, Lval (Var f, NoOffset), _, _) ->
-        E.warn "%a should be a variable" dn_lval l; c.last_var <- None; false
+        (*E.warn "%a should be a variable" dn_lval l;*) c.last_var <- None; false
     (* Weird call *)
     | Call _ ->
         E.warn
@@ -104,14 +108,18 @@ class markCps = object(self)
   method vstmt (s: stmt) : stmt visitAction =
     if c.cps_con && c.next_stmt != s
     then begin
-      (*E.log "control flow broken in cps context: %a\ninstead of: %a\n***\n"
-      d_loc (get_stmtLoc s.skind)
-      d_loc (get_stmtLoc c.next_stmt.skind);*)
+      E.log "control flow broken in cps context: %a\ninstead of: %a\n***\n"
+      d_stmt s
+      d_stmt c.next_stmt;
     raise (AddGoto c) end
+    else if c.cps_con && (List.exists is_label s.labels) then
+      (* potential goto into cps context *)
+      (E.log "label in cps context! ";
+      raise (FunctionalizeGoto s))
     else match s.skind with
     (* XXX accepted even in cps context ? XXX*)
     | CpcSpawn _ ->
-        let context = copy c in
+        let context = copy_context c in
         c <- {(fresh_context ()) with cps_fun = true};
         self#set_next s;
         ChangeDoChildrenPost (s, fun s -> c <- context; s.cps <- c.cps_con; s)
@@ -122,7 +130,7 @@ class markCps = object(self)
           s.cps <- true;
           self#set_next s;
           SkipChildren
-    |CpcDone _ when c.cps_fun ->
+    | CpcDone _ when c.cps_fun ->
         (* just like a Return *)
         s.cps <- true;
         c.cps_con <- false;
@@ -134,11 +142,14 @@ class markCps = object(self)
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
     | CpcFun _ ->
         ChangeDoChildrenPost
-          (s, fun s -> s.cps <- c.cps_con; self#set_next s; s)
+          (s, fun s -> s.cps <- c.cps_con; self#set_next ~set_last:false s; s)
     | Instr [] ->
-        self#set_next s;
+        self#set_next ~set_last:false s;
         s.cps <- c.cps_con;
         SkipChildren
+    | Instr (hd::_) when c.cps_con && not(self#is_cps hd) ->
+        E.log "not cps instruction in cps context\n";
+        raise (AddGoto c)
     | Instr _ ->
         c.last_stmt <- s;
         ChangeDoChildrenPost (s, fun s ->
@@ -157,37 +168,39 @@ class markCps = object(self)
         SkipChildren
 
     (* Control flow in cps context *)
-    | Goto _ when c.cps_con ->
-        E.s (E.unimp "functionnalize goto")
+    | Goto (g, _) when c.cps_con ->
+        raise (FunctionalizeGoto !g)
     | Break _ | Continue _ when c.cps_con ->
         raise (TrivializeStmt c.enclosing_stmt);
     | If _ | Switch _ | Loop _ when c.cps_con ->
+        E.log "control flow in cps context\n";
         raise (AddGoto c)
 
     (* Control flow otherwise *)
     | Goto _ | Break _ | Continue _ -> SkipChildren
     | If _ -> ChangeDoChildrenPost (s, fun s ->
         if c.next_stmt != dummyStmt then begin
-          (*E.log "escaping cps context in if statement %a\n***\n" dn_stmt s;*)
+          E.log "escaping cps context in if statement %a\n***\n" dn_stmt s;
           raise (AddGoto c) end
         else s)
     | Switch _ ->
         c.enclosing_stmt <- s;
         ChangeDoChildrenPost (s, fun s ->
           if c.next_stmt != dummyStmt then begin
-            (* E.log "escaping cps context in switch statement %a\n***\n" dn_stmt s; *)
+            E.log "escaping cps context in switch statement %a\n***\n" dn_stmt s;
             raise (AddGoto c) end
           else s)
     | Loop _ ->
         c.enclosing_stmt <- s;
         ChangeDoChildrenPost (s, fun s ->
           if c.next_stmt != dummyStmt then begin
-            (* E.log "escaping cps context in loop statement %a\n***\n" dn_stmt s; *)
+            E.log "escaping cps context in loop statement %a\n***\n" dn_stmt s;
             assert(c.next_stmt == s);
             raise (TrivializeStmt s) end
           else s)
 
     | Block _ ->
+        self#set_next ~set_last:false s;
         ChangeDoChildrenPost
           (s, fun s -> s.cps <- c.cps_con; s)
 
@@ -197,8 +210,7 @@ class markCps = object(self)
   method vfunc (f:fundec) : fundec visitAction =
     Cfg.clearCFGinfo f;
     ignore(Cfg.cfgFun f);
-    (*XXX c.next_stmt <- dummyStmt;*)
-    let context = copy c in
+    let context = copy_context c in
     c <- {(fresh_context ()) with cps_fun = f.svar.vcps};
     ChangeDoChildrenPost (f, fun f -> c <- context; f)
 
@@ -237,6 +249,76 @@ end
 
 (*****************************************************************************)
 
+exception GotoContent of stmt list
+
+let make_function_name =
+  let i = ref 0 in
+  fun base -> incr i; Printf.sprintf "__cpc_%s_%d" base !i
+
+class functionalizeGoto start =
+      let Label(label,_,_) = List.find is_label start.labels in
+      let fd = emptyFunction (make_function_name label) in
+
+      let fd_block last =
+        [ mkStmt (CpcFun (fd, locUnknown));
+          mkStmt (Instr[Call(None,Lval(Var fd.svar, NoOffset),[],locUnknown)]);
+          last ] in
+      let () = fd.svar.vcps <- true in
+      object(self)
+        inherit nopCilVisitor
+
+        val mutable acc = false
+        val mutable stack = []
+
+        method private unstack last =
+          acc <- false;
+          fd.sbody <- mkBlock (List.rev stack);
+          stack <- [];
+          mkStmt (Block (mkBlock (compactStmts (fd_block last))))
+
+        method private unstack_fun ({skind=CpcFun(f,_)} as s) =
+          acc <- false;
+          fd.sbody <- mkBlock (List.rev stack);
+          stack <- [];
+          f.sbody.bstmts <- compactStmts
+            (f.sbody.bstmts
+            @ (fd_block (mkStmt (CpcDone locUnknown))));
+          s
+
+        method vstmt (s: stmt) : stmt visitAction =
+        if s == start then acc <- true;
+        match s.skind with
+        | Goto (g, loc) when !g == start ->
+            let s' = (mkStmt ( Instr
+              [Call(None,Lval(Var fd.svar, NoOffset),[],loc)])) in
+            if acc then begin
+              stack <- s' :: stack;
+              ChangeTo (mkEmptyStmt())
+            end else  ChangeTo s'
+        | Return _ | CpcDone _ when acc ->
+            ChangeTo(self#unstack s)
+        | _ when acc -> ChangeDoChildrenPost(
+            (acc <- false;s),
+            (fun s -> acc <- true;
+              stack <- s :: stack;
+              mkEmptyStmt ()))
+        | Block _ -> DoChildren
+        | CpcFun _ ->
+            ChangeDoChildrenPost(s, fun s ->
+            if acc
+            then self#unstack_fun s
+            else s
+          )
+        | _ ->
+            ChangeDoChildrenPost(s, fun s ->
+            if acc
+            then self#unstack (mkStmt (CpcDone locUnknown))
+            else s
+          )
+      end
+
+(*****************************************************************************)
+
 let eliminate_switch_loop s =
   xform_switch_stmt s ~remove_loops:true
     (fun () -> failwith "break with no enclosing loop")
@@ -244,48 +326,66 @@ let eliminate_switch_loop s =
 
 let make_label =
   let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "cpc_label_%d" !i
+  fun () -> incr i; Printf.sprintf "__cpc_label_%d" !i
 
 let add_goto src dst =
   assert (src != dummyStmt && dst != dummyStmt);
+  E.log "add goto from %a\n to %a\n" d_stmt src d_stmt dst;
   let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
   let src' = mkStmt src.skind in
   src.skind <- Block (mkBlock ([
     src';
-    mkStmt (Goto (ref dst, src_loc))]));
+    mkStmt (Goto (ref dst, src_loc));
+    mkStmt (CpcDone locUnknown)
+    ]));
   dst.labels <- [Label (make_label(), dst_loc, false)]
+
 
 (*****************************************************************************)
 
+let () = lineDirectiveStyle := None;;
+
 let rec doit (f: file) =
   try
+    E.log "********************* doit ******************\n";
+    let r = read_line () in
+    if r = "q" then E.log "quit!\n" else
+    if r = "d" then (dumpFile defaultCilPrinter stdout "" f; doit f)
+    else begin
     visitCilFileSameGlobals (new markCps) f;
-    visitCilFile (new cpsConverter) f
+    (*visitCilFile (new cpsConverter) f;*)
+    E.log "Finished!\n";
+    end
   with
   | TrivializeStmt s when s = dummyStmt ->
       E.s (E.error "break or continue with no enclosing loop")
   | TrivializeStmt s ->
-      (*E.log "TrivializeStmt %a\n" d_stmt s;*)
+      E.log "TrivializeStmt %a\n" d_stmt s;
       eliminate_switch_loop s;
       doit f
-  | AddGoto c ->
-      let (src,dst) = (c.last_stmt, c.next_stmt) in
+  | AddGoto {last_stmt = src; next_stmt = dst} ->
       add_goto src dst;
       doit f
-  | SplitInstr (s, i) -> begin match s.skind with
-    | Instr l ->
-        let rec split_instr acc = function
-          | [] -> raise Not_found
-          | t::q when t==i -> (List.rev acc, l)
-          | t::q -> split_instr (t::acc) q in
-        let (l1,l2) = split_instr [] l in
+  | SplitInstr ({skind = Instr l} as s, i) ->
+      let rec split_instr acc = function
+        | [] -> raise Not_found
+        | t::q when t==i -> (List.rev acc, l)
+        | t::q -> split_instr (t::acc) q in
+      let (l1,l2) = split_instr [] l in
+        begin
         let (s1, s2) = (mkStmt (Instr l1), mkStmt (Instr l2)) in
-        (*E.log "SplitInstr %a\n" d_instr i;*)
+        E.log "SplitInstr %a\n at point:\n%a\n" d_stmt s d_instr i;
         s.skind <- Block (mkBlock ([s1; s2]));
         add_goto s1 s2;
-        doit f
-    | _ -> E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
-  end
+        end;
+      doit f
+  | SplitInstr (s, _) ->
+      E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
+  | FunctionalizeGoto start ->
+      E.log "functionalize goto\n";
+      visitCilFileSameGlobals (new functionalizeGoto start) f;
+      doit f
+  | Exit -> E.log "Exit\n";()
 
 let feature : featureDescr =
   { fd_name = "cpc";
