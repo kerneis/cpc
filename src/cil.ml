@@ -3881,7 +3881,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
 
     | CpcSpawn (s, l) ->
         self#pLineDirective l
-          ++ text "cpc_spawn"
+          ++ text "cpc_spawn "
           ++ self#pStmt () s
 
     (*| CpcFork (s, l) ->
