@@ -115,13 +115,20 @@ class markCps = object(self)
         c <- {(fresh_context ()) with cps_fun = true};
         self#set_next s;
         ChangeDoChildrenPost (s, fun s -> c <- context; s.cps <- c.cps_con; s)
-    | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _
+    | CpcYield _ | CpcWait _ | CpcSleep _
     | CpcIoWait _
         when c.cps_fun -> (* beware, order matters! *)
           c.cps_con <- true; (* must be set first *)
           s.cps <- true;
           self#set_next s;
           SkipChildren
+    |CpcDone _ when c.cps_fun ->
+        (* just like a Return *)
+        s.cps <- true;
+        c.cps_con <- false;
+        c.last_stmt <- dummyStmt;
+        c.next_stmt <- dummyStmt;
+        SkipChildren
     | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _
     | CpcIoWait _ ->
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
