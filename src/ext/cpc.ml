@@ -335,8 +335,9 @@ class functionalizeGoto start =
       let Label(label,_,_) = List.find is_label start.labels in
       let fd = emptyFunction (make_function_name label) in
 
-      let fd_block last =
-        [ mkStmt (CpcFun (fd, locUnknown));
+      let fd_block first last =
+        [ first;
+          mkStmt (CpcFun (fd, locUnknown));
           mkStmt (Instr[Call(None,Lval(Var fd.svar, NoOffset),[],locUnknown)]);
           last ] in
       let () = fd.svar.vcps <- true in
@@ -346,19 +347,20 @@ class functionalizeGoto start =
         val mutable acc = false
         val mutable stack = []
 
-        method private unstack last =
+        method private unstack first last =
           acc <- false;
           fd.sbody <- mkBlock (List.rev stack);
           stack <- [];
-          mkStmt (Block (mkBlock (compactStmts (fd_block last))))
+          mkStmt (Block (mkBlock (compactStmts (fd_block first last))))
 
         method private unstack_fun ({skind=CpcFun(f,_)} as s) =
           acc <- false;
           fd.sbody <- mkBlock (List.rev stack);
           stack <- [];
           f.sbody.bstmts <- compactStmts
-            (f.sbody.bstmts
-            @ (fd_block (mkStmt (CpcDone locUnknown))));
+            (fd_block
+            (mkStmt (Block (mkBlock(f.sbody.bstmts))))
+            (mkStmt (CpcDone locUnknown)));
           s
 
         method vstmt (s: stmt) : stmt visitAction =
@@ -372,7 +374,7 @@ class functionalizeGoto start =
               ChangeTo (mkEmptyStmt())
             end else  ChangeTo s'
         | Return _ | CpcDone _ when acc ->
-            ChangeTo(self#unstack s)
+            ChangeTo(self#unstack (mkEmptyStmt ()) s)
         | _ when acc -> ChangeDoChildrenPost(
             (acc <- false;s),
             (fun s -> acc <- true;
@@ -388,7 +390,7 @@ class functionalizeGoto start =
         | _ ->
             ChangeDoChildrenPost(s, fun s ->
             if acc
-            then self#unstack (mkStmt (CpcDone locUnknown))
+            then self#unstack s (mkStmt (CpcDone locUnknown))
             else s
           )
       end
