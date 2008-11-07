@@ -323,6 +323,30 @@ class lambdaLifter = object(self)
 
 end
 
+(*************** Utility functions *******************************************)
+
+let eliminate_switch_loop s =
+  xform_switch_stmt s ~remove_loops:true
+    (fun () -> failwith "break with no enclosing loop")
+    (fun () -> failwith "continue with no enclosing loop") (-1)
+
+let make_label =
+  let i = ref 0 in
+  fun () -> incr i; Printf.sprintf "__cpc_label_%d" !i
+
+let add_goto src dst =
+  assert (src != dummyStmt && dst != dummyStmt);
+  E.log "add goto from %a\n to %a\n" d_stmt src d_stmt dst;
+  let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
+  let src' = mkStmt src.skind in
+  src.skind <- Block (mkBlock ([
+    src';
+    mkStmt (Goto (ref dst, src_loc));
+    mkStmt (CpcDone locUnknown)
+    ]));
+  dst.labels <- [Label (make_label(), dst_loc, false)]
+
+
 (************** Functionnalize Goto ******************************************)
 
 exception GotoContent of stmt list
@@ -393,31 +417,48 @@ class functionalizeGoto start =
             then self#unstack s (mkStmt (CpcDone locUnknown))
             else s
           )
-      end
+end
 
-(*************** Utility functions *******************************************)
+exception Enclosing of stmt
 
-let eliminate_switch_loop s =
-  xform_switch_stmt s ~remove_loops:true
-    (fun () -> failwith "break with no enclosing loop")
-    (fun () -> failwith "continue with no enclosing loop") (-1)
+class findEnclosing = fun start -> object(self)
+  inherit nopCilVisitor
 
-let make_label =
-  let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "__cpc_label_%d" !i
+  val mutable enclosing = dummyStmt
+  val mutable seen_start = false
 
-let add_goto src dst =
-  assert (src != dummyStmt && dst != dummyStmt);
-  E.log "add goto from %a\n to %a\n" d_stmt src d_stmt dst;
-  let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
-  let src' = mkStmt src.skind in
-  src.skind <- Block (mkBlock ([
-    src';
-    mkStmt (Goto (ref dst, src_loc));
-    mkStmt (CpcDone locUnknown)
-    ]));
-  dst.labels <- [Label (make_label(), dst_loc, false)]
+  method vstmt s =
+    if s == start then seen_start <- true;
+    match s.skind with
+    | Break _ | Continue _ when seen_start ->
+        raise (Enclosing enclosing)
+    | Switch _ | Loop _ when not seen_start ->
+      let e = enclosing in
+        ChangeDoChildrenPost(
+          (enclosing <- s; s),
+          (fun s ->
+            enclosing <- e;
+            seen_start <- false;
+            s))
+    | Switch _ | Loop _ -> SkipChildren
+    | _ ->
+        let seen = seen_start in
+        ChangeDoChildrenPost (s, fun s ->
+          seen_start <- seen;
+          s)
 
+end
+
+let functionnalize start f =
+  begin try
+    visitCilFileSameGlobals (new findEnclosing start) f
+  with
+  | Enclosing s ->
+      assert( s != dummyStmt);
+      E.log "found escaping break or continue: trivializing\n%a\n" d_stmt s;
+      eliminate_switch_loop s
+  end;
+  visitCilFileSameGlobals (new functionalizeGoto start) f
 
 (*****************************************************************************)
 
@@ -469,7 +510,7 @@ let rec doit (f: file) =
       E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
   | FunctionalizeGoto start ->
       E.log "functionalize goto\n";
-      visitCilFileSameGlobals (new functionalizeGoto start) f;
+      functionnalize start f;
       doit f
   | Exit -> E.log "Exit\n";()
 
