@@ -249,6 +249,19 @@ end
 
 (*****************************************************************************)
 
+class cleaner = object(self)
+  inherit nopCilVisitor
+
+  val mutable stack = []
+
+  method vblock (b: block) : block visitAction =
+    ChangeDoChildrenPost (b, fun b ->
+      b.bstmts <- compactStmts b.bstmts;
+      b)
+end
+
+(*****************************************************************************)
+
 exception GotoContent of stmt list
 
 let make_function_name =
@@ -348,12 +361,14 @@ let () = lineDirectiveStyle := None;;
 let rec doit (f: file) =
   try
     E.log "********************* doit ******************\n";
+    visitCilFileSameGlobals (new cleaner) f;
     let r = read_line () in
     if r = "q" then E.log "quit!\n" else
     if r = "d" then (dumpFile defaultCilPrinter stdout "" f; doit f)
     else begin
     visitCilFileSameGlobals (new markCps) f;
     (*visitCilFile (new cpsConverter) f;*)
+    visitCilFileSameGlobals (new cleaner) f;
     E.log "Finished!\n";
     end
   with
