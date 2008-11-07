@@ -268,11 +268,58 @@ end
 
 (********************* Lambda-lifting ****************************************)
 
+module S = Set.Make(struct type t = varinfo let compare = compare end)
+
+class replaceVars = fun map -> object(self)
+  inherit nopCilVisitor
+
+  method vvrbl (v:varinfo) : varinfo visitAction =
+    if not (v.vglob || isFunctionType v.vtype)
+    then ChangeTo(List.assoc v map)
+    else SkipChildren
+end
+
 class lambdaLifter = object(self)
   inherit nopCilVisitor
 
-  method vstmt (s: stmt) : stmt visitAction =
-    DoChildren
+  val mutable free_vars = S.empty
+  val mutable local_funs = []
+  val mutable local_proto = []
+
+  method vvrbl (v:varinfo) : varinfo visitAction =
+    if not (v.vglob || isFunctionType v.vtype)
+    then free_vars <- S.add v free_vars;
+    SkipChildren
+
+  method vstmt (s: stmt) : stmt visitAction = match s.skind with
+  | CpcFun (f, _) ->
+      assert(f.sformals = []);
+      assert(f.slocals = []);
+      let old_fv = free_vars in
+      free_vars <- S.empty;
+      ChangeDoChildrenPost (s, fun s ->
+        let f_fv = S.elements free_vars in
+        let f_formals = List.map (fun v -> copyVarinfo v v.vname) f_fv in
+        let map = List.combine f_fv f_formals in
+        setFormals f f_formals;
+        f.sbody <- visitCilBlock (new replaceVars map) f.sbody;
+        (* FIXME Ensure name uniqueness *)
+        let fglob = makeGlobalVar f.svar.vname f.svar.vtype in
+        local_funs <- GFun(f,locUnknown) :: local_funs;
+        local_proto <- GVarDecl(fglob,locUnknown) :: local_proto;
+        free_vars <- S.union free_vars old_fv;
+        mkEmptyStmt())
+  | _ -> DoChildren
+
+  method vglob (g: global) : global list visitAction = match g with
+  | GFun _ -> ChangeDoChildrenPost ([g], fun g ->
+      (* TODO: use CLists instead? *)
+      let res = local_proto @ local_funs @ g in
+      local_funs <- [];
+      local_proto <- [];
+      free_vars <- S.empty;
+      res)
+  | _ -> SkipChildren
 
 end
 
