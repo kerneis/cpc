@@ -11,7 +11,8 @@ exception TrivializeStmt of stmt
 exception FunctionalizeGoto of stmt
 
 let is_label = function Label _ -> true | _ -> false
-(*****************************************************************************)
+
+(******************** CPS Marking ********************************************)
 
 (* Context used in the markCps visitor *)
 type mark_context = {
@@ -106,17 +107,21 @@ class markCps = object(self)
     | false, _ -> SkipChildren
 
   method vstmt (s: stmt) : stmt visitAction =
+    (* Broken control flow *)
     if c.cps_con && c.next_stmt != s
     then begin
       E.log "control flow broken in cps context: %a\ninstead of: %a\n***\n"
       d_stmt s
       d_stmt c.next_stmt;
     raise (AddGoto c) end
+
+    (* Potential goto into cps context *)
     else if c.cps_con && (List.exists is_label s.labels) then
-      (* potential goto into cps context *)
       (E.log "label in cps context! ";
       raise (FunctionalizeGoto s))
     else match s.skind with
+
+    (* CPC Constructs *)
     (* XXX accepted even in cps context ? XXX*)
     | CpcSpawn _ ->
         let context = copy_context c in
@@ -143,6 +148,8 @@ class markCps = object(self)
     | CpcFun _ ->
         ChangeDoChildrenPost
           (s, fun s -> s.cps <- c.cps_con; self#set_next ~set_last:false s; s)
+
+    (* Instructions and return *)
     | Instr [] ->
         self#set_next ~set_last:false s;
         s.cps <- c.cps_con;
@@ -199,6 +206,7 @@ class markCps = object(self)
             raise (TrivializeStmt s) end
           else s)
 
+    (* Blocks *)
     | Block _ ->
         self#set_next ~set_last:false s;
         ChangeDoChildrenPost
@@ -216,7 +224,7 @@ class markCps = object(self)
 
 end
 
-(*****************************************************************************)
+(******************* CPS Conversion ******************************************)
 
 let do_convert return s =
   (* dummy converter, just reverse the stack *)
@@ -247,7 +255,7 @@ class cpsConverter = object(self)
 
 end
 
-(*****************************************************************************)
+(********************* Cleaning **********************************************)
 
 class cleaner = object(self)
   inherit nopCilVisitor
@@ -260,7 +268,7 @@ class cleaner = object(self)
       b)
 end
 
-(*****************************************************************************)
+(************** Functionnalize Goto ******************************************)
 
 exception GotoContent of stmt list
 
