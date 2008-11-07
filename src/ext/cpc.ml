@@ -374,17 +374,22 @@ let add_goto src dst =
 
 let init () = lineDirectiveStyle := None
 
+let pause = ref true
+
 let rec doit (f: file) =
   try
     E.log "********************* doit ******************\n";
     visitCilFileSameGlobals (new cleaner) f;
-    let r = read_line () in
+    let r = if !pause then read_line () else "" in
     if r = "q" then E.log "quit!\n" else
     if r = "d" then (dumpFile defaultCilPrinter stdout "" f; doit f)
+    else if r = "r" then (pause := false; doit f)
     else begin
     visitCilFileSameGlobals (new markCps) f;
+    E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
     (*visitCilFile (new cpsConverter) f;*)
+    E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
     E.log "Finished!\n";
     end
