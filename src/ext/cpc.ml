@@ -260,12 +260,20 @@ end
 class cleaner = object(self)
   inherit nopCilVisitor
 
-  val mutable stack = []
-
   method vblock (b: block) : block visitAction =
     ChangeDoChildrenPost (b, fun b ->
       b.bstmts <- compactStmts b.bstmts;
       b)
+end
+
+(********************* Lambda-lifting ****************************************)
+
+class lambdaLifter = object(self)
+  inherit nopCilVisitor
+
+  method vstmt (s: stmt) : stmt visitAction =
+    DoChildren
+
 end
 
 (************** Functionnalize Goto ******************************************)
@@ -338,7 +346,7 @@ class functionalizeGoto start =
           )
       end
 
-(*****************************************************************************)
+(*************** Utility functions *******************************************)
 
 let eliminate_switch_loop s =
   xform_switch_stmt s ~remove_loops:true
@@ -375,6 +383,7 @@ let rec doit (f: file) =
     if r = "d" then (dumpFile defaultCilPrinter stdout "" f; doit f)
     else begin
     visitCilFileSameGlobals (new markCps) f;
+    visitCilFile (new lambdaLifter) f;
     (*visitCilFile (new cpsConverter) f;*)
     visitCilFileSameGlobals (new cleaner) f;
     E.log "Finished!\n";
