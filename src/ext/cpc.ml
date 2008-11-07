@@ -279,12 +279,26 @@ class replaceVars = fun map -> object(self)
     else SkipChildren
 end
 
+class insertArgs = fun map -> object(self)
+  inherit nopCilVisitor
+
+  method vinst = function
+    | Call(lval, Lval ((Var f, NoOffset) as l), args, loc)
+        when List.mem_assoc f map ->
+          let args' = List.assoc f map in
+          assert(args = []);
+          E.log "inserting in %a\n" d_lval l;
+          ChangeTo([Call(lval, Lval(Var f, NoOffset), args', loc)])
+    | _ -> SkipChildren
+end
+
 class lambdaLifter = object(self)
   inherit nopCilVisitor
 
   val mutable free_vars = S.empty
   val mutable local_funs = []
   val mutable local_proto = []
+  val mutable local_map = [] (* maps local functions to their free vars *)
 
   method vvrbl (v:varinfo) : varinfo visitAction =
     if not (v.vglob || isFunctionType v.vtype)
@@ -300,13 +314,14 @@ class lambdaLifter = object(self)
       ChangeDoChildrenPost (s, fun s ->
         let f_fv = S.elements free_vars in
         let f_formals = List.map (fun v -> copyVarinfo v v.vname) f_fv in
+        let f_args = List.map (fun v -> Lval(Var v, NoOffset)) f_fv in
         let map = List.combine f_fv f_formals in
         setFormals f f_formals;
         f.sbody <- visitCilBlock (new replaceVars map) f.sbody;
         (* FIXME Ensure name uniqueness *)
-        let fglob = makeGlobalVar f.svar.vname f.svar.vtype in
         local_funs <- GFun(f,locUnknown) :: local_funs;
-        local_proto <- GVarDecl(fglob,locUnknown) :: local_proto;
+        local_proto <- GVarDecl(f.svar,locUnknown) :: local_proto;
+        local_map <- (f.svar,f_args) :: local_map;
         free_vars <- S.union free_vars old_fv;
         mkEmptyStmt())
   | _ -> DoChildren
@@ -315,10 +330,15 @@ class lambdaLifter = object(self)
   | GFun _ -> ChangeDoChildrenPost ([g], fun g ->
       (* TODO: use CLists instead? *)
       let res = local_proto @ local_funs @ g in
+      let insert_vis = new insertArgs local_map in
+      let insert_args g = match visitCilGlobal insert_vis g with
+        | [g] -> g
+        | _ -> assert false in
       local_funs <- [];
       local_proto <- [];
+      local_map <- [];
       free_vars <- S.empty;
-      res)
+      List.map insert_args res)
   | _ -> SkipChildren
 
 end
