@@ -356,7 +356,7 @@ let add_goto src dst =
 
 (*****************************************************************************)
 
-let () = lineDirectiveStyle := None;;
+let init () = lineDirectiveStyle := None
 
 let rec doit (f: file) =
   try
@@ -407,7 +407,7 @@ let feature : featureDescr =
     fd_enabled = ref false;
     fd_description = "cpc translation to C";
     fd_extraopt = [];
-    fd_doit = doit;
+    fd_doit = (fun f -> init() ; doit f);
     fd_post_check = true;
   }
 
