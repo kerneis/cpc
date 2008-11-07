@@ -9,7 +9,7 @@
      It is used in src/frontc/cabs2cil.ml too, but there is not
      local functions at this stage.
 [src/ext/...]
-* Many not exhaustive pattern-matching...
+* Check and correct the rough support of cpc constructs
 [src/ext/cfg.ml]
 * Check local functions support.
 [src/ext/cpc.ml]
@@ -17,9 +17,8 @@
 
 QUESTIONS
 =========
-* quand je fonctionnalise un GOTO, est-ce que je supprime le code
-  correspondant (et je le remplace par un appel de fonction) ou
-  est-ce que je le duplique dans le corps de la fonction associée.
 * cpc_spawn, c'est pas clair du tout à quel niveau le gérer
-* Problème avec les labels quand on convertit (interdire les labels
-  en contexte cps ?)
+* quand je fonctionalise, j'ajoute de cpc_done à tout bout de champ, ça ne
+  fait pas de mal, mais est-ce vraiment utile ?
+* il faut gérer les "escaping gotos" (ceux en position cps sont
+  automatiquement fonctionalisés, mais quid des autres ?)

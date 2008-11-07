@@ -397,7 +397,7 @@ class functionalizeGoto start =
           stack <- [];
           mkStmt (Block (mkBlock (compactStmts (fd_block first last))))
 
-        method private unstack_fun ({skind=CpcFun(f,_)} as s) =
+        method private unstack_fun f =
           acc <- false;
           fd.sbody <- mkBlock (List.rev stack);
           stack <- [];
@@ -405,7 +405,7 @@ class functionalizeGoto start =
             (fd_block
             (mkStmt (Block (mkBlock(f.sbody.bstmts))))
             (mkStmt (CpcDone locUnknown)));
-          s
+          f
 
         method vstmt (s: stmt) : stmt visitAction =
         if s == start then acc <- true;
@@ -425,18 +425,19 @@ class functionalizeGoto start =
               stack <- s :: stack;
               mkEmptyStmt ()))
         | Block _ -> DoChildren
-        | CpcFun _ ->
-            ChangeDoChildrenPost(s, fun s ->
-            if acc
-            then self#unstack_fun s
-            else s
-          )
         | _ ->
             ChangeDoChildrenPost(s, fun s ->
             if acc
             then self#unstack s (mkStmt (CpcDone locUnknown))
             else s
           )
+
+        method vfunc (f: fundec) : fundec visitAction =
+          assert(not acc);
+          ChangeDoChildrenPost(f, fun f ->
+            if acc
+            then self#unstack_fun f
+            else f)
 end
 
 exception Enclosing of stmt
@@ -471,14 +472,15 @@ end
 
 let functionnalize start f =
   begin try
-    visitCilFileSameGlobals (new findEnclosing start) f
+    visitCilFileSameGlobals (new findEnclosing start) f;
+    visitCilFileSameGlobals (new functionalizeGoto start) f
   with
   | Enclosing s ->
       assert( s != dummyStmt);
       E.log "found escaping break or continue: trivializing\n%a\n" d_stmt s;
-      eliminate_switch_loop s
-  end;
-  visitCilFileSameGlobals (new functionalizeGoto start) f
+      eliminate_switch_loop s;
+      E.log "***\nresult:\n%a\n" d_stmt s;
+  end
 
 (*****************************************************************************)
 
