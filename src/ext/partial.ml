@@ -702,7 +702,14 @@ struct
                               visit_block
                                 stmt_fun
                                 (visit_block stmt_fun y block1)
-                                block2)
+                                block2
+                          | CpcDone _ | CpcYield _ | CpcWait _
+                          | CpcSleep _ | CpcIoWait _ -> y
+                          | CpcSpawn _ | CpcFun _ ->
+                              Errormsg.warn "partial: blindly assuming \
+                              cpc_spawn and cpc_yield do not have live \
+                              labels\n";
+                              y)
                     acc
                     blk.bstmts
                 and gather_gotos acc stmt =

@@ -331,12 +331,23 @@ let rec analyze_stmt (s : stmt ) : unit =
         analyze_block h
     | Break l -> ()
     | Continue l -> ()
+    | CpcDone _ | CpcYield _
+    | CpcIoWait _ | CpcWait _ | CpcSleep _ -> ()
+    | CpcSpawn (s, _) -> analyze_stmt s
+    | CpcFun (fd, _) ->
+        Errormsg.warn "ptranal: blindly diving into CpcFun (hoping \
+        it's correct)\n";
+        let (oldf,oldret) = (!current_fundec,!current_ret) in
+        analyze_function fd;
+        current_fundec := oldf;
+        current_ret := oldret
+
 
 
 and analyze_block (b : block ) : unit =
   List.iter analyze_stmt b.bstmts
 
-let analyze_function (f : fundec ) : unit =
+and analyze_function (f : fundec ) : unit =
   let oldlv = analyze_var_decl f.svar in
   let ret = A.make_fresh (f.svar.vname ^ "_ret") in
   let formals = List.map analyze_var_decl f.sformals in

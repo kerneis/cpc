@@ -196,6 +196,18 @@ let computeUseDefStmtKind ?(acc_used=VS.empty)
         List.iter (fun i -> ignore (visitCilInstr useDefVisitor i)) il
     | TryExcept _ | TryFinally _ -> ()
     | Block _ -> ()
+    | CpcSleep (e, None, _)
+    | CpcWait (e, _) -> ve e
+    | CpcIoWait (e, e', None, _)
+    | CpcSleep (e, Some(e',None), _) ->
+        ve e; ve e'
+    | CpcIoWait (e, e', Some e'', _)
+    | CpcSleep (e, Some(e',Some e''), _) ->
+        ve e; ve e'; ve e''
+    | CpcFun (_, _)
+    | CpcSpawn (_, _)
+    | CpcDone _
+    | CpcYield _ -> ()
   in
   !varUsed, !varDefs
 
@@ -236,6 +248,21 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
       !varUsed, !varDefs
   | TryExcept _ | TryFinally _ -> !varUsed, !varDefs
   | Block b -> handle_block b
+  | CpcSleep (e, None, _)
+  | CpcWait (e, _) -> let _ = ve e in !varUsed, !varDefs
+  | CpcIoWait (e, e', None, _)
+  | CpcSleep (e, Some(e',None), _) ->
+      let _ = (ve e; ve e') in !varUsed, !varDefs
+  | CpcIoWait (e, e', Some e'', _)
+  | CpcSleep (e, Some(e',Some e''), _) ->
+      let _ = ve e; ve e'; ve e'' in !varUsed, !varDefs
+  | CpcFun (fd, _) ->
+      E.warn "usedef: shall we really dive into CpcFun?\n";
+      handle_block fd.sbody
+  | CpcSpawn (s, _) ->
+      computeDeepUseDefStmtKind ~acc_used:acc_used ~acc_defs:acc_defs
+      s.skind
+  | CpcDone _ | CpcYield _ -> !varUsed, !varDefs
 
 let computeUseLocalTypes ?(acc_used=VS.empty)
                          (fd : fundec)

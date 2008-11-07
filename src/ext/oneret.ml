@@ -46,7 +46,7 @@ module E = Errormsg
 
 let dummyVisitor = new nopCilVisitor
 
-let oneret (f: Cil.fundec) : unit = 
+let rec oneret (f: Cil.fundec) : unit = 
   let fname = f.svar.vname in
   (* Get the return type *)
   let retTyp = 
@@ -149,8 +149,19 @@ let oneret (f: Cil.fundec) : unit =
         s.skind <- Block (scanBlock false b);
         s :: scanStmts mainbody rests
     | ({skind=(Goto _ | Instr _ | Continue _ | Break _ 
-               | TryExcept _ | TryFinally _)} as s)
+               | TryExcept _ | TryFinally _
+               | CpcYield _ | CpcDone _ | CpcWait _
+               | CpcSleep _ | CpcIoWait _)} as s)
       :: rests -> s :: scanStmts mainbody rests
+    | ({skind=CpcSpawn (stmt,l)} as s) :: rests ->
+        currentLoc := l;
+        s.skind <- CpcSpawn (
+          mkStmt (Block (mkBlock (scanStmts false [stmt]))), l);
+        s :: scanStmts mainbody rests
+    | ({skind=CpcFun (fd, l)} as s) :: rests ->
+        oneret fd;
+        currentLoc := l;
+        s :: scanStmts mainbody rests
 
   and scanBlock (mainbody: bool) (b: block) = 
     { bstmts = scanStmts mainbody b.bstmts; battrs = b.battrs; }
