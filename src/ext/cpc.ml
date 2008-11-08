@@ -518,7 +518,7 @@ let rec doit (f: file) =
   | SplitInstr ({skind = Instr l} as s, i) ->
       let rec split_instr acc = function
         | [] -> raise Not_found
-        | t::q when t==i -> (List.rev acc, l)
+        | t::q as l when t==i -> (List.rev acc, l)
         | t::q -> split_instr (t::acc) q in
       let (l1,l2) = split_instr [] l in
         begin
