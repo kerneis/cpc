@@ -707,7 +707,7 @@ struct
                           | CpcSleep _ | CpcIoWait _ -> y
                           | CpcSpawn _ | CpcFun _ ->
                               Errormsg.warn "partial: blindly assuming \
-                              cpc_spawn and cpc_yield do not have live \
+                              cpc_spawn and cpc_fun do not have live \
                               labels\n";
                               y)
                     acc
