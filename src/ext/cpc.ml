@@ -68,11 +68,13 @@ class markCps = object(self)
       (* check that last_var is the first argument of args *)
     let check_var args = match c.last_var with
       | None -> true
-      | Some v ->
+      | Some v -> true (* XXX Cannot be checked at this level --- should be done
+                        * by switching variables after lambda-lifting  and
+                        * optimizations.
         match args with
         | Lval (Var v', NoOffset)::_ -> v = v'
         | [] -> false
-        | e::_ -> (*E.warn "%a should be a variable" dn_exp e;*) false
+        | e::_ -> (*E.warn "%a should be a variable" dn_exp e;*) false *)
     in match i with
     | Set _ | Asm _ -> c.last_var <- None; false
     (* Non cps call *)
