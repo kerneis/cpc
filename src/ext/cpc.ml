@@ -32,12 +32,15 @@ class replaceGotos start replace_with =
   | _ -> DoChildren
 end
 
-let copyClearStmt s file =
+let copyClearStmt s file stack =
   let res = {(mkEmptyStmt()) with skind = s.skind; labels = s.labels} in
-  let replace loc = [mkStmt (Goto (ref res, loc))] in
+  let new_goto loc = [mkStmt (Goto (ref res, loc))] in
+  if (List.exists is_label s.labels)
+  then (
+    let vis = new replaceGotos s new_goto in
+    visitCilFileSameGlobals vis file;
+    List.iter (fun s -> ignore(visitCilStmt vis s)) stack);
   s.skind <- Instr [];
-  if List.exists is_label s.labels
-  then visitCilFileSameGlobals (new replaceGotos s replace) file;
   s.labels <- [];
   res
 
@@ -62,12 +65,14 @@ let add_goto src dst =
     ]));
   dst.labels <- [Label (make_label(), dst_loc, false)]
 
-let add_goto_after src enclosing =
-  let dst = mkEmptyStmt () in
+let add_goto_after src enclosing file stack =
+  E.log "add_goto_after: enclosing is %a\n" d_stmt enclosing;
+  let dst = mkEmptyStmt() in
+  let copy = copyClearStmt enclosing file stack in
   add_goto src dst;
-  enclosing.skind <- Block (mkBlock (compactStmts [
-    mkStmt enclosing.skind;
-    dst]))
+  enclosing.skind <- Block (mkBlock ([
+    copy;
+    dst]));
 
 (*** Stolen from src/ext/partial.ml ***
 (* Sets of {c goto}-targets *)
@@ -555,6 +560,7 @@ class functionalizeGoto start file =
         val mutable stack = []
         val mutable do_return = false
         val mutable last_stmt = dummyStmt;
+        val mutable new_start = dummyStmt;
 
         method private unstack_block b =
           let return_val, return_exp =
@@ -575,7 +581,8 @@ class functionalizeGoto start file =
             [ mkStmt (Block (mkBlock(b.bstmts)));
               mkStmt (CpcFun (fd, locUnknown))]
             @ call_fun locUnknown);
-          visitCilFileSameGlobals (new replaceGotos start call_fun) file
+          assert(new_start != dummyStmt);
+          visitCilFileSameGlobals (new replaceGotos new_start call_fun) file
 
         method vstmt (s: stmt) : stmt visitAction =
           last_stmt <- s;
@@ -588,7 +595,9 @@ class functionalizeGoto start file =
           ChangeDoChildrenPost(s,
           (fun s ->
             if acc then
-              (stack <- (copyClearStmt s file) :: stack;
+              ( let copy = copyClearStmt s file stack in
+                stack <- copy :: stack;
+                if s == start then new_start <- copy;
                s)
             else s))
 
@@ -602,12 +611,13 @@ class functionalizeGoto start file =
               if acc
               then begin match (compactStmts stack), enclosing.succs with
               | [], _ -> assert false
-              | [x], _ -> (* only stacked the labeled statement, at
+              (*XXX BULLSHIT!!!!!!!
+               * | [x], _ -> (* only stacked the labeled statement, at
                            * the end of the block: substitute in place *)
                   let subst _loc = [x] in
                   acc <- false;
                   visitCilFileSameGlobals (new replaceGotos start subst) file;
-                  b
+                  b*)
               | _, []
               | {skind=Return _} :: _ , _
               | {skind=CpcDone _} :: _ , _ ->
@@ -618,7 +628,7 @@ class functionalizeGoto start file =
                    * the destination label is somehow deleted when
                    * returning from vblock. *)
                   self#unstack_block b;
-                  add_goto_after last_in_stack enclosing;
+                  add_goto_after last_in_stack enclosing file stack;
                   b
               end
               else (acc <- old_acc ; b)))
