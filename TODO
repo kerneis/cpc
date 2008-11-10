@@ -22,3 +22,5 @@ QUESTIONS
   fait pas de mal, mais est-ce vraiment utile ?
 * il faut gérer les "escaping gotos" (ceux en position cps sont
   automatiquement fonctionalisés, mais quid des autres ?)
+* copyStmt est une mauvaise idée : casse les gotos --- ou bien il faut les
+  mettre à jour, ou bien faire autrement.

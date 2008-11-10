@@ -12,6 +12,169 @@ exception FunctionalizeGoto of stmt
 
 let is_label = function Label _ -> true | _ -> false
 
+exception FoundFun of fundec
+
+(*************** Utility functions *******************************************)
+
+let fst4 (x,_,_,_) = x
+
+class replaceGotos start replace_with =
+  object(self)
+  inherit nopCilVisitor
+
+  method vstmt s = match s.skind with
+  | Goto (g, loc) when !g == start ->
+      s.skind <- (match replace_with loc with
+      | [] -> Instr []
+      | [{labels=[];skind=x}] -> x
+      | l -> Block (mkBlock l));
+      SkipChildren
+  | _ -> DoChildren
+end
+
+let copyClearStmt s file =
+  let res = {(mkEmptyStmt()) with skind = s.skind; labels = s.labels} in
+  let replace loc = [mkStmt (Goto (ref res, loc))] in
+  s.skind <- Instr [];
+  if List.exists is_label s.labels
+  then visitCilFileSameGlobals (new replaceGotos s replace) file;
+  s.labels <- [];
+  res
+
+let eliminate_switch_loop s =
+  xform_switch_stmt s ~remove_loops:true
+    (fun () -> failwith "break with no enclosing loop")
+    (fun () -> failwith "continue with no enclosing loop") (-1)
+
+let make_label =
+  let i = ref 0 in
+  fun () -> incr i; Printf.sprintf "__cpc_label_%d" !i
+
+let add_goto src dst =
+  assert (src != dummyStmt && dst != dummyStmt);
+  E.log "add goto from %a\nto %a\n" d_stmt src d_stmt dst;
+  let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
+  let src' = mkStmt src.skind in
+  src.skind <- Block (mkBlock ([
+    src';
+    mkStmt (Goto (ref dst, src_loc));
+    (*mkStmt (CpcDone locUnknown)*)
+    ]));
+  dst.labels <- [Label (make_label(), dst_loc, false)]
+
+let add_goto_after src enclosing =
+  let dst = mkEmptyStmt () in
+  add_goto src dst;
+  enclosing.skind <- Block (mkBlock (compactStmts [
+    mkStmt enclosing.skind;
+    dst]))
+
+(*** Stolen from src/ext/partial.ml ***
+(* Sets of {c goto}-targets *)
+module LabelSet =
+  Set.Make (struct
+              type t = label * stmt
+              let compare x y =
+                match (fst x), (fst y) with
+                    Label (name1, _, _), Label (name2, _, _) ->
+                      String.compare name1 name2
+                  | _, _ -> 0
+            end)
+(* Answer whether block [b] contains labels that are
+   alive.  "Live" labels are actually targets of
+   [goto]-instructions {b outside} of [b]. *)
+let live_labels b =
+  let gather_labels acc stmt =
+    List.fold_left (fun a x -> LabelSet.add (x,stmt) a) acc stmt.labels in
+  let rec visit_block stmt_fun acc blk =
+    List.fold_left
+      (fun a x ->
+        let y = stmt_fun a x in
+          match x.skind with
+              Instr _
+            | Return _ | Goto _ | Break _ | Continue _ -> y
+            | If (_expr, then_block, else_block, _loc) ->
+                visit_block
+                  stmt_fun
+                  (visit_block stmt_fun y then_block)
+                  else_block
+            | Switch (_expr, block, _stmt_list, _loc) ->
+                visit_block stmt_fun y block
+            | Loop (block, _loc, _opt_stmt1, _opt_stmt2) ->
+                visit_block stmt_fun y block
+            | Block block ->
+                visit_block stmt_fun y block
+            | TryFinally (block1, block2, _loc)
+            | TryExcept (block1, _, block2, _loc) ->
+                visit_block
+                  stmt_fun
+                  (visit_block stmt_fun y block1)
+                  block2
+            | CpcDone _ | CpcYield _ | CpcWait _
+            | CpcSleep _ | CpcIoWait _ -> y
+            | CpcSpawn (s, _) ->
+                visit_block stmt_fun y (mkBlock [s])
+            | CpcFun ({sbody = block},_) ->
+                visit_block stmt_fun y block)
+      acc
+      blk.bstmts
+  and gather_gotos acc stmt =
+    match stmt.skind with
+        Goto (stmt_ref, _loc) -> gather_labels acc !stmt_ref
+      | _ -> acc
+  and transitive_closure ini_stmt =
+    let rec iter trace acc stmt =
+      List.fold_left
+        (fun (a_trace, a_stmt) s ->
+          if List.mem s.sid a_trace then (a_trace, a_stmt)
+          else iter (s.sid :: a_trace) (s :: a_stmt) s)
+        (trace, acc) (stmt.preds @ stmt.succs) in
+      List.sort (* sorting is unnecessary, but nice *)
+        (fun a b -> a.sid - b.sid)
+        (snd (iter [] [] ini_stmt)) in
+  let block_labels = visit_block gather_labels LabelSet.empty b
+  and block_gotos = visit_block gather_gotos LabelSet.empty b
+  and all_gotos =
+    List.fold_left
+      (fun a x ->
+        match x.skind with
+            Goto (stmt_ref, _loc) -> gather_labels a !stmt_ref
+          | Block block -> visit_block gather_gotos a block
+          | _ -> a)
+      LabelSet.empty
+      (if b.bstmts = [] then []
+        else transitive_closure (List.hd b.bstmts))
+  in
+    (LabelSet.inter
+      (LabelSet.diff all_gotos block_gotos)
+      block_labels)
+*)
+
+(* return the nearest enclosing function of a statement *)
+class enclosingFunction = fun start -> object(self)
+  inherit nopCilVisitor
+
+  val mutable ef = None
+
+  method vstmt s =
+    if s == start
+    then (match ef with Some f -> raise (FoundFun f) | None -> assert false)
+    else DoChildren
+
+  method vfunc f =
+    let f' = ef in
+    ef <- Some f;
+    ChangeDoChildrenPost(f, fun f ->
+      ef <- f';f)
+end
+
+let enclosing_function start file =
+  try
+    visitCilFileSameGlobals (new enclosingFunction start) file;
+    E.log "enclosing function not found for: %a\n" d_stmt start;
+    raise Not_found
+  with FoundFun f -> f
+
 (******************** CPS Marking ********************************************)
 
 (* Context used in the markCps visitor *)
@@ -43,7 +206,7 @@ let copy_context c =
 exception AddGoto of mark_context
 
 
-class markCps = object(self)
+class markCps = fun file -> object(self)
   inherit nopCilVisitor
 
   val mutable c = fresh_context ()
@@ -186,6 +349,10 @@ class markCps = object(self)
         raise (AddGoto c)
 
     (* Control flow otherwise *)
+    | Goto (g, _)
+        when enclosing_function s file != enclosing_function !g file ->
+          E.log "live goto!\n";
+          raise (FunctionalizeGoto !g)
     | Goto _ | Break _ | Continue _ -> SkipChildren
     | If _ -> ChangeDoChildrenPost (s, fun s ->
         if c.next_stmt != dummyStmt then begin
@@ -270,7 +437,11 @@ end
 
 (********************* Lambda-lifting ****************************************)
 
-module S = Set.Make(struct type t = varinfo let compare = compare end)
+module S = Set.Make(
+  struct
+    type t = varinfo
+    let compare x y = compare x.vid y.vid
+  end)
 
 class replaceVars = fun map -> object(self)
   inherit nopCilVisitor
@@ -310,7 +481,6 @@ class lambdaLifter = object(self)
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   | CpcFun (f, _) ->
       assert(f.sformals = []);
-      assert(f.slocals = []);
       let old_fv = free_vars in
       free_vars <- S.empty;
       ChangeDoChildrenPost (s, fun s ->
@@ -345,31 +515,7 @@ class lambdaLifter = object(self)
 
 end
 
-(*************** Utility functions *******************************************)
-
-let eliminate_switch_loop s =
-  xform_switch_stmt s ~remove_loops:true
-    (fun () -> failwith "break with no enclosing loop")
-    (fun () -> failwith "continue with no enclosing loop") (-1)
-
-let make_label =
-  let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "__cpc_label_%d" !i
-
-let add_goto src dst =
-  assert (src != dummyStmt && dst != dummyStmt);
-  E.log "add goto from %a\n to %a\n" d_stmt src d_stmt dst;
-  let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
-  let src' = mkStmt src.skind in
-  src.skind <- Block (mkBlock ([
-    src';
-    mkStmt (Goto (ref dst, src_loc));
-    mkStmt (CpcDone locUnknown)
-    ]));
-  dst.labels <- [Label (make_label(), dst_loc, false)]
-
-
-(************** Functionnalize Goto ******************************************)
+(************** Functionalize Goto *******************************************)
 
 exception GotoContent of stmt list
 
@@ -377,111 +523,173 @@ let make_function_name =
   let i = ref 0 in
   fun base -> incr i; Printf.sprintf "__cpc_%s_%d" base !i
 
-class functionalizeGoto start =
+exception FoundType of typ
+
+class hasReturn = object(self)
+  inherit nopCilVisitor
+
+  method vstmt s = match s.skind with
+  | Return (Some e, _) -> raise (FoundType (typeOf e))
+  | Return (None, _) -> raise (FoundType voidType)
+  | _ -> DoChildren
+end
+
+(* return the type of the first Return in a statement *)
+let has_return s =
+  try
+    ignore(visitCilStmt (new hasReturn) s);
+    None
+  with FoundType t -> Some t
+
+class functionalizeGoto start file =
+      let enclosing_fun = enclosing_function start file in
       let Label(label,_,_) = List.find is_label start.labels in
       let fd = emptyFunction (make_function_name label) in
-
-      let fd_block first last =
-        [ first;
-          mkStmt (CpcFun (fd, locUnknown));
-          mkStmt (Instr[Call(None,Lval(Var fd.svar, NoOffset),[],locUnknown)]);
-          last ] in
+      let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
+      let ret_var = makeTempVar enclosing_fun ~name:"ret_var" ret_type in
       let () = fd.svar.vcps <- true in
       object(self)
         inherit nopCilVisitor
 
         val mutable acc = false
         val mutable stack = []
+        val mutable do_return = false
+        val mutable last_stmt = dummyStmt;
 
-        method private unstack first last =
+        method private unstack_block b =
+          let return_val, return_exp =
+            if do_return then begin
+              let ret_val = Var ret_var,NoOffset in
+              setFunctionType fd (TFun (ret_type,Some [],false,[]));
+              (Some ret_val, Some (Lval ret_val))
+            end
+            else None, None in
+          let call_fun loc = [
+            mkStmt (Instr
+              [Call(return_val,Lval(Var fd.svar, NoOffset),[],loc)]);
+            mkStmt (Return (return_exp, loc))] in
           acc <- false;
           fd.sbody <- mkBlock (List.rev stack);
           stack <- [];
-          mkStmt (Block (mkBlock (compactStmts (fd_block first last))))
-
-        method private unstack_fun f =
-          acc <- false;
-          fd.sbody <- mkBlock (List.rev stack);
-          stack <- [];
-          f.sbody.bstmts <- compactStmts
-            (fd_block
-            (mkStmt (Block (mkBlock(f.sbody.bstmts))))
-            (mkStmt (CpcDone locUnknown)));
-          f
+          b.bstmts <- compactStmts (
+            [ mkStmt (Block (mkBlock(b.bstmts)));
+              mkStmt (CpcFun (fd, locUnknown))]
+            @ call_fun locUnknown);
+          visitCilFileSameGlobals (new replaceGotos start call_fun) file
 
         method vstmt (s: stmt) : stmt visitAction =
-        if s == start then acc <- true;
-        match s.skind with
-        | Goto (g, loc) when !g == start ->
-            let s' = (mkStmt ( Instr
-              [Call(None,Lval(Var fd.svar, NoOffset),[],loc)])) in
-            if acc then begin
-              stack <- s' :: stack;
-              ChangeTo (mkEmptyStmt())
-            end else  ChangeTo s'
-        | Return _ | CpcDone _ when acc ->
-            ChangeTo(self#unstack (mkEmptyStmt ()) s)
-        | _ when acc -> ChangeDoChildrenPost(
-            (acc <- false;s),
-            (fun s -> acc <- true;
-              stack <- s :: stack;
-              mkEmptyStmt ()))
-        | Block _ -> DoChildren
-        | _ ->
-            ChangeDoChildrenPost(s, fun s ->
-            if acc
-            then self#unstack s (mkStmt (CpcDone locUnknown))
-            else s
-          )
+          last_stmt <- s;
+          if s == start then acc <- true;
+          (if acc then match has_return s with
+          | None -> ()
+          | Some r when typeSig ret_type = typeSig r ->
+              do_return <- true
+          | _ -> E.s (E.error "conflicting return types\n"));
+          ChangeDoChildrenPost(s,
+          (fun s ->
+            if acc then
+              (stack <- (copyClearStmt s file) :: stack;
+               s)
+            else s))
 
-        method vfunc (f: fundec) : fundec visitAction =
-          assert(not acc);
-          ChangeDoChildrenPost(f, fun f ->
-            if acc
-            then self#unstack_fun f
-            else f)
+        method vblock (b: block) : block visitAction =
+          let old_acc = acc in
+          let enclosing = last_stmt in
+          ChangeDoChildrenPost(
+            (acc <- false; b),
+            (fun b ->
+              last_stmt <- enclosing;
+              if acc
+              then begin match (compactStmts stack), enclosing.succs with
+              | [], _ -> assert false
+              | [x], _ -> (* only stacked the labeled statement, at
+                           * the end of the block: substitute in place *)
+                  let subst _loc = [x] in
+                  acc <- false;
+                  visitCilFileSameGlobals (new replaceGotos start subst) file;
+                  b
+              | _, []
+              | {skind=Return _} :: _ , _
+              | {skind=CpcDone _} :: _ , _ ->
+                  self#unstack_block b; b
+              | last_in_stack :: _, _ ->
+                  (* XXX this works only because we do not modify *any*
+                   * statement while visiting the file --- otherwise
+                   * the destination label is somehow deleted when
+                   * returning from vblock. *)
+                  self#unstack_block b;
+                  add_goto_after last_in_stack enclosing;
+                  b
+              end
+              else (acc <- old_acc ; b)))
 end
 
-exception Enclosing of stmt
+exception BreakContinue of stmt
+
+(*exception LiveStmt of stmt
+
+let rec choose_stmt set start =
+  try
+    let ((_,s) as x) = LabelSet.choose set in
+    if s == start
+    then choose_stmt (LabelSet.remove x set) start
+    else Some s
+  with Not_found -> None
+*)
 
 class findEnclosing = fun start -> object(self)
   inherit nopCilVisitor
 
-  val mutable enclosing = dummyStmt
+  val mutable nearest_loop = dummyStmt
   val mutable seen_start = false
+  val mutable check_loops = false
 
   method vstmt s =
-    if s == start then seen_start <- true;
+    (* check that (check_loops => seen_start) holds *)
+    assert((not check_loops) || seen_start);
+    if s == start then (seen_start <- true; check_loops <- true);
     match s.skind with
-    | Break _ | Continue _ when seen_start ->
-        raise (Enclosing enclosing)
-    | Switch _ | Loop _ when not seen_start ->
-      let e = enclosing in
+    | Break _ | Continue _ when check_loops ->
+        raise (BreakContinue nearest_loop)
+    | Switch _ | Loop _ ->
+      let e = nearest_loop in
+      let cl = check_loops in
         ChangeDoChildrenPost(
-          (enclosing <- s; s),
+          (nearest_loop <- s; check_loops <- false; s),
           (fun s ->
-            enclosing <- e;
-            seen_start <- false;
+            nearest_loop <- e;
+            check_loops <- cl;
             s))
-    | Switch _ | Loop _ -> SkipChildren
-    | _ ->
-        let seen = seen_start in
-        ChangeDoChildrenPost (s, fun s ->
-          seen_start <- seen;
-          s)
+    | _ -> DoChildren
+
+  method vblock b =
+    let seen = seen_start in
+    let cl = check_loops in
+    ChangeDoChildrenPost(b, fun b ->
+      (*let live_stmt =
+        if seen_start
+        then choose_stmt (live_labels b) start
+        else None in
+      match live_stmt with
+      | Some s -> raise (LiveStmt s)
+      | None ->*) (seen_start <- seen; check_loops <- cl; b))
 
 end
 
-let functionnalize start f =
+let rec functionalize start f =
   begin try
     visitCilFileSameGlobals (new findEnclosing start) f;
-    visitCilFileSameGlobals (new functionalizeGoto start) f
+    visitCilFileSameGlobals (new functionalizeGoto start f) f;
   with
-  | Enclosing s ->
+  | BreakContinue s ->
       assert( s != dummyStmt);
       E.log "found escaping break or continue: trivializing\n%a\n" d_stmt s;
       eliminate_switch_loop s;
       E.log "***\nresult:\n%a\n" d_stmt s;
+  (*| LiveStmt s ->
+      E.log "found a live label: functionalizing it\n%a\n" d_stmt s;
+      functionalize s f*)
+  | Not_found -> E.s (E.bug "no enclosing function found\n")
   end
 
 (*****************************************************************************)
@@ -499,12 +707,13 @@ let rec doit (f: file) =
     if r = "d" then (dumpFile defaultCilPrinter stdout "" f; doit f)
     else if r = "r" then (pause := false; doit f)
     else begin
-    visitCilFileSameGlobals (new markCps) f;
+    visitCilFileSameGlobals (new markCps f) f;
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
     (*visitCilFile (new cpsConverter) f;*)
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
+    uniqueVarNames f; (* just in case *)
     E.log "Finished!\n";
     end
   with
@@ -534,7 +743,7 @@ let rec doit (f: file) =
       E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
   | FunctionalizeGoto start ->
       E.log "functionalize goto\n";
-      functionnalize start f;
+      functionalize start f;
       doit f
   | Exit -> E.log "Exit\n";()
 
