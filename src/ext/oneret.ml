@@ -150,14 +150,10 @@ let rec oneret (f: Cil.fundec) : unit =
         s :: scanStmts mainbody rests
     | ({skind=(Goto _ | Instr _ | Continue _ | Break _ 
                | TryExcept _ | TryFinally _
-               | CpcYield _ | CpcDone _ | CpcWait _
+               | CpcYield _ | CpcDone _
+               | CpcWait _ | CpcSpawn _
                | CpcSleep _ | CpcIoWait _)} as s)
       :: rests -> s :: scanStmts mainbody rests
-    | ({skind=CpcSpawn (stmt,l)} as s) :: rests ->
-        currentLoc := l;
-        s.skind <- CpcSpawn (
-          mkStmt (Block (mkBlock (scanStmts false [stmt]))), l);
-        s :: scanStmts mainbody rests
     | ({skind=CpcFun (fd, l)} as s) :: rests ->
         oneret fd;
         currentLoc := l;

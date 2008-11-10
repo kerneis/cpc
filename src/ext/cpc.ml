@@ -298,10 +298,9 @@ class markCps = fun file -> object(self)
     (* CPC Constructs *)
     (* XXX accepted even in cps context ? XXX*)
     | CpcSpawn _ ->
-        let context = copy_context c in
-        c <- {(fresh_context ()) with cps_fun = true};
+        s.cps <- c.cps_con;
         self#set_next s;
-        ChangeDoChildrenPost (s, fun s -> c <- context; s.cps <- c.cps_con; s)
+        SkipChildren
     | CpcYield _ | CpcWait _ | CpcSleep _
     | CpcIoWait _
         when c.cps_fun -> (* beware, order matters! *)

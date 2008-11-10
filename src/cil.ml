@@ -776,7 +776,7 @@ and stmtkind =
 
   | CpcYield of location
   | CpcDone of location
-  | CpcSpawn of stmt * location
+  | CpcSpawn of exp * exp list * location
   (*| CpcFork of stmt * location*)
   | CpcWait of exp * location
   | CpcSleep of exp * (exp * exp option) option * location
@@ -1111,7 +1111,7 @@ let rec get_stmtLoc (statement : stmtkind) =
     | TryExcept (_, _, _, l) -> l
     | CpcYield l -> l
     | CpcDone l -> l
-    | CpcSpawn (_, l) -> l
+    | CpcSpawn (_, _, l) -> l
     (*| CpcFork (_, l) -> l*)
     | CpcWait (_,l) -> l
     | CpcSleep (_, _, l) -> l
@@ -3881,10 +3881,11 @@ class defaultCilPrinterClass : cilPrinter = object (self)
         self#pLineDirective l
           ++ text "cpc_done;"
 
-    | CpcSpawn (s, l) ->
+    | CpcSpawn (f, args, l) ->
         self#pLineDirective l
           ++ text "cpc_spawn "
-          ++ self#pStmt () s
+          ++ self#pInstr ()
+              (Call(None, f, args, l))
 
     (*| CpcFork (s, l) ->
         self#pLineDirective l
@@ -5331,7 +5332,6 @@ and childrenStmt (toPrepend: instr list ref) (vis:cilVisitor) (s:stmt): stmt =
   let fExp e = (visitCilExpr vis e) in
   let fBlock b = visitCilBlock vis b in
   let fInst i = visitCilInstr vis i in
-  let fStmt s = visitCilStmt vis s in
   (* Just change the statement kind *)
   let skind' = 
     match s.skind with
@@ -5390,11 +5390,12 @@ and childrenStmt (toPrepend: instr list ref) (vis:cilVisitor) (s:stmt): stmt =
           TryExcept(b', (il'', e'), h', l) 
         else s.skind
     | CpcYield _ | CpcDone _ -> s.skind
-    | CpcSpawn (stmt, l) ->
-        let s' = fStmt stmt in
+    | CpcSpawn (e, el, l) ->
+        let e' = fExp e in
+        let el' = mapNoCopy fExp el in
         assertEmptyQueue vis;
-        if s' != stmt then
-          CpcSpawn (s', l)
+        if e' != e || el' != el then
+          CpcSpawn (e', el', l)
         else s.skind
     (*| CpcFork (stmt, l) ->
         let s' = fStmt stmt in
@@ -5947,8 +5948,7 @@ let rec peepHole1 (* Process one statement and possibly replace it *)
           s.skind <- TryExcept(b, (doInstrList il, e), h, l);
       | Return _ | Goto _ | Break _ | Continue _ -> ()
       | CpcYield _ | CpcDone _ | CpcWait _
-      | CpcSleep _ | CpcIoWait _ -> ()
-      | CpcSpawn (s, _) -> peepHole1 doone [s]
+      | CpcSleep _ | CpcIoWait _ | CpcSpawn _ -> ()
       (*| CpcFork (s, _) -> peepHole1 doone [s]*)
       | CpcFun _ -> ())
     ss
@@ -5986,8 +5986,7 @@ let rec peepHole2  (* Process two statements and possibly replace them both *)
 
       | Return _ | Goto _ | Break _ | Continue _ -> ()
       | CpcYield _ | CpcDone _ | CpcWait _
-      | CpcSleep _ | CpcIoWait _ -> ()
-      | CpcSpawn (s, _) -> peepHole2 dotwo [s]
+      | CpcSleep _ | CpcIoWait _ | CpcSpawn _ -> ()
       (*| CpcFork (s, _) -> peepHole2 dotwo [s]*)
       | CpcFun _ -> ())
     ss

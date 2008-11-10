@@ -6282,12 +6282,18 @@ and doStatement (s : A.statement) : chunk =
         s2c (mkStmt (CpcDone loc'))
      | CPC_SPAWN (s, loc) ->
         let loc' = convLoc loc in
-        let mkSpawn s = s2c (mkStmt (CpcSpawn (s, loc'))) in
+        let mkSpawn f args = mkStmt (CpcSpawn (f, args, loc')) in
         currentLoc := loc';
         begin match compactStmts (pushPostIns (doStatement s)) with
         | [] -> skipChunk
-        | [s'] -> mkSpawn s'
-        | l -> mkSpawn (mkStmt (Block (mkBlock l)))
+        | [{skind=Instr[Call(None,f,args,_)]}] -> s2c (mkSpawn f args)
+        | body ->
+          let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
+          let f = {(emptyFunction name) with sbody = mkBlock body} in
+          s2c (mkStmt (Block (mkBlock [
+          mkStmt(CpcFun(f, loc'));
+          mkSpawn (Lval (Var f.svar,NoOffset)) []
+          ])))
         end
      (*| CPC_FORK (s, loc) ->
         let loc' = convLoc loc in

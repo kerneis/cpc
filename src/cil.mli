@@ -990,7 +990,7 @@ and stmtkind =
 
   | CpcYield of location
   | CpcDone of location
-  | CpcSpawn of stmt * location
+  | CpcSpawn of exp * exp list * location
   (*| CpcFork of stmt * location*)
   | CpcWait of exp * location
   | CpcSleep of exp * (exp * exp option) option * location

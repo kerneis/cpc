@@ -204,8 +204,10 @@ let computeUseDefStmtKind ?(acc_used=VS.empty)
     | CpcIoWait (e, e', Some e'', _)
     | CpcSleep (e, Some(e',Some e''), _) ->
         ve e; ve e'; ve e''
+    | CpcSpawn (e, el, _) ->
+        ve e;
+        List.iter ve el
     | CpcFun (_, _)
-    | CpcSpawn (_, _)
     | CpcDone _
     | CpcYield _ -> ()
   in
@@ -256,12 +258,13 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
   | CpcIoWait (e, e', Some e'', _)
   | CpcSleep (e, Some(e',Some e''), _) ->
       let _ = ve e; ve e'; ve e'' in !varUsed, !varDefs
+  | CpcSpawn (e, el, _) ->
+      ve e;
+      List.iter ve el;
+      !varUsed, !varDefs
   | CpcFun (fd, _) ->
       E.warn "usedef: shall we really dive into CpcFun?\n";
       handle_block fd.sbody
-  | CpcSpawn (s, _) ->
-      computeDeepUseDefStmtKind ~acc_used:acc_used ~acc_defs:acc_defs
-      s.skind
   | CpcDone _ | CpcYield _ -> !varUsed, !varDefs
 
 let computeUseLocalTypes ?(acc_used=VS.empty)

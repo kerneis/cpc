@@ -775,7 +775,8 @@ and checkStmt (s: stmt) =
 
       | Instr il -> List.iter checkInstr il
       | CpcYield _ | CpcDone _ -> ()
-      | CpcSpawn (s, _) (*| CpcFork (s, _)*) -> checkStmt s
+      | CpcSpawn (e, el, l) (*| CpcFork (s, _)*) ->
+          checkInstr(Call(None,e,el,l))
       | CpcWait (e, _) -> ignore(checkExp false e)
                           (* do not check the type of condition variables *)
       | CpcSleep (e, None, _) -> checkExpType false e intType

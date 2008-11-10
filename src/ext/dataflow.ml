@@ -224,7 +224,7 @@ module ForwardsDataFlow =
             | TryExcept _ | TryFinally _ 
             | Switch _ | Loop _ | Return _ | Block _ -> curr
             |CpcFun (_, _)|CpcIoWait (_, _, _, _)|CpcSleep (_, _, _)
-            |CpcWait (_, _)|CpcSpawn (_, _)|CpcDone _|CpcYield _ ->
+            |CpcWait (_, _)|CpcSpawn (_, _, _)|CpcDone _|CpcYield _ ->
               (E.warn "dataflow: bindly modified code!\n";
               curr)
           in

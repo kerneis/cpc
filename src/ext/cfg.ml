@@ -124,10 +124,10 @@ and fasStmt (todo) (s : stmt) =
       | If (_, tb, fb, _) -> (fasBlock todo tb; fasBlock todo fb)
       | Switch (_, b, _, _) -> fasBlock todo b
       | Loop (b, _, _, _) -> fasBlock todo b
-      | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _
+      | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ 
+      | CpcIoWait _ | CpcSpawn _
       | (Return _ | Break _ | Continue _ | Goto _ | Instr _) -> ()
       | TryExcept _ | TryFinally _ -> E.s (E.unimp "try/except/finally")
-      | CpcSpawn (s, _) -> fasStmt todo s
       | CpcFun (fd, _) -> forallStmts todo fd
   end
 ;;
@@ -322,12 +322,9 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option) 
          any direct successor to stmt following the loop *)
   | TryExcept _ | TryFinally _ -> 
       E.s (E.unimp "try/except/finally")
-  | CpcYield _ | CpcWait _ | CpcSleep _ | CpcIoWait _ ->
+  | CpcYield _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcSpawn _ ->
       addOptionSucc next
   | CpcDone _ -> ()
-  | CpcSpawn (stmt, _) ->
-      addOptionSucc next;
-      cfgStmt stmt None None None
   | CpcFun (fd, _) ->
       (* Do not recurse into CpcFun --- this is done later *)
       addOptionSucc next;
