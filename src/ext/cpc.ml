@@ -32,6 +32,8 @@ class replaceGotos start replace_with =
   | _ -> DoChildren
 end
 
+(* Return a copy of statement, clear the initial one and update gotos
+accordingly *)
 let copyClearStmt s file stack =
   let res = {(mkEmptyStmt()) with skind = s.skind; labels = s.labels} in
   let new_goto loc = [mkStmt (Goto (ref res, loc))] in
@@ -44,6 +46,8 @@ let copyClearStmt s file stack =
   s.labels <- [];
   res
 
+(* FIXME: every loop/switch is removed, although only the first one
+would be necessary *)
 let eliminate_switch_loop s =
   xform_switch_stmt s ~remove_loops:true
     (fun () -> failwith "break with no enclosing loop")
@@ -548,7 +552,8 @@ let has_return s =
 
 class functionalizeGoto start file =
       let enclosing_fun = enclosing_function start file in
-      let Label(label,_,_) = List.find is_label start.labels in
+      let label = match List.find is_label start.labels with
+        | Label(l,_,_) -> l | _ -> assert false in
       let fd = emptyFunction (make_function_name label) in
       let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
       let ret_var = makeTempVar enclosing_fun ~name:"ret_var" ret_type in
@@ -556,11 +561,14 @@ class functionalizeGoto start file =
       object(self)
         inherit nopCilVisitor
 
-        val mutable acc = false
+        val mutable acc = false (* are we in an accumulating phase?*)
         val mutable stack = []
-        val mutable do_return = false
-        val mutable last_stmt = dummyStmt;
-        val mutable new_start = dummyStmt;
+        val mutable do_return = false (* does the stack contain return
+        statements *)
+        val mutable last_stmt = dummyStmt; (* last stmt processed -- the
+        final goto must be added there when we're done accumulating *)
+        val mutable new_start = dummyStmt; (* copy of start in the stack
+        -- probably useless, should be equal to last stmt in stack *)
 
         method private unstack_block b =
           let return_val, return_exp =
@@ -582,6 +590,7 @@ class functionalizeGoto start file =
               mkStmt (CpcFun (fd, locUnknown))]
             @ call_fun locUnknown);
           assert(new_start != dummyStmt);
+          assert(new_start == List.hd fd.sbody.bstmts);
           visitCilFileSameGlobals (new replaceGotos new_start call_fun) file
 
         method vstmt (s: stmt) : stmt visitAction =
@@ -647,6 +656,9 @@ let rec choose_stmt set start =
   with Not_found -> None
 *)
 
+(* Look for break/continue in statements to be functionalized ---
+XXX code must be kept in sync with functionalizeGotos !!! ---
+and return the nearest enclosing loop/switch statement *)
 class findEnclosing = fun start -> object(self)
   inherit nopCilVisitor
 
