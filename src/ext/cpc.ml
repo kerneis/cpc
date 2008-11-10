@@ -466,8 +466,8 @@ class insertArgs = fun map -> object(self)
   method vinst = function
     | Call(lval, Lval ((Var f, NoOffset) as l), args, loc)
         when List.mem_assoc f map ->
-          let args' = List.assoc f map in
-          assert(args = []);
+          let args' = args @ (List.assoc f map) in
+          (*assert(args = []); no more true*)
           E.log "inserting in %a\n" d_lval l;
           ChangeTo([Call(lval, Lval(Var f, NoOffset), args', loc)])
     | _ -> SkipChildren
@@ -488,11 +488,12 @@ class lambdaLifter = object(self)
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   | CpcFun (f, _) ->
-      assert(f.sformals = []);
+      (*assert(f.sformals = []); no more true*)
+      let args = List.fold_left (fun s x -> S.add x s) S.empty f.sformals in
       let old_fv = free_vars in
       free_vars <- S.empty;
       ChangeDoChildrenPost (s, fun s ->
-        let f_fv = S.elements free_vars in
+        let f_fv = S.elements (S.diff free_vars args) in
         let f_formals = List.map (fun v -> copyVarinfo v v.vname) f_fv in
         let f_args = List.map (fun v -> Lval(Var v, NoOffset)) f_fv in
         let map = List.combine f_fv f_formals in
