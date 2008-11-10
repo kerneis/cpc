@@ -621,8 +621,9 @@ class functionalizeGoto start file =
             (fun b ->
               last_stmt <- enclosing;
               if acc
-              then begin match (compactStmts stack), enclosing.succs with
-              | [], _ -> assert false
+              then begin match (compactStmts stack), enclosing.succs,
+              enclosing.skind with
+              | [], _, _ -> assert false
               (*XXX BULLSHIT!!!!!!!
                * | [x], _ -> (* only stacked the labeled statement, at
                            * the end of the block: substitute in place *)
@@ -630,11 +631,12 @@ class functionalizeGoto start file =
                   acc <- false;
                   visitCilFileSameGlobals (new replaceGotos start subst) file;
                   b*)
-              | _, []
-              | {skind=Return _} :: _ , _
-              | {skind=CpcDone _} :: _ , _ ->
+              | _, [], _
+              | _, _, CpcFun _
+              | {skind=Return _} :: _ , _, _
+              | {skind=CpcDone _} :: _ , _, _ ->
                   self#unstack_block b; b
-              | last_in_stack :: _, _ ->
+              | last_in_stack :: _, _, _ ->
                   (* XXX this works only because we do not modify *any*
                    * statement while visiting the file --- otherwise
                    * the destination label is somehow deleted when
