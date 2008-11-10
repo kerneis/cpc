@@ -556,7 +556,10 @@ class functionalizeGoto start file =
         | Label(l,_,_) -> l | _ -> assert false in
       let fd = emptyFunction (make_function_name label) in
       let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
-      let ret_var = makeTempVar enclosing_fun ~name:"ret_var" ret_type in
+      let ret_var =
+        if typeSig ret_type = typeSig voidType
+        then None
+        else Some (makeTempVar enclosing_fun ~name:"ret_var" ret_type) in
       let () = fd.svar.vcps <- true in
       object(self)
         inherit nopCilVisitor
@@ -572,12 +575,13 @@ class functionalizeGoto start file =
 
         method private unstack_block b =
           let return_val, return_exp =
-            if do_return then begin
+            begin match ret_var with
+              | Some ret_var when do_return ->
               let ret_val = Var ret_var,NoOffset in
               setFunctionType fd (TFun (ret_type,Some [],false,[]));
               (Some ret_val, Some (Lval ret_val))
-            end
-            else None, None in
+              | _ -> None, None
+            end in
           let call_fun loc = [
             mkStmt (Instr
               [Call(return_val,Lval(Var fd.svar, NoOffset),[],loc)]);
@@ -718,7 +722,7 @@ let rec functionalize start f =
 
 let init () = lineDirectiveStyle := None
 
-let pause = ref true
+let pause = ref false
 
 let rec doit (f: file) =
   try
