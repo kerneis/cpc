@@ -6289,7 +6289,9 @@ and doStatement (s : A.statement) : chunk =
         | [{skind=Instr[Call(None,f,args,_)]}] -> s2c (mkSpawn f args)
         | body ->
           let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
-          let f = {(emptyFunction name) with sbody = mkBlock body} in
+          let f = {(emptyFunction name) with
+            sbody = mkBlock (body@[mkStmt (Return (None,locUnknown))])} in
+          f.svar.vcps <- true;
           s2c (mkStmt (Block (mkBlock [
           mkStmt(CpcFun(f, loc'));
           mkSpawn (Lval (Var f.svar,NoOffset)) []
