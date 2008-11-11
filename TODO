@@ -20,13 +20,3 @@
   => probably yes, just like if, switch, etc.
 [src/frontc/cabs2cil.ml]
 * check transformation of CPC_FUN (scoping, globals, etc.)
-
-QUESTIONS
-=========
-* cpc_spawn, c'est pas clair du tout à quel niveau le gérer
-* quand je fonctionalise, j'ajoute de cpc_done à tout bout de champ, ça ne
-  fait pas de mal, mais est-ce vraiment utile ?
-* il faut gérer les "escaping gotos" (ceux en position cps sont
-  automatiquement fonctionalisés, mais quid des autres ?)
-* copyStmt est une mauvaise idée : casse les gotos --- ou bien il faut les
-  mettre à jour, ou bien faire autrement.
