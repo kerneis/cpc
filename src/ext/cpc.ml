@@ -324,7 +324,10 @@ class markCps = fun file -> object(self)
     else if c.cps_con && (List.exists is_label s.labels) then
       (E.log "label in cps context! ";
       raise (FunctionalizeGoto s))
-    else let lv = c.last_var in match s.skind with
+    else begin
+      if c.cps_con then assert(s.labels = []); (* no Case or Default in cps
+                                                * context *)
+      let lv = c.last_var in match s.skind with
 
     (* Instructions and return *)
     (* Must be first, to catch last_var if necessary *)
@@ -428,6 +431,8 @@ class markCps = fun file -> object(self)
 
     | TryFinally _ | TryExcept _ ->
         E.s (E.unimp "try/except/finally not supported by CPC")
+
+    end
 
   method vfunc (f:fundec) : fundec visitAction =
     Cfg.clearCFGinfo f;
@@ -641,7 +646,9 @@ class functionalizeGoto start file =
             @ call_fun locUnknown);
           assert(new_start != dummyStmt);
           assert(new_start == List.hd fd.sbody.bstmts);
-          visitCilFileSameGlobals (new replaceGotos new_start call_fun) file
+          assert(List.for_all is_label new_start.labels); (*No Case or Default*)
+          visitCilFileSameGlobals (new replaceGotos new_start call_fun) file;
+          new_start.labels <- []
 
         method vstmt (s: stmt) : stmt visitAction =
           last_stmt <- s;
@@ -671,13 +678,6 @@ class functionalizeGoto start file =
               then begin match (compactStmts stack), enclosing.succs,
               enclosing.skind with
               | [], _, _ -> assert false
-              (*XXX BULLSHIT!!!!!!!
-               * | [x], _ -> (* only stacked the labeled statement, at
-                           * the end of the block: substitute in place *)
-                  let subst _loc = [x] in
-                  acc <- false;
-                  visitCilFileSameGlobals (new replaceGotos start subst) file;
-                  b*)
               | _, [], _
               | _, _, CpcFun _
               | {skind=Return _} :: _ , _, _
