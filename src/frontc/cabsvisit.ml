@@ -488,6 +488,9 @@ and childrenStatement vis s =
       let e3' = ve e3 in
       if e1' != e1 || e2' != e2 || e3' != e3 then CPC_IO_WAIT (e1', e2', e3', l)
       else s
+  | CPC_FUN d -> match visitCabsDefinition vis d with
+      | [FUNDEF _ as fd] -> if fd != d then CPC_FUN fd else s
+      | _ -> assert false
           
 and visitCabsExpression vis (e: expression) : expression = 
   doVisit vis vis#vexpr childrenExpression e

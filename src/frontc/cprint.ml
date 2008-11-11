@@ -762,6 +762,7 @@ and print_statement stat =
         print_expression exp3;
       end;
       print ");"; new_line ()
+  | CPC_FUN d -> print_def d
       
 and print_block blk = 
   new_line();

@@ -297,6 +297,7 @@ let transformOffsetOf (speclist, dtype) member =
 /* %token<Cabs.cabsloc> CPC_FORK */
 %token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_SPAWN
 %token<Cabs.cabsloc> CPC_WAIT CPC_SLEEP CPC_IO_WAIT
+%token<Cabs.cabsloc> CPC_FUN
 
 %token<Cabs.cabsloc> ATTRIBUTE INLINE ASM TYPEOF FUNCTION__ PRETTY_FUNCTION__
 %token LABEL__
@@ -938,6 +939,7 @@ statement:
 |   CPC_IO_WAIT LPAREN expression COMMA expression COMMA expression RPAREN SEMICOLON
                         { CPC_IO_WAIT(fst $3, fst $5, fst $7, (*handleLoc*) $1) }
 
+|   function_def        { CPC_FUN $1 }
 |   error location   SEMICOLON   { (NOP $2)}
 ;
 

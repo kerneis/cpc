@@ -235,6 +235,7 @@ and statement =
  | CPC_WAIT of expression * cabsloc
  | CPC_SLEEP of expression * expression * expression * cabsloc
  | CPC_IO_WAIT of expression * expression * expression * cabsloc
+ | CPC_FUN of definition
  
 and for_clause = 
    FC_EXP of expression

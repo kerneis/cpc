@@ -60,6 +60,12 @@ let debugGlobal = false
 
 let continueOnError = true
 
+let copy_into h h' =
+  H.clear h';
+  (* we have to create a list because we get the bindings in reverse order *)
+  let items = H.fold (fun k x l -> (k,x)::l) h [] in
+  List.iter (fun (x,k) -> H.add h' x k) items
+
 (** Turn on tranformation that forces correct parameter evaluation order *)
 let forceRLArgEval = ref false
 
@@ -5392,10 +5398,23 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
        doDecl isglobal (A.DECDEF ((specs, [((n,dt,a,loc'), A.NO_INIT)]), loc))
 
   | A.FUNDEF (((specs,(n,dt,a, _)) : A.single_name),
-              (body : A.block), loc1, loc2) when isglobal ->
+              (body : A.block), loc1, loc2) when isglobal || isCps specs ->
     begin
       let funloc = convLoc loc1 in
       let endloc = convLoc loc2 in
+      (* save global vars to restore them later if dealing with an intern cps
+       * function *)
+      let fdec = !currentFunctionFDEC in
+      let exprid = !constrExprId in
+      let unionargs = !transparentUnionArgs in
+      let returntype = !currentReturnType in
+      let targetdata = !gotoTargetData in
+      let targetnextaddr = !gotoTargetNextAddr in
+      let tempvars = IH.copy callTempVars in
+      let sizearrays = IH.copy varSizeArrays in
+      (*let oldenv = H.copy env in
+      let oldgenv = H.copy genv in*)
+      let targethash = H.copy gotoTargetHash in
 (*      ignore (E.log "Definition of %s at %a\n" n d_loc funloc); *)
       currentLoc := funloc;
       E.withContext
@@ -5823,13 +5842,46 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
             
             (* ignore (E.log "The env after finishing the body of %s:\n%t\n"
                         n docEnv); *)
-            cabsPushGlobal (GFun (!currentFunctionFDEC, funloc));
-            empty
+            if isglobal then begin
+              cabsPushGlobal (GFun (!currentFunctionFDEC, funloc));
+              empty
+            end else begin
+              let res = s2c (mkStmt (CpcFun (!currentFunctionFDEC, funloc))) in
+              currentFunctionFDEC := fdec;
+              constrExprId := exprid;
+              transparentUnionArgs := unionargs;
+              currentReturnType := returntype;
+              gotoTargetData := targetdata;
+              gotoTargetNextAddr := targetnextaddr;
+              IH.copy_into tempvars callTempVars;
+              IH.copy_into sizearrays varSizeArrays;
+              (*copy_into oldenv env;
+              copy_into oldgenv genv;*)
+              copy_into targethash gotoTargetHash;
+              res
+            end
           with e when continueOnError -> begin
             ignore (E.log "error in collectFunction %s: %s\n"
                       n (Printexc.to_string e));
-            cabsPushGlobal (GAsm("error in function " ^ n, !currentLoc));
-            empty
+            if isglobal then begin
+              cabsPushGlobal (GAsm("error in function " ^ n, !currentLoc));
+              empty
+            end else begin
+              let res = s2c (mkStmt (Instr [Asm ([], ["error in function " ^ n],
+                [],[],[],!currentLoc)])) in
+              currentFunctionFDEC := fdec;
+              constrExprId := exprid;
+              transparentUnionArgs := unionargs;
+              currentReturnType := returntype;
+              gotoTargetData := targetdata;
+              gotoTargetNextAddr := targetnextaddr;
+              IH.copy_into tempvars callTempVars;
+              IH.copy_into sizearrays varSizeArrays;
+              (*copy_into oldenv env;
+              copy_into oldgenv genv;*)
+              copy_into targethash gotoTargetHash;
+              res
+            end
           end)
         () (* argument of E.withContext *)
     end (* FUNDEF *)
@@ -6337,6 +6389,7 @@ and doStatement (s : A.statement) : chunk =
         let (_, e2', _) = doExp false e2 (AExp None) in
         let (_, e3', _) = doExp false e3 (AExp None) in
         s2c (mkStmt (CpcIoWait (e1', e2', Some e3', loc')))
+     | CPC_FUN d -> doDecl false d
 
 
   with e when continueOnError -> begin

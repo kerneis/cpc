@@ -41,6 +41,11 @@ let rec isInline = function
   | SpecInline :: _ -> true
   | _ :: rest -> isInline rest
 
+let rec isCps = function
+    [] -> false
+  | SpecCPS :: _ -> true
+  | _ :: rest -> isCps rest
+
 let rec isTypedef = function
     [] -> false
   | SpecTypedef :: _ -> true
@@ -92,6 +97,7 @@ begin
   | CPC_WAIT (_,loc) -> loc
   | CPC_SLEEP (_,_,_,loc) -> loc
   | CPC_IO_WAIT (_,_,_,loc) -> loc
+  | CPC_FUN d -> get_definitionloc d
 end
 
 
