@@ -13,6 +13,7 @@ exception FunctionalizeGoto of stmt
 let is_label = function Label _ -> true | _ -> false
 
 exception FoundFun of fundec
+exception FoundVar of varinfo
 
 (*************** Utility functions *******************************************)
 
@@ -76,7 +77,7 @@ let add_goto_after src enclosing file stack =
   add_goto src dst;
   enclosing.skind <- Block (mkBlock ([
     copy;
-    dst]));
+    dst]))
 
 (*** Stolen from src/ext/partial.ml ***
 (* Sets of {c goto}-targets *)
@@ -159,6 +160,38 @@ let live_labels b =
       block_labels)
 *)
 
+(* return the cps var just before a statement *)
+let rec find_var = function
+  | [Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), _, _)]
+      when f.vcps ->
+        FoundVar v
+  | [] | [_] -> Not_found
+  | hd::tl -> find_var tl
+
+class lastVar = fun start -> object(self)
+  inherit nopCilVisitor
+
+  method vstmt s = match s.skind, s.succs with
+  | Goto(g, _), [succ] when !g == start && !g == succ -> begin
+      match s.preds with
+      | [{skind=Instr l} as p] when p.cps ->
+          raise (find_var l)
+      | _ -> raise Not_found
+  end
+  | _ -> DoChildren
+
+end
+
+let last_var start file =
+  try
+    visitCilFileSameGlobals (new lastVar start) file;
+    None
+  with
+  | FoundVar v ->
+      E.log "found last_var %a\n" d_lval (Var v, NoOffset);
+      Some v
+  | Not_found -> None
+
 (* return the nearest enclosing function of a statement *)
 class enclosingFunction = fun start -> object(self)
   inherit nopCilVisitor
@@ -240,13 +273,11 @@ class markCps = fun file -> object(self)
       (* check that last_var is the first argument of args *)
     let check_var args = match c.last_var with
       | None -> true
-      | Some v -> true (* XXX Cannot be checked at this level --- should be done
-                        * by switching variables after lambda-lifting  and
-                        * optimizations.
+      | Some v ->
         match args with
         | Lval (Var v', NoOffset)::_ -> v = v'
         | [] -> false
-        | e::_ -> (*E.warn "%a should be a variable" dn_exp e;*) false *)
+        | e::_ -> E.warn "%a should be a variable" dn_exp e; false
     in match i with
     | Set _ | Asm _ -> c.last_var <- None; false
     (* Non cps call *)
@@ -260,7 +291,7 @@ class markCps = fun file -> object(self)
     | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
         check_var args && (c.last_var <- Some v; true)
     | Call (Some l, Lval (Var f, NoOffset), _, _) ->
-        (*E.warn "%a should be a variable" dn_lval l;*) c.last_var <- None; false
+        E.warn "%a should be a variable" dn_lval l; c.last_var <- None; false
     (* Weird call *)
     | Call _ ->
         E.warn
@@ -293,44 +324,21 @@ class markCps = fun file -> object(self)
     else if c.cps_con && (List.exists is_label s.labels) then
       (E.log "label in cps context! ";
       raise (FunctionalizeGoto s))
-    else match s.skind with
-
-    (* CPC Constructs *)
-    (* XXX accepted even in cps context ? XXX*)
-    | CpcSpawn _ ->
-        s.cps <- c.cps_con;
-        self#set_next s;
-        SkipChildren
-    | CpcYield _ | CpcWait _ | CpcSleep _
-    | CpcIoWait _
-        when c.cps_fun -> (* beware, order matters! *)
-          c.cps_con <- true; (* must be set first *)
-          s.cps <- true;
-          self#set_next s;
-          SkipChildren
-    | CpcDone _ when c.cps_fun ->
-        (* just like a Return *)
-        s.cps <- true;
-        c.cps_con <- false;
-        c.last_stmt <- dummyStmt;
-        c.next_stmt <- dummyStmt;
-        SkipChildren
-    | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _
-    | CpcIoWait _ ->
-        E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
-    | CpcFun _ ->
-        ChangeDoChildrenPost
-          (s, fun s -> s.cps <- c.cps_con; self#set_next ~set_last:false s; s)
+    else let lv = c.last_var in match s.skind with
 
     (* Instructions and return *)
+    (* Must be first, to catch last_var if necessary *)
     | Instr [] ->
         self#set_next ~set_last:false s;
         s.cps <- c.cps_con;
         SkipChildren
     | Instr (hd::_) when c.cps_con && not(self#is_cps hd) ->
-        E.log "not cps instruction in cps context\n";
+        E.log "not cps instruction in cps context: %a\n" d_instr hd;
         raise (AddGoto c)
     | Instr _ ->
+        (* if in cps_context, c.last_var has been updated by the former
+         * pattern-matching, so we must restore it *)
+        if c.cps_con then c.last_var <- lv;
         c.last_stmt <- s;
         ChangeDoChildrenPost (s, fun s ->
           self#set_next s;
@@ -346,6 +354,13 @@ class markCps = fun file -> object(self)
           c.next_stmt <- dummyStmt;
         end;
         SkipChildren
+    | CpcDone _ when c.cps_fun ->
+        (* just like a Return *)
+        s.cps <- true;
+        c.cps_con <- false;
+        c.last_stmt <- dummyStmt;
+        c.next_stmt <- dummyStmt;
+        SkipChildren
 
     (* Control flow in cps context *)
     | Goto (g, _) when c.cps_con ->
@@ -354,6 +369,9 @@ class markCps = fun file -> object(self)
         raise (TrivializeStmt c.enclosing_stmt);
     | If _ | Switch _ | Loop _ when c.cps_con ->
         E.log "control flow in cps context\n";
+        raise (AddGoto c)
+    | _ when c.last_var != None ->
+        E.log "return variable ignored in cps context\n";
         raise (AddGoto c)
 
     (* Control flow otherwise *)
@@ -382,6 +400,25 @@ class markCps = fun file -> object(self)
             assert(c.next_stmt == s);
             raise (TrivializeStmt s) end
           else s)
+
+    (* CPC Constructs *)
+    | CpcSpawn _ ->
+        s.cps <- c.cps_con;
+        self#set_next s;
+        SkipChildren
+    | CpcYield _ | CpcWait _ | CpcSleep _
+    | CpcIoWait _
+        when c.cps_fun -> (* beware, order matters! *)
+          c.cps_con <- true; (* must be set first *)
+          s.cps <- true;
+          self#set_next s;
+          SkipChildren
+    | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _
+    | CpcIoWait _ ->
+        E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
+    | CpcFun _ ->
+        ChangeDoChildrenPost
+          (s, fun s -> s.cps <- c.cps_con; self#set_next ~set_last:false s; s)
 
     (* Blocks *)
     | Block _ ->
@@ -455,9 +492,10 @@ class replaceVars = fun map -> object(self)
   inherit nopCilVisitor
 
   method vvrbl (v:varinfo) : varinfo visitAction =
-    if not (v.vglob || isFunctionType v.vtype)
-    then ChangeTo(List.assoc v map)
-    else SkipChildren
+    try
+      ChangeTo(List.assoc v map)
+    with
+      Not_found -> SkipChildren
 end
 
 class insertArgs = fun map -> object(self)
@@ -497,7 +535,7 @@ class lambdaLifter = object(self)
         let f_formals = List.map (fun v -> copyVarinfo v v.vname) f_fv in
         let f_args = List.map (fun v -> Lval(Var v, NoOffset)) f_fv in
         let map = List.combine f_fv f_formals in
-        setFormals f f_formals;
+        setFormals f (f.sformals@f_formals);
         f.sbody <- visitCilBlock (new replaceVars map) f.sbody;
         (* FIXME Ensure name uniqueness *)
         local_funs <- GFun(f,locUnknown) :: local_funs;
@@ -552,6 +590,7 @@ let has_return s =
 
 class functionalizeGoto start file =
       let enclosing_fun = enclosing_function start file in
+      let last_var = last_var start file in
       let label = match List.find is_label start.labels with
         | Label(l,_,_) -> l | _ -> assert false in
       let fd = emptyFunction (make_function_name label) in
@@ -582,12 +621,19 @@ class functionalizeGoto start file =
               (Some ret_val, Some (Lval ret_val))
               | _ -> None, None
             end in
+          let args, map = match last_var with
+          | None -> [], []
+          | Some v ->
+              let v' = copyVarinfo v v.vname in
+              setFormals fd [v'];
+              [Lval(Var v, NoOffset)], [(v, v')] in
           let call_fun loc = [
             mkStmt (Instr
-              [Call(return_val,Lval(Var fd.svar, NoOffset),[],loc)]);
+              [Call(return_val,Lval(Var fd.svar, NoOffset),args,loc)]);
             mkStmt (Return (return_exp, loc))] in
           acc <- false;
-          fd.sbody <- mkBlock (List.rev stack);
+          fd.sbody <-
+            visitCilBlock (new replaceVars map) (mkBlock (List.rev stack));
           stack <- [];
           b.bstmts <- compactStmts (
             [ mkStmt (Block (mkBlock(b.bstmts)));

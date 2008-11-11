@@ -18,6 +18,8 @@
 * CpcConstructs do not contain instructions, but they contain
   expressions, should we ignore them too?
   => probably yes, just like if, switch, etc.
+[src/frontc/cabs2cil.ml]
+* check transformation of CPC_FUN (scoping, globals, etc.)
 
 QUESTIONS
 =========
