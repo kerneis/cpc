@@ -330,7 +330,7 @@ class markCps = fun file -> object(self)
         SkipChildren
     | CpcYield _ | CpcWait _ | CpcSleep _
     | CpcIoWait _
-        when c.cps_fun -> (* beware, order matters! *)
+        when c.cps_fun -> (* Beware, order matters! *)
           c.cps_con <- true; (* must be set first *)
           s.cps <- true;
           self#set_next s;
@@ -338,7 +338,7 @@ class markCps = fun file -> object(self)
     | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _
     | CpcIoWait _ ->
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
-    | CpcFun _ ->
+    | CpcFun _ -> (* saving and restoring context is done in vfunc *)
         ChangeDoChildrenPost
           (s, fun s -> s.cps <- c.cps_con; self#set_next ~set_last:false s; s)
 
@@ -412,76 +412,146 @@ module S = Set.Make(
     let compare x y = compare x.vid y.vid
   end)
 
-class replaceVars = fun map -> object(self)
-  inherit nopCilVisitor
+module H = Hashtbl
 
-  method vvrbl (v:varinfo) : varinfo visitAction =
-    try
-      ChangeTo(List.assoc v map)
+let h = H.create 32
+
+let get_map fd =
+  try H.find h fd with Not_found -> []
+
+let extend_map fd map =
+  let l = get_map fd in
+  (* we shall not overwrite any previous binding *)
+  assert(List.for_all (fun (x,_) -> not (List.mem_assq x l)) map);
+  H.replace h fd (map @ l)
+
+let replace_vars fd map =
+  let visitor = object(self)
+    inherit nopCilVisitor
+
+    val mutable current_map = map
+
+    method vvrbl (v:varinfo) : varinfo visitAction =
+      try
+        ChangeTo(
+          let r = List.assoc v current_map in
+          E.log "%s(%d)->%s(%d)\n" v.vname v.vid r.vname r.vid;
+          r)
     with
-      Not_found -> SkipChildren
-end
+    Not_found -> SkipChildren
 
-class insertArgs = fun map -> object(self)
-  inherit nopCilVisitor
+    method vstmt s = match s.skind with
+    | CpcFun(fd, _) ->
+        let m = current_map in
+        current_map <- (get_map fd)@m;
+        ChangeDoChildrenPost(s, fun s ->
+          current_map <- m; s)
+    | _ -> DoChildren
+  end in
+  extend_map fd map;
+  fd.sbody <- visitCilBlock visitor fd.sbody
 
-  method vinst = function
-    | Call(lval, Lval ((Var f, NoOffset) as l), args, loc)
-        when List.mem_assoc f map ->
-          let args' = args @ (List.assoc f map) in
-          (*assert(args = []); no more true*)
-          E.log "inserting in %a\n" d_lval l;
-          ChangeTo([Call(lval, Lval(Var f, NoOffset), args', loc)])
-    | _ -> SkipChildren
-end
+(* return a list of local cps functions in a function *)
+let collect_local_fun fd =
+  let fun_list = ref [] in
+  let collector = object(self)
+    inherit nopCilVisitor
+
+    method vstmt s = match s.skind with
+    | CpcFun (fd, _) ->
+        fun_list := fd :: !fun_list;
+        DoChildren
+    | _ -> DoChildren
+  end in
+  ignore(visitCilFunction collector fd);
+  !fun_list
+
+(* remove local functions *)
+let remove_local_fun fd =
+  visitCilFunction (object(self)
+    inherit nopCilVisitor
+
+    method vstmt s = match s.skind with
+    | CpcFun (fd, _) ->
+        ChangeTo(mkEmptyStmt())
+    | _ -> DoChildren
+  end) fd
+
+(* return a set of free variables in a function *)
+let free_vars fd =
+  let args = List.fold_left (fun s x -> S.add x s) S.empty fd.sformals in
+  let bounded = List.fold_left (fun s x -> S.add x s) args fd.slocals in
+  let vars = ref S.empty in
+  let collector = object(self)
+    inherit nopCilVisitor
+
+    method vvrbl v =
+      if not (v.vglob || isFunctionType v.vtype)
+      then vars := S.add v !vars;
+      SkipChildren
+
+    method vstmt s = match s.skind with
+    | CpcFun _ -> SkipChildren
+    | _ -> DoChildren
+  end in
+  ignore(visitCilFunction collector fd);
+  S.diff !vars bounded
+
+(* remove free variable thanks to an iterated lambda-lifting technique:
+  - find free vars of a local function
+  - add them as parameters of this function and insert them at every call point
+  - proceed with the next function until none has free vars left
+  Return the list of globals made out of (removed) local functions *)
+let remove_free_vars enclosing_fun loc =
+  let rec make_globals gfuns = function
+    | [] -> GFun(remove_local_fun enclosing_fun,loc) :: (* List.rev *) gfuns
+    | fd :: tl ->
+        GVarDecl(fd.svar,locUnknown) ::
+          make_globals (GFun(remove_local_fun fd,locUnknown) :: gfuns) tl in
+  let introduce_new_vars fd fv =
+    let new_formals = List.map (fun v -> copyVarinfo v v.vname) fv in
+    let new_args = List.map (fun v -> Lval(Var v, NoOffset)) fv in
+    let map = List.combine fv new_formals in
+    let insert =
+      object(self)
+        inherit nopCilVisitor
+
+        method vinst = function
+          | Call(lval, Lval ((Var f, NoOffset) as l), args, loc)
+          when f == fd.svar ->
+            let args' = args @ new_args in
+            E.log "inserting in %a\n" d_lval l;
+            ChangeTo([Call(lval, Lval(Var f, NoOffset), args', loc)])
+          | _ -> SkipChildren
+      end in
+    setFormals fd (fd.sformals @ new_formals);
+    (* XXX Beware, order matters! replaceVar must be called AFTER insert, for
+     * fd.sbody might contain recursive calls to itself *)
+    enclosing_fun.sbody <- visitCilBlock insert enclosing_fun.sbody;
+    replace_vars fd map;
+    E.log "%a\n" d_global (GVarDecl(fd.svar,locUnknown)) in
+  let rec iter = function
+  | fd :: tl ->
+      let fv = free_vars fd in
+      if S.is_empty fv
+      then iter tl
+      else begin
+        E.log "free variables in %s:\n" fd.svar.vname;
+        S.iter (fun v -> E.log "- %s(%d)\n" v.vname v.vid) fv;
+        introduce_new_vars fd (S.elements fv);
+        (* XXX It is necessary to restart from scratch with a fresh list of
+         * local functions, for they have changed when introducing new vars *)
+        E.log "Result:\n%a\n**************" d_global (GFun (enclosing_fun,loc));
+        iter (collect_local_fun enclosing_fun)
+      end
+  | [] -> make_globals [] (collect_local_fun enclosing_fun) in
+  iter (collect_local_fun enclosing_fun)
 
 class lambdaLifter = object(self)
   inherit nopCilVisitor
 
-  val mutable free_vars = S.empty
-  val mutable local_funs = []
-  val mutable local_proto = []
-  val mutable local_map = [] (* maps local functions to their free vars *)
-
-  method vvrbl (v:varinfo) : varinfo visitAction =
-    if not (v.vglob || isFunctionType v.vtype)
-    then free_vars <- S.add v free_vars;
-    SkipChildren
-
-  method vstmt (s: stmt) : stmt visitAction = match s.skind with
-  | CpcFun (f, _) ->
-      (*assert(f.sformals = []); no more true*)
-      let args = List.fold_left (fun s x -> S.add x s) S.empty f.sformals in
-      let old_fv = free_vars in
-      free_vars <- S.empty;
-      ChangeDoChildrenPost (s, fun s ->
-        let f_fv = S.elements (S.diff free_vars args) in
-        let f_formals = List.map (fun v -> copyVarinfo v v.vname) f_fv in
-        let f_args = List.map (fun v -> Lval(Var v, NoOffset)) f_fv in
-        let map = List.combine f_fv f_formals in
-        setFormals f (f.sformals@f_formals);
-        f.sbody <- visitCilBlock (new replaceVars map) f.sbody;
-        (* FIXME Ensure name uniqueness *)
-        local_funs <- GFun(f,locUnknown) :: local_funs;
-        local_proto <- GVarDecl(f.svar,locUnknown) :: local_proto;
-        local_map <- (f.svar,f_args) :: local_map;
-        free_vars <- S.union free_vars old_fv;
-        mkEmptyStmt())
-  | _ -> DoChildren
-
   method vglob (g: global) : global list visitAction = match g with
-  | GFun _ -> ChangeDoChildrenPost ([g], fun g ->
-      (* TODO: use CLists instead? *)
-      let res = local_proto @ local_funs @ g in
-      let insert_vis = new insertArgs local_map in
-      let insert_args g = match visitCilGlobal insert_vis g with
-        | [g] -> g
-        | _ -> assert false in
-      local_funs <- [];
-      local_proto <- [];
-      local_map <- [];
-      free_vars <- S.empty;
-      List.map insert_args res)
+  | GFun (fd,loc) -> ChangeTo(remove_free_vars fd loc)
   | _ -> SkipChildren
 
 end
@@ -556,8 +626,7 @@ class functionalizeGoto start file =
               [Call(return_val,Lval(Var fd.svar, NoOffset),args,loc)]);
             mkStmt (Return (return_exp, loc))] in
           acc <- false;
-          fd.sbody <-
-            visitCilBlock (new replaceVars map) (mkBlock (List.rev stack));
+          fd.sbody <- mkBlock (List.rev stack);
           stack <- [];
           b.bstmts <- compactStmts (
             [ mkStmt (Block (mkBlock(b.bstmts)));
@@ -566,7 +635,10 @@ class functionalizeGoto start file =
           assert(new_start != dummyStmt);
           assert(new_start == List.hd fd.sbody.bstmts);
           assert(List.for_all is_label new_start.labels); (*No Case or Default*)
+          (* XXX Beware, order matters! replaceVars must be called AFTER
+           * replaceGotos, for fd.sbody might contain recursive calls to itself *)
           visitCilFileSameGlobals (new replaceGotos new_start call_fun) file;
+          replace_vars fd map;
           new_start.labels <- []
 
         method vstmt (s: stmt) : stmt visitAction =
