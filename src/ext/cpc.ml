@@ -523,6 +523,15 @@ let remove_free_vars enclosing_fun loc =
             E.log "inserting in %a\n" d_lval l;
             ChangeTo([Call(lval, Lval(Var f, NoOffset), args', loc)])
           | _ -> SkipChildren
+
+        method vstmt s = match s.skind with
+          | CpcSpawn(Lval ((Var f, NoOffset) as l), args, loc)
+          when f == fd.svar ->
+            let args' = args @ new_args in
+            E.log "inserting in %a\n" d_lval l;
+            s.skind <- CpcSpawn(Lval(Var f, NoOffset), args', loc);
+            SkipChildren
+          | _ -> DoChildren
       end in
     setFormals fd (fd.sformals @ new_formals);
     (* XXX Beware, order matters! replaceVar must be called AFTER insert, for
