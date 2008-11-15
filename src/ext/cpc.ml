@@ -112,15 +112,10 @@ let last_var start file =
   | Not_found -> None
 
 (* return the nearest enclosing function of a statement *)
-class enclosingFunction = fun start -> object(self)
+class enclosingFunction = fun fd_opt -> object(self)
   inherit nopCilVisitor
 
-  val mutable ef = None
-
-  method vstmt s =
-    if s == start
-    then (match ef with Some f -> raise (FoundFun f) | None -> assert false)
-    else DoChildren
+  val mutable ef = fd_opt
 
   method vfunc f =
     let f' = ef in
@@ -130,8 +125,16 @@ class enclosingFunction = fun start -> object(self)
 end
 
 let enclosing_function start file =
+  let visitor = object(self)
+    inherit (enclosingFunction None)
+
+    method vstmt s =
+      if s == start
+      then (match ef with Some f -> raise (FoundFun f) | None -> assert false)
+      else DoChildren
+  end in
   try
-    visitCilFileSameGlobals (new enclosingFunction start) file;
+    visitCilFileSameGlobals visitor file;
     E.log "enclosing function not found for: %a\n" d_stmt start;
     raise Not_found
   with FoundFun f -> f
@@ -425,6 +428,7 @@ let extend_map fd map =
   assert(List.for_all (fun (x,_) -> not (List.mem_assq x l)) map);
   H.replace h fd (map @ l)
 
+(* extend the map associated to fd and replace variables accordingly *)
 let replace_vars fd map =
   let visitor = object(self)
     inherit nopCilVisitor
@@ -450,6 +454,20 @@ let replace_vars fd map =
   end in
   extend_map fd map;
   fd.sbody <- visitCilBlock visitor fd.sbody
+
+class replaceVisitor = fun enclosing -> object(self)
+    inherit (enclosingFunction (Some enclosing))
+
+    method vvrbl (v:varinfo) : varinfo visitAction =
+      let map = match ef with Some f -> get_map f | None -> assert false in
+      try
+        ChangeTo(
+          let r = List.assoc v map in
+          E.log "%s(%d)->%s(%d)\n" v.vname v.vid r.vname r.vid;
+          r)
+      with Not_found -> SkipChildren
+
+  end
 
 (* return a list of local cps functions in a function *)
 let collect_local_fun fd =
@@ -514,14 +532,15 @@ let remove_free_vars enclosing_fun loc =
     let map = List.combine fv new_formals in
     let insert =
       object(self)
-        inherit nopCilVisitor
+        inherit (replaceVisitor enclosing_fun)
 
         method vinst = function
           | Call(lval, Lval ((Var f, NoOffset) as l), args, loc)
           when f == fd.svar ->
             let args' = args @ new_args in
             E.log "inserting in %a\n" d_lval l;
-            ChangeTo([Call(lval, Lval(Var f, NoOffset), args', loc)])
+            ChangeDoChildrenPost([Call(lval, Lval(Var f, NoOffset), args',
+            loc)], fun x -> x)
           | _ -> SkipChildren
 
         method vstmt s = match s.skind with
@@ -530,14 +549,14 @@ let remove_free_vars enclosing_fun loc =
             let args' = args @ new_args in
             E.log "inserting in %a\n" d_lval l;
             s.skind <- CpcSpawn(Lval(Var f, NoOffset), args', loc);
-            SkipChildren
+            DoChildren
           | _ -> DoChildren
       end in
     setFormals fd (fd.sformals @ new_formals);
-    (* XXX Beware, order matters! replaceVar must be called AFTER insert, for
-     * fd.sbody might contain recursive calls to itself *)
-    enclosing_fun.sbody <- visitCilBlock insert enclosing_fun.sbody;
+    (* XXX Beware, order matters! replaceVar must be called BEFORE insert, to
+     * update the global map (h) which is then used by insert *)
     replace_vars fd map;
+    enclosing_fun.sbody <- visitCilBlock insert enclosing_fun.sbody;
     E.log "%a\n" d_global (GVarDecl(fd.svar,locUnknown)) in
   let rec iter = function
   | fd :: tl ->
@@ -550,7 +569,7 @@ let remove_free_vars enclosing_fun loc =
         introduce_new_vars fd (S.elements fv);
         (* XXX It is necessary to restart from scratch with a fresh list of
          * local functions, for they have changed when introducing new vars *)
-        E.log "Result:\n%a\n**************" d_global (GFun (enclosing_fun,loc));
+        E.log "Result:\n%a\n**************\n" d_global (GFun (enclosing_fun,loc));
         iter (collect_local_fun enclosing_fun)
       end
   | [] -> make_globals [] (collect_local_fun enclosing_fun) in
