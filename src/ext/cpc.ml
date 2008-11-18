@@ -33,7 +33,7 @@ end
 (* Return a copy of statement, clear the initial one and update gotos
 accordingly *)
 let copyClearStmt s file stack =
-  let res = {(mkEmptyStmt()) with skind = s.skind; labels = s.labels} in
+  let res = {(mkEmptyStmt()) with skind = s.skind; labels = s.labels; cps=s.cps} in
   let new_goto loc = [mkStmt (Goto (ref res, loc))] in
   if (List.exists is_label s.labels)
   then (
@@ -42,6 +42,7 @@ let copyClearStmt s file stack =
     List.iter (fun s -> ignore(visitCilStmt vis s)) stack);
   s.skind <- Instr [];
   s.labels <- [];
+  s.cps <- false;
   res
 
 (* FIXME: every loop/switch is removed, although only the first one
@@ -55,11 +56,12 @@ let make_label =
   let i = ref 0 in
   fun () -> incr i; Printf.sprintf "__cpc_label_%d" !i
 
-let add_goto src dst =
+let add_goto src dst file =
   assert (src != dummyStmt && dst != dummyStmt);
   E.log "add goto from %a\nto %a\n" d_stmt src d_stmt dst;
   let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
-  let src' = mkStmt src.skind in
+  (* XXX DO NOT USE copyClearStmt HERE --- we want to keep the labels *)
+  let src' = {(mkEmptyStmt()) with skind=src.skind; cps = src.cps} in
   src.skind <- Block (mkBlock ([
     src';
     mkStmt (Goto (ref dst, src_loc));
@@ -71,7 +73,7 @@ let add_goto_after src enclosing file stack =
   E.log "add_goto_after: enclosing is %a\n" d_stmt enclosing;
   let dst = mkEmptyStmt() in
   let copy = copyClearStmt enclosing file stack in
-  add_goto src dst;
+  add_goto src dst file;
   enclosing.skind <- Block (mkBlock ([
     copy;
     dst]))
@@ -843,7 +845,7 @@ let rec doit (f: file) =
       eliminate_switch_loop s;
       doit f
   | AddGoto {last_stmt = src; next_stmt = dst} ->
-      add_goto src dst;
+      add_goto src dst f;
       doit f
   | SplitInstr ({skind = Instr l} as s, i) ->
       let rec split_instr acc = function
@@ -855,7 +857,7 @@ let rec doit (f: file) =
         let (s1, s2) = (mkStmt (Instr l1), mkStmt (Instr l2)) in
         E.log "SplitInstr %a\n at point:\n%a\n" d_stmt s d_instr i;
         s.skind <- Block (mkBlock ([s1; s2]));
-        add_goto s1 s2;
+        add_goto s1 s2 f;
         end;
       doit f
   | SplitInstr (s, _) ->
