@@ -9,6 +9,8 @@ exception TrivializeStmt of stmt
 
 let is_label = function Label _ -> true | _ -> false
 
+let cpc_continuation : compinfo option ref = ref None
+
 exception FoundFun of fundec
 exception FoundVar of varinfo
 
@@ -150,6 +152,22 @@ let enclosing_function start file =
     raise Not_found
   with FoundFun f -> f
 
+exception FoundCompinfo of compinfo
+
+let find_struct name file =
+  let visitor = object(self)
+    inherit nopCilVisitor
+
+    method vglob = function
+      | GCompTag ({cname = n} as c,_) when n = name ->
+          raise (FoundCompinfo c)
+      | _ -> DoChildren
+  end in
+  try
+    visitCilFileSameGlobals visitor file;
+    E.log "compinfo not found for: %s\n" name;
+    None
+  with FoundCompinfo c -> Some c
 (******************** CPS Marking ********************************************)
 
 (* Context used in the markCps visitor *)
@@ -395,7 +413,7 @@ end
 
 let do_convert return s =
   (* dummy converter, just reverse the stack *)
-  mkStmt (Block (mkBlock (s@[return])))
+  s@[return]
 
 class cpsConverter = object(self)
   inherit nopCilVisitor
@@ -413,7 +431,7 @@ class cpsConverter = object(self)
         s.skind <- Instr [];
         SkipChildren
     | Return _ ->
-        let res = do_convert s stack in
+        let res = mkStmt (Block (mkBlock (do_convert s stack))) in
         stack <- [];
         ChangeTo res
     | _ -> assert false
@@ -815,7 +833,10 @@ let rec functionalize start f =
 
 (*****************************************************************************)
 
-let init () = lineDirectiveStyle := None
+let init file = begin
+  lineDirectiveStyle := None;
+  cpc_continuation := find_struct "cpc_continuation" file;
+end
 
 let pause = ref false
 
@@ -831,7 +852,7 @@ let rec doit (f: file) =
     visitCilFileSameGlobals (new markCps f) f;
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
-    (*visitCilFile (new cpsConverter) f;*)
+    visitCilFile (new cpsConverter) f;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
     uniqueVarNames f; (* just in case *)
@@ -886,7 +907,7 @@ let feature : featureDescr =
     fd_enabled = ref false;
     fd_description = "cpc translation to C";
     fd_extraopt = [];
-    fd_doit = (fun f -> init() ; doit f);
+    fd_doit = (fun f -> init f ; doit f);
     fd_post_check = true;
   }
 
