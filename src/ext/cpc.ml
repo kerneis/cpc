@@ -7,9 +7,6 @@ exception SplitInstr of stmt * instr
 (* Eliminate break and continue in a switch/loop *)
 exception TrivializeStmt of stmt
 
-(* Functionalize a statement with a label *)
-exception FunctionalizeGoto of stmt
-
 let is_label = function Label _ -> true | _ -> false
 
 exception FoundFun of fundec
@@ -181,6 +178,9 @@ let copy_context c =
 (* add a goto from last_stmt to next_stmt *)
 exception AddGoto of mark_context
 
+(* Functionalize a statement with a label *)
+exception FunctionalizeGoto of stmt * mark_context
+
 exception SplitYield of stmt
 
 class markCps = fun file -> object(self)
@@ -258,7 +258,7 @@ class markCps = fun file -> object(self)
     (* Potential goto into cps context *)
     else if c.cps_con && (List.exists is_label s.labels) then
       (E.log "label in cps context! ";
-      raise (FunctionalizeGoto s))
+      raise (FunctionalizeGoto (s,c)))
     else begin
       if c.cps_con then assert(s.labels = []); (* no Case or Default in cps
                                                 * context *)
@@ -314,7 +314,7 @@ class markCps = fun file -> object(self)
 
     (* Control flow in cps context *)
     | Goto (g, _) when c.cps_con ->
-        raise (FunctionalizeGoto !g)
+        raise (FunctionalizeGoto (!g,c))
     | Break _ | Continue _ when c.cps_con ->
         raise (TrivializeStmt c.enclosing_stmt);
     | If _ | Switch _ | Loop _ when c.cps_con ->
@@ -328,7 +328,7 @@ class markCps = fun file -> object(self)
     | Goto (g, _)
         when enclosing_function s file != enclosing_function !g file ->
           E.log "live goto!\n";
-          raise (FunctionalizeGoto !g)
+          raise (FunctionalizeGoto (!g,c))
     | Goto _ | Break _ | Continue _ -> SkipChildren
     | If _ -> ChangeDoChildrenPost (s, fun s ->
         if c.next_stmt != dummyStmt then begin
@@ -720,7 +720,9 @@ class functionalizeGoto start file =
               if acc
               then begin match (compactStmts stack), enclosing.succs,
               enclosing.skind with
-              | [], _, _ -> assert false
+              (* Loops should have been trivialized first, and stack should
+               * contain at least the <start> stmt *)
+              | [], _, _ | _, _, Loop _ -> assert false
               | _, [], _
               | _, _, CpcFun _
               | {skind=Return _} :: _ , _, _
@@ -858,10 +860,15 @@ let rec doit (f: file) =
       doit f
   | SplitInstr (s, _) ->
       E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
-  | FunctionalizeGoto start ->
+  | FunctionalizeGoto (start,c) ->
       E.log "functionalize goto\n";
-      functionalize start f;
-      doit f
+      begin match c.enclosing_stmt.skind with
+      | Switch _ | Loop _ ->
+          E.log "enclosing is a switch or a loop: trivializing first\n";
+          eliminate_switch_loop c.enclosing_stmt;
+          doit f
+      | _ -> functionalize start f; doit f
+      end
   | SplitYield ({skind=CpcYield l} as s) ->
       let (s1,s2) = (copyClearStmt s f [], mkStmt (Instr [])) in
       E.log "SplitYield\n";
