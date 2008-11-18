@@ -87,6 +87,12 @@ let rec find_var = function
   | [] | [_] -> Not_found
   | hd::tl -> find_var tl
 
+(* find one of the following patterns:
+  <cps call>; goto l; label l: <start>;
+or
+  <cps call>; cpc_yield; goto l; label l: <start>;
+and extract the last var of <cps call>.
+*)
 class lastVar = fun start -> object(self)
   inherit nopCilVisitor
 
@@ -95,6 +101,12 @@ class lastVar = fun start -> object(self)
       match s.preds with
       | [{skind=Instr l} as p] when p.cps ->
           raise (find_var l)
+      | [{skind=CpcYield _} as p] when p.cps -> begin
+        match p.preds with
+        | [{skind=Instr l} as p'] when p'.cps ->
+            raise (find_var l)
+        | _ -> raise Not_found
+      end
       | _ -> raise Not_found
   end
   | _ -> DoChildren
@@ -169,6 +181,7 @@ let copy_context c =
 (* add a goto from last_stmt to next_stmt *)
 exception AddGoto of mark_context
 
+exception SplitYield of stmt
 
 class markCps = fun file -> object(self)
   inherit nopCilVisitor
@@ -251,7 +264,7 @@ class markCps = fun file -> object(self)
                                                 * context *)
       let lv = c.last_var in match s.skind with
 
-    (* Instructions and return *)
+    (* Instructions *)
     (* Must be first, to catch last_var if necessary *)
     | Instr [] ->
         self#set_next ~set_last:false s;
@@ -270,6 +283,9 @@ class markCps = fun file -> object(self)
           s.cps <- c.cps_con;
           s
         )
+
+    (* Return, cpc_done and cpc_yield *)
+
     | Return _ ->
         if c.cps_fun
         then begin
@@ -286,6 +302,15 @@ class markCps = fun file -> object(self)
         c.last_stmt <- dummyStmt;
         c.next_stmt <- dummyStmt;
         SkipChildren
+
+      (* cpc_yield should be split, except if it has already been done *)
+    | CpcYield _ when s.cps ->
+        c.cps_con <- true;
+        self#set_next s;
+        SkipChildren
+    | CpcYield _ ->
+        s.cps <- true; (* leave a mark for next time *)
+        raise (SplitYield s)
 
     (* Control flow in cps context *)
     | Goto (g, _) when c.cps_con ->
@@ -331,14 +356,13 @@ class markCps = fun file -> object(self)
         s.cps <- c.cps_con;
         self#set_next s;
         SkipChildren
-    | CpcYield _ | CpcWait _ | CpcSleep _
-    | CpcIoWait _
+    | CpcWait _ | CpcSleep _ | CpcIoWait _
         when c.cps_fun -> (* Beware, order matters! *)
           c.cps_con <- true; (* must be set first *)
           s.cps <- true;
           self#set_next s;
           SkipChildren
-    | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _
+    | CpcDone _ | CpcWait _ | CpcSleep _
     | CpcIoWait _ ->
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
     | CpcFun _ -> (* saving and restoring context is done in vfunc *)
@@ -838,6 +862,14 @@ let rec doit (f: file) =
       E.log "functionalize goto\n";
       functionalize start f;
       doit f
+  | SplitYield ({skind=CpcYield l} as s) ->
+      let (s1,s2) = (copyClearStmt s f [], mkStmt (Instr [])) in
+      E.log "SplitYield\n";
+      s.skind <- Block (mkBlock ([s1; s2]));
+      add_goto s1 s2 f;
+      doit f
+  | SplitYield s ->
+      E.s (E.bug "SplitYield raised with wrong argument %a" d_stmt s)
   | Exit -> E.log "Exit\n";()
 
 let feature : featureDescr =
