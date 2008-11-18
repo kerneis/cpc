@@ -10,6 +10,7 @@ exception TrivializeStmt of stmt
 let is_label = function Label _ -> true | _ -> false
 
 let cpc_continuation : compinfo option ref = ref None
+let cpc_function : typ option ref = ref None
 
 exception FoundFun of fundec
 exception FoundVar of varinfo
@@ -168,6 +169,24 @@ let find_struct name file =
     E.log "compinfo not found for: %s\n" name;
     None
   with FoundCompinfo c -> Some c
+
+exception FoundType of typ
+
+let find_type name file =
+  let visitor = object(self)
+    inherit nopCilVisitor
+
+    method vglob = function
+      | GType ({tname = n; ttype = t},_) when n = name ->
+          raise (FoundType t)
+      | _ -> DoChildren
+  end in
+  try
+    visitCilFileSameGlobals visitor file;
+    E.log "typeinfo not found for: %s\n" name;
+    None
+  with FoundType t -> Some t
+
 (******************** CPS Marking ********************************************)
 
 (* Context used in the markCps visitor *)
@@ -415,7 +434,12 @@ let do_convert return s =
   (* dummy converter, just reverse the stack *)
   s@[return]
 
-class cpsConverter = object(self)
+class cpsConverter = fun () ->
+  let cpc_continuation = match !cpc_continuation with
+  | Some c -> TComp(c,[])
+  | None -> E.s (E.bug "couldn't find struct cpc_continuation\n")
+  in
+  object(self)
   inherit nopCilVisitor
 
   val mutable stack = []
@@ -438,6 +462,26 @@ class cpsConverter = object(self)
     end
     else DoChildren
 
+  method vglob = function
+  | (GVarDecl ({vtype=TFun(_,args,_,_) ; vcps = true} as v, _) as g) ->
+      let args = argsToList args in
+      (* XXX copy the attributes too? Should be empty anyway *)
+      let fields = List.map (fun (name,typ, attr) ->
+        name, typ, None, attr, locUnknown ) args in
+      let arglist_struct =
+        mkCompInfo true (v.vname^"_arglist")
+          (fun _ -> fields) [] in
+      let comptag = GCompTag (arglist_struct, locUnknown) in
+      let new_arglist_fun = emptyFunction (v.vname^"_new_arglist") in
+      let cont_name = Printf.sprintf "cpc__continuation_%d" (newVID()) in
+      let new_args = Some (args@[cont_name,TPtr(cpc_continuation,[]),[]]) in
+      let new_arglist_type = TFun (TPtr(cpc_continuation, []), new_args,
+        false, []) in
+      setFunctionTypeMakeFormals new_arglist_fun new_arglist_type;
+      new_arglist_fun.svar.vinline <- true;
+      new_arglist_fun.svar.vstorage <- Static;
+      ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
+  | _ -> DoChildren
 end
 
 (********************* Cleaning **********************************************)
@@ -836,6 +880,7 @@ let rec functionalize start f =
 let init file = begin
   lineDirectiveStyle := None;
   cpc_continuation := find_struct "cpc_continuation" file;
+  cpc_function := find_type "cpc_function" file;
 end
 
 let pause = ref false
@@ -852,7 +897,7 @@ let rec doit (f: file) =
     visitCilFileSameGlobals (new markCps f) f;
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
-    visitCilFile (new cpsConverter) f;
+    visitCilFile (new cpsConverter ()) f;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
     uniqueVarNames f; (* just in case *)
