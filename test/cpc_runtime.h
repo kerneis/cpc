@@ -41,6 +41,7 @@ cpc_alloc(struct cpc_continuation **cp, int s)
     return p;
 }
 
+#pragma cilnoremove("cpc_dealloc")
 static inline void*
 cpc_dealloc(struct cpc_continuation *c, int s)
 {

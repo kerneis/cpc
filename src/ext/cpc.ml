@@ -12,6 +12,7 @@ let is_label = function Label _ -> true | _ -> false
 let cpc_continuation : compinfo option ref = ref None
 let cpc_function : typ option ref = ref None
 let cpc_alloc : fundec option ref = ref None
+let cpc_dealloc : fundec option ref = ref None
 
 exception FoundFun of fundec
 exception FoundVar of varinfo
@@ -460,10 +461,15 @@ class cpsConverter = fun () ->
   | Some fd -> fd
   | None -> E.s (E.bug "couldn't find runtime function cpc_alloc\n")
   in
+  let cpc_dealloc = match !cpc_dealloc with
+  | Some fd -> fd
+  | None -> E.s (E.bug "couldn't find runtime function cpc_dealloc\n")
+  in
   object(self)
   inherit nopCilVisitor
 
   val mutable stack = []
+  val mutable struct_map = []
 
   method vstmt (s: stmt) : stmt visitAction =
     if s.cps
@@ -485,6 +491,9 @@ class cpsConverter = fun () ->
 
   method vglob = function
   | (GVarDecl ({vtype=TFun(_,args,_,_) ; vcps = true} as v, _) as g) ->
+      E.log "GVarDecl %s\n" v.vname;
+      (* do not deal with a declaration twice *)
+      if List.mem_assq v struct_map then ChangeTo [] else begin
       let args = argsToList args in
       (* XXX copy the attributes too? Should be empty anyway *)
       let fields = List.map (fun (name,typ, attr) ->
@@ -529,7 +538,42 @@ class cpsConverter = fun () ->
           Some (Lval(Var last_arg,NoOffset)),
           locUnknown))
       ]));
+      struct_map <- (v, arglist_struct) :: struct_map;
       ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
+      end
+  | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps = true};sformals = args} as fd, _) ->
+      E.log "GFun %s\n" fd.svar.vname;
+      let new_arg = ["cpc_current_continuation", cpc_cont_ptr, []] in
+      let arglist_struct = List.assoc fd.svar struct_map in
+      let cpc_arguments =
+        makeLocalVar fd "cpc_arguments"
+        (TPtr(TComp(arglist_struct, []),[])) in
+      (* add former arguments to slocals *)
+      fd.slocals <- args @ fd.slocals;
+      fd.sformals <- [];
+      setFunctionTypeMakeFormals fd (TFun(ret_typ, Some new_arg, va, attr));
+      let cpc_current_continuation =
+        match fd.sformals with [x] -> x | _ -> assert false in
+      fd.sbody.bstmts <-
+        mkStmt(Instr (
+          (* cpc_arguments = cpc_dealloc(cpc_current_continuation,sizeof(arglist_struct)) *)
+          Call(
+            Some (Var cpc_arguments, NoOffset),
+            Lval (Var cpc_dealloc.svar, NoOffset),
+            [Lval (Var cpc_current_continuation, NoOffset);
+            SizeOf (TComp(arglist_struct,[]))],
+            locUnknown
+            ) ::
+          (* field = cpc_arguments -> field *)
+          List.map2 (fun v f ->
+            Set(
+              (Var v, NoOffset),
+              Lval (mkMem (Lval (Var cpc_arguments,NoOffset)) (Field (f, NoOffset))),
+              locUnknown
+            )
+          )  args arglist_struct.cfields))
+        :: fd.sbody.bstmts;
+      DoChildren
   | _ -> DoChildren
 end
 
@@ -659,7 +703,9 @@ let free_vars fd =
   Return the list of globals made out of (removed) local functions *)
 let remove_free_vars enclosing_fun loc =
   let rec make_globals gfuns = function
-    | [] -> GFun(remove_local_fun enclosing_fun,loc) :: (* List.rev *) gfuns
+    | [] ->
+        GVarDecl(enclosing_fun.svar,locUnknown) ::
+        GFun(remove_local_fun enclosing_fun,loc) :: (* List.rev *) gfuns
     | fd :: tl ->
         GVarDecl(fd.svar,locUnknown) ::
           make_globals (GFun(remove_local_fun fd,locUnknown) :: gfuns) tl in
@@ -931,6 +977,7 @@ let init file = begin
   cpc_continuation := find_struct "cpc_continuation" file;
   cpc_function := find_type "cpc_function" file;
   cpc_alloc := find_function "cpc_alloc" file;
+  cpc_dealloc := find_function "cpc_dealloc" file;
 end
 
 let pause = ref false
