@@ -11,6 +11,7 @@ let is_label = function Label _ -> true | _ -> false
 
 let cpc_continuation : compinfo option ref = ref None
 let cpc_function : typ option ref = ref None
+let cpc_alloc : fundec option ref = ref None
 
 exception FoundFun of fundec
 exception FoundVar of varinfo
@@ -18,6 +19,9 @@ exception FoundVar of varinfo
 (*************** Utility functions *******************************************)
 
 let fst4 (x,_,_,_) = x
+
+let cut_last l = let l' = List.rev l in
+  List.rev (List.tl l'), List.hd l'
 
 class replaceGotos start replace_with =
   object(self)
@@ -186,6 +190,21 @@ let find_type name file =
     E.log "typeinfo not found for: %s\n" name;
     None
   with FoundType t -> Some t
+
+let find_function name file =
+  let visitor = object(self)
+    inherit nopCilVisitor
+
+    method vglob = function
+      | GFun (fd,_) when fd.svar.vname = name ->
+          raise (FoundFun fd)
+      | _ -> SkipChildren
+  end in
+  try
+    visitCilFileSameGlobals visitor file;
+    E.log "function not found: %s\n" name;
+    None
+  with FoundFun t -> Some t
 
 (******************** CPS Marking ********************************************)
 
@@ -434,9 +453,12 @@ let do_convert return s =
   s@[return]
 
 class cpsConverter = fun () ->
-  let cpc_continuation = match !cpc_continuation with
-  | Some c -> TComp(c,[])
-  | None -> E.s (E.bug "couldn't find struct cpc_continuation\n")
+  let cpc_cont_ptr = match !cpc_continuation with
+  | Some c -> TPtr(TComp(c,[]),[])
+  | None -> E.s (E.bug "couldn't find struct cpc_continuation\n") in
+  let cpc_alloc = match !cpc_alloc with
+  | Some fd -> fd
+  | None -> E.s (E.bug "couldn't find runtime function cpc_alloc\n")
   in
   object(self)
   inherit nopCilVisitor
@@ -473,12 +495,40 @@ class cpsConverter = fun () ->
       let comptag = GCompTag (arglist_struct, locUnknown) in
       let new_arglist_fun = emptyFunction (v.vname^"_new_arglist") in
       let cont_name = Printf.sprintf "cpc__continuation_%d" (newVID()) in
-      let new_args = Some (args@[cont_name,TPtr(cpc_continuation,[]),[]]) in
-      let new_arglist_type = TFun (TPtr(cpc_continuation, []), new_args,
-        false, []) in
+      let new_args = Some (args@[cont_name,cpc_cont_ptr,[]]) in
+      let new_arglist_type = TFun (cpc_cont_ptr, new_args, false, []) in
+      let temp_arglist =
+        makeTempVar new_arglist_fun ~name:"cpc_arglist"
+        (TPtr(TComp(arglist_struct, []),[])) in
+      (* Beware, order matters! One must set function type before getting the
+       * sformals (when setting new_arglist_fun.sbody) *)
       setFunctionTypeMakeFormals new_arglist_fun new_arglist_type;
       new_arglist_fun.svar.vinline <- true;
       new_arglist_fun.svar.vstorage <- Static;
+      new_arglist_fun.sbody <- (
+        let field_args, last_arg = cut_last new_arglist_fun.sformals in
+        mkBlock ([mkStmt(Instr (
+          (* temp_arglist = cpc_alloc(&last_arg,sizeof(arglist_struct)) *)
+          Call(
+            Some (Var temp_arglist, NoOffset),
+            Lval (Var cpc_alloc.svar, NoOffset),
+            [AddrOf (Var last_arg, NoOffset);
+            SizeOf (TComp(arglist_struct,[]))],
+            locUnknown
+            ) ::
+          (* temp_arglist -> field = field *)
+          List.map2 (fun v f ->
+            Set(
+              (mkMem (Lval (Var temp_arglist,NoOffset)) (Field (f, NoOffset))),
+              Lval(Var v, NoOffset),
+              locUnknown
+            )
+          ) field_args arglist_struct.cfields));
+        (* return last_arg *)
+        mkStmt(Return (
+          Some (Lval(Var last_arg,NoOffset)),
+          locUnknown))
+      ]));
       ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
   | _ -> DoChildren
 end
@@ -880,6 +930,7 @@ let init file = begin
   lineDirectiveStyle := None;
   cpc_continuation := find_struct "cpc_continuation" file;
   cpc_function := find_type "cpc_function" file;
+  cpc_alloc := find_function "cpc_alloc" file;
 end
 
 let pause = ref false

@@ -25,6 +25,7 @@ struct cpc_continuation *cpc_continuation_copy(struct cpc_continuation *c);
 
 extern cpc_continuation *cpc_ready_1;
         
+#pragma cilnoremove("cpc_alloc")
 static inline void* 
 cpc_alloc(struct cpc_continuation **cp, int s)
 {
