@@ -1,8 +1,9 @@
 open Cil
 module E = Errormsg
 
-(* Split an instruction list given an instruction *)
-exception SplitInstr of stmt * instr
+(* Split an instruction list given an instruction
+ * the boolean tells whether a goto should be added *)
+exception SplitInstr of stmt * instr * bool
 
 (* Eliminate break and continue in a switch/loop *)
 exception TrivializeStmt of stmt
@@ -24,6 +25,10 @@ let fst4 (x,_,_,_) = x
 
 let cut_last l = let l' = List.rev l in
   List.rev (List.tl l'), List.hd l'
+
+let first_instr s = match s.skind with
+  | Instr (hd::_) -> hd
+  | _ -> raise (Invalid_argument "firs_instr")
 
 class replaceGotos start replace_with =
   object(self)
@@ -297,13 +302,17 @@ class markCps = fun file -> object(self)
 
   method vinst (i: instr) : instr list visitAction =
     match self#is_cps i, c.cps_fun with
+    | true, true when not (c.cps_con || first_instr c.last_stmt == i) ->
+      (* split if the first cps instruction is not the first of the statement *)
+      (* do not add any goto , we're not in cps context yet *)
+        raise (SplitInstr (c.last_stmt,i,false))
     | true, true ->
         c.cps_con <- true;
         SkipChildren
     | true, false ->
         E.s (E.error "cps call not allowed here: %a" d_instr i)
     | false, _ when c.cps_con ->
-        raise (SplitInstr (c.last_stmt,i))
+        raise (SplitInstr (c.last_stmt,i, true))
     | false, _ -> SkipChildren
 
   method vstmt (s: stmt) : stmt visitAction =
@@ -1018,7 +1027,7 @@ let rec doit (f: file) =
   | AddGoto {last_stmt = src; next_stmt = dst} ->
       add_goto src dst f;
       doit f
-  | SplitInstr ({skind = Instr l} as s, i) ->
+  | SplitInstr ({skind = Instr l} as s, i, shall_add_goto) ->
       let rec split_instr acc = function
         | [] -> raise Not_found
         | t::q as l when t==i -> (List.rev acc, l)
@@ -1026,12 +1035,16 @@ let rec doit (f: file) =
       let (l1,l2) = split_instr [] l in
         begin
         let (s1, s2) = (mkStmt (Instr l1), mkStmt (Instr l2)) in
-        E.log "SplitInstr %a\n at point:\n%a\n" d_stmt s d_instr i;
+        E.log "SplitInstr %a\n:\n%a\n***\n%a\n" d_stmt s d_stmt s1 d_stmt s2;
         s.skind <- Block (mkBlock ([s1; s2]));
-        add_goto s1 s2 f;
+        if shall_add_goto
+        then add_goto s1 s2 f
+        else
+          (* avoid fusion of s1 and s2 *)
+          s2.labels <- [Label ("__fusion_avoidance",locUnknown, false)];
         end;
       doit f
-  | SplitInstr (s, _) ->
+  | SplitInstr (s, _, _) ->
       E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
   | FunctionalizeGoto (start,c) ->
       E.log "functionalize goto\n";
