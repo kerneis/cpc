@@ -49,6 +49,7 @@ cpc_dealloc(struct cpc_continuation *c, int s)
     return c->c + c->length;
 }
 
+#pragma cilnoremove("cpc_really_invoke_continuation")
 static void
 cpc_really_invoke_continuation(struct cpc_continuation *c)
 {
@@ -73,6 +74,7 @@ cpc_really_invoke_continuation(struct cpc_continuation *c)
 #ifdef CPC_TAIL_RECURSIVE_COMPILER
 #define cpc_invoke_continuation cpc_really_invoke_continuation
 #else
+#pragma cilnoremove("cpc_invoke_continuation")
 static inline void
 cpc_invoke_continuation(struct cpc_continuation *c)
 {

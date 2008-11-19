@@ -13,6 +13,7 @@ let cpc_continuation : compinfo option ref = ref None
 let cpc_function : typ option ref = ref None
 let cpc_alloc : fundec option ref = ref None
 let cpc_dealloc : fundec option ref = ref None
+let cpc_invoke : fundec option ref = ref None
 
 exception FoundFun of fundec
 exception FoundVar of varinfo
@@ -464,6 +465,10 @@ class cpsConverter = fun () ->
   let cpc_dealloc = match !cpc_dealloc with
   | Some fd -> fd
   | None -> E.s (E.bug "couldn't find runtime function cpc_dealloc\n")
+  in
+  let cpc_invoke = match !cpc_invoke with
+  | Some fd -> fd
+  | None -> E.s (E.bug "couldn't find runtime function cpc_invoke_continuation\n")
   in
   object(self)
   inherit nopCilVisitor
@@ -978,6 +983,9 @@ let init file = begin
   cpc_function := find_type "cpc_function" file;
   cpc_alloc := find_function "cpc_alloc" file;
   cpc_dealloc := find_function "cpc_dealloc" file;
+  cpc_invoke := find_function "cpc_invoke_continuation" file;
+  if !cpc_invoke = None then
+    cpc_invoke := find_function "cpc_really_invoke_continuation" file;
 end
 
 let pause = ref false
