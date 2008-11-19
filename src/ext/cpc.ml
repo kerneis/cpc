@@ -411,8 +411,7 @@ class markCps = fun file -> object(self)
     (* Blocks *)
     | Block _ ->
         self#set_next ~set_last:false s;
-        ChangeDoChildrenPost
-          (s, fun s -> s.cps <- c.cps_con; s)
+        DoChildren
 
     | TryFinally _ | TryExcept _ ->
         E.s (E.unimp "try/except/finally not supported by CPC")
