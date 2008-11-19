@@ -246,7 +246,7 @@ exception AddGoto of mark_context
 (* Functionalize a statement with a label *)
 exception FunctionalizeGoto of stmt * mark_context
 
-exception SplitYield of stmt
+exception SplitCpc of stmt
 
 class markCps = fun file -> object(self)
   inherit nopCilVisitor
@@ -353,7 +353,7 @@ class markCps = fun file -> object(self)
           s
         )
 
-    (* Return, cpc_done and cpc_yield *)
+    (* Return and cpc_done *)
 
     | Return _ ->
         if c.cps_fun
@@ -372,14 +372,14 @@ class markCps = fun file -> object(self)
         c.next_stmt <- dummyStmt;
         SkipChildren
 
-      (* cpc_yield should be split, except if it has already been done *)
-    | CpcYield _ when s.cps ->
+    (* cpc constructs should be split, except if it has already been done *)
+    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcYield _ when s.cps ->
         c.cps_con <- true;
         self#set_next s;
         SkipChildren
-    | CpcYield _ ->
+    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcYield _ when c.cps_fun ->
         s.cps <- true; (* leave a mark for next time *)
-        raise (SplitYield s)
+        raise (SplitCpc s)
 
     (* Control flow in cps context *)
     | Goto (g, _) when c.cps_con ->
@@ -425,14 +425,7 @@ class markCps = fun file -> object(self)
         s.cps <- c.cps_con;
         self#set_next s;
         SkipChildren
-    | CpcWait _ | CpcSleep _ | CpcIoWait _
-        when c.cps_fun -> (* Beware, order matters! *)
-          c.cps_con <- true; (* must be set first *)
-          s.cps <- true;
-          self#set_next s;
-          SkipChildren
-    | CpcDone _ | CpcWait _ | CpcSleep _
-    | CpcIoWait _ ->
+    | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcYield _ ->
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
     | CpcFun _ -> (* saving and restoring context is done in vfunc *)
         ChangeDoChildrenPost
@@ -1055,14 +1048,17 @@ let rec doit (f: file) =
           doit f
       | _ -> functionalize start f; doit f
       end
-  | SplitYield ({skind=CpcYield l} as s) ->
+  | SplitCpc ({skind=CpcYield _} as s)
+  | SplitCpc ({skind=CpcWait _} as s)
+  | SplitCpc ({skind=CpcSleep _} as s)
+  | SplitCpc ({skind=CpcIoWait _} as s) ->
       let (s1,s2) = (copyClearStmt s f [], mkStmt (Instr [])) in
-      E.log "SplitYield\n";
+      E.log "SplitCpc\n";
       s.skind <- Block (mkBlock ([s1; s2]));
       add_goto s1 s2 f;
       doit f
-  | SplitYield s ->
-      E.s (E.bug "SplitYield raised with wrong argument %a" d_stmt s)
+  | SplitCpc s ->
+      E.s (E.bug "SplitCpc raised with wrong argument %a" d_stmt s)
   | Exit -> E.log "Exit\n";()
 
 let feature : featureDescr =
