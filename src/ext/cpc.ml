@@ -452,11 +452,7 @@ end
 
 (******************* CPS Conversion ******************************************)
 
-let do_convert return s =
-  (* dummy converter, just reverse the stack *)
-  s@[return]
-
-class cpsConverter = fun () ->
+class cpsConverter = fun file ->
   let cpc_cont_ptr = match !cpc_continuation with
   | Some c -> TPtr(TComp(c,[]),[])
   | None -> E.s (E.bug "couldn't find struct cpc_continuation\n") in
@@ -477,24 +473,53 @@ class cpsConverter = fun () ->
 
   val mutable stack = []
   val mutable struct_map = []
+  val mutable newarglist_map = []
+  val mutable current_continuation = makeVarinfo false "dummyVar" voidType
 
-  method vstmt (s: stmt) : stmt visitAction =
-    if s.cps
-    then begin match s.skind with
-    | CpcYield _ | CpcDone _
-    | CpcWait _ | CpcSleep _
-    | CpcIoWait _ | Instr _
-    | CpcSpawn _ ->
-        stack <- s::stack;
-        s.skind <- Instr [];
-        SkipChildren
-    | Return _ ->
-        let res = mkStmt (Block (mkBlock (do_convert s stack))) in
-        stack <- [];
-        ChangeTo res
-    | _ -> assert false
-    end
-    else DoChildren
+  method private do_convert return =
+    let convert_instr = function
+      (* Cps call without assignment *)
+      | Call (None, Lval (Var f, NoOffset), args, _) ->
+          (*
+          cpc_current_continuation = my_cpc__my_cpc__my_cpc__while_2_32_new_arglist(fd, cpc_current_continuation);
+          cpc_current_continuation = cpc_continuation_push(cpc_current_continuation,((cpc_function* )my_cpc__my_cpc__while_2_32));
+          *)
+          [Call (
+            Some(Var current_continuation , NoOffset),
+            List.assoc f newarglist_map,
+            args@[Lval(Var current_continuation, NoOffset)],
+            locUnknown
+          );
+          (* FIXME: incomplete *)
+            ]
+          (* Cps call with assignment *)
+      | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
+          E.s (E.unimp "cps call with assignment\n")
+      | _ -> assert false
+    in let rec aux = function
+    | [] -> [return]
+    | {skind=Instr l} :: tl ->
+        mkStmt(Instr(List.flatten(List.rev_map convert_instr l))) :: aux tl
+    | _ :: tl -> aux tl
+    in aux stack
+
+  method vstmt (s: stmt) : stmt visitAction = match s.skind with
+  | CpcYield _ | CpcDone _
+  | CpcWait _ | CpcSleep _
+  | CpcIoWait _ | Instr _
+  | CpcSpawn _ when s.cps ->
+      stack <- (copyClearStmt s file stack)::stack;
+      s.skind <- Instr [];
+      SkipChildren
+  | Return _ when s.cps ->
+      let res =
+        mkStmt (Block (mkBlock (self#do_convert s))) in
+      stack <- [];
+      ChangeTo res
+  | CpcYield _ | CpcDone _
+  | CpcWait _ | CpcSleep _
+  | CpcIoWait _ -> assert false
+  | _ -> DoChildren
 
   method vglob = function
   | (GVarDecl ({vtype=TFun(_,args,_,_) ; vcps = true} as v, _) as g) ->
@@ -546,6 +571,8 @@ class cpsConverter = fun () ->
           locUnknown))
       ]));
       struct_map <- (v, arglist_struct) :: struct_map;
+      newarglist_map <-
+        (v, Lval (Var new_arglist_fun.svar, NoOffset)) :: newarglist_map;
       ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
       end
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps = true};sformals = args} as fd, _) ->
@@ -559,15 +586,16 @@ class cpsConverter = fun () ->
       fd.slocals <- args @ fd.slocals;
       fd.sformals <- [];
       setFunctionTypeMakeFormals fd (TFun(ret_typ, Some new_arg, va, attr));
-      let cpc_current_continuation =
-        match fd.sformals with [x] -> x | _ -> assert false in
+      current_continuation <- begin match fd.sformals with
+        | [x] -> x
+        | _ -> assert false end;
       fd.sbody.bstmts <-
         mkStmt(Instr (
           (* cpc_arguments = cpc_dealloc(cpc_current_continuation,sizeof(arglist_struct)) *)
           Call(
             Some (Var cpc_arguments, NoOffset),
             Lval (Var cpc_dealloc.svar, NoOffset),
-            [Lval (Var cpc_current_continuation, NoOffset);
+            [Lval (Var current_continuation, NoOffset);
             SizeOf (TComp(arglist_struct,[]))],
             locUnknown
             ) ::
@@ -580,6 +608,7 @@ class cpsConverter = fun () ->
             )
           )  args arglist_struct.cfields))
         :: fd.sbody.bstmts;
+      fd.svar.vcps <- false; (* this is not a cps function anymore *)
       DoChildren
   | _ -> DoChildren
 end
@@ -1004,7 +1033,7 @@ let rec doit (f: file) =
     visitCilFileSameGlobals (new markCps f) f;
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
-    visitCilFile (new cpsConverter ()) f;
+    visitCilFile (new cpsConverter f) f;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
     uniqueVarNames f; (* just in case *)
