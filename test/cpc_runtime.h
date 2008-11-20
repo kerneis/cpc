@@ -106,6 +106,7 @@ cpc_continuation_push(cpc_continuation *c, cpc_function *f)
         memcpy(cpc_arg, &value, size); \
     } while(0)
 
+#pragma cilnoremove("cpc_schedule")
 void cpc_schedule(struct cpc_continuation *cont);
 extern void cpc_main_loop(void);
 extern void cpc_prim_sleep(int, int, cpc_condvar*, cpc_continuation*);

@@ -12,10 +12,11 @@ let is_label = function Label _ -> true | _ -> false
 
 let cpc_continuation : compinfo option ref = ref None
 let cpc_function : typ option ref = ref None
-let cpc_alloc : fundec option ref = ref None
-let cpc_dealloc : fundec option ref = ref None
-let cpc_invoke : fundec option ref = ref None
-let cpc_push : fundec option ref = ref None
+let cpc_alloc : varinfo option ref = ref None
+let cpc_dealloc : varinfo option ref = ref None
+let cpc_invoke : varinfo option ref = ref None
+let cpc_push : varinfo option ref = ref None
+let cpc_schedule : varinfo option ref = ref None
 
 exception FoundFun of fundec
 exception FoundVar of varinfo
@@ -145,18 +146,21 @@ class enclosingFunction = fun fd_opt -> object(self)
 
   method vfunc f =
     let f' = ef in
-    ef <- Some f;
+    ef <- f;
     ChangeDoChildrenPost(f, fun f ->
       ef <- f';f)
 end
 
 let enclosing_function start file =
   let visitor = object(self)
-    inherit (enclosingFunction None)
+    inherit (enclosingFunction dummyFunDec)
 
     method vstmt s =
       if s == start
-      then (match ef with Some f -> raise (FoundFun f) | None -> assert false)
+      then begin
+        assert(not(ef == dummyFunDec));
+        raise (FoundFun ef)
+      end
       else DoChildren
   end in
   try
@@ -204,15 +208,16 @@ let find_function name file =
     inherit nopCilVisitor
 
     method vglob = function
-      | GFun (fd,_) when fd.svar.vname = name ->
-          raise (FoundFun fd)
+      | GVarDecl(v,_)
+      | GFun ({svar=v},_) when v.vname = name && isFunctionType v.vtype ->
+          raise (FoundVar v)
       | _ -> SkipChildren
   end in
   try
     visitCilFileSameGlobals visitor file;
     E.log "function not found: %s\n" name;
     None
-  with FoundFun t -> Some t
+  with FoundVar v -> Some v
 
 (******************** CPS Marking ********************************************)
 
@@ -465,53 +470,56 @@ class cpsConverter = fun file ->
   let cpc_dealloc =  extract cpc_dealloc "cpc_dealloc (function)" in
   (*let cpc_invoke = extract cpc_invoke "cpc_invoke_continuation (function)" in*)
   let cpc_push = extract cpc_push "cpc_continuation_push (function)" in
+  let cpc_schedule = extract cpc_schedule "cpc_schedule (function)" in
   object(self)
-  inherit nopCilVisitor
+  inherit (enclosingFunction dummyFunDec)
 
   val mutable stack = []
   val mutable struct_map = []
   val mutable newarglist_map = []
   val mutable current_continuation = makeVarinfo false "dummyVar" voidType
 
+
+  method private convert_instr ?(cc=current_continuation) = function
+    (* Cps call without assignment *)
+    | Call (None, Lval (Var f, NoOffset), args, _) -> [
+      (* cc = new_arglist_fun(... args ..., cc);
+         cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
+        Call (
+          Some(Var cc , NoOffset),
+          List.assoc f newarglist_map,
+          args@[Lval(Var cc, NoOffset)],
+          locUnknown
+        );
+        Call (
+          Some(Var cc , NoOffset),
+          Lval(Var cpc_push, NoOffset),
+          [Lval(Var cc, NoOffset);
+          mkCast (Lval(Var f, NoOffset)) cpc_fun_ptr],
+          locUnknown
+        )]
+        (* Cps call with assignment *)
+    | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
+        E.s (E.unimp "cps call with assignment\n")
+    | _ -> assert false
+
   method private do_convert return =
-    let convert_instr = function
-      (* Cps call without assignment *)
-      | Call (None, Lval (Var f, NoOffset), args, _) -> [
-        (*
-        cpc_current_continuation =
-          new_arglist_fun(... args ..., cpc_current_continuation);
-        cpc_current_continuation =
-          cpc_continuation_push(cpc_current_continuation,((cpc_function* )f));
-        *)
-          Call (
-            Some(Var current_continuation , NoOffset),
-            List.assoc f newarglist_map,
-            args@[Lval(Var current_continuation, NoOffset)],
-            locUnknown
-          );
-          Call (
-            Some(Var current_continuation , NoOffset),
-            Lval(Var cpc_push.svar,NoOffset),
-            [Lval(Var current_continuation, NoOffset);
-            mkCast (Lval(Var f, NoOffset)) cpc_fun_ptr],
-            locUnknown
-          )]
-          (* Cps call with assignment *)
-      | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
-          E.s (E.unimp "cps call with assignment\n")
-      | _ -> assert false
-    in let rec aux = function
+    let rec aux = function
     | [] -> [return]
     | {skind=Instr l} :: tl ->
-        mkStmt(Instr(List.flatten(List.rev_map convert_instr l))) :: aux tl
-    | _ :: tl -> aux tl
+        mkStmt(Instr(List.flatten(List.rev_map self#convert_instr l))) :: aux tl
+    | {skind=CpcYield _} :: tl
+    | {skind=CpcWait _} :: tl
+    | {skind=CpcSleep _} :: tl
+    | {skind=CpcDone _} :: tl
+    | {skind=CpcIoWait _} :: tl -> aux tl
+    | _ -> assert false
     in aux stack
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   | CpcYield _ | CpcDone _
   | CpcWait _ | CpcSleep _
-  | CpcIoWait _ | Instr _
-  | CpcSpawn _ when s.cps ->
+  | CpcIoWait _ | Instr _ when s.cps ->
       stack <- (copyClearStmt s file stack)::stack;
       s.skind <- Instr [];
       SkipChildren
@@ -523,6 +531,16 @@ class cpsConverter = fun file ->
   | CpcYield _ | CpcDone _
   | CpcWait _ | CpcSleep _
   | CpcIoWait _ -> assert false
+  | CpcSpawn (f, args, _) ->
+      assert( not(ef == dummyFunDec));
+      let apply_later =
+        makeTempVar ef ~name:"cpc_apply_later" cpc_cont_ptr in
+      s.skind <- Instr (
+      (self#convert_instr ~cc:apply_later (Call(None,f,args,locUnknown)))
+      @[(* cpc_schedule(apply_later); *)
+        Call(None,Lval(Var cpc_schedule, NoOffset),[Lval(Var apply_later,
+        NoOffset)],locUnknown)]);
+      SkipChildren
   | _ -> DoChildren
 
   method vglob = function
@@ -556,7 +574,7 @@ class cpsConverter = fun file ->
           (* temp_arglist = cpc_alloc(&last_arg,sizeof(arglist_struct)) *)
           Call(
             Some (Var temp_arglist, NoOffset),
-            Lval (Var cpc_alloc.svar, NoOffset),
+            Lval (Var cpc_alloc, NoOffset),
             [AddrOf (Var last_arg, NoOffset);
             SizeOf (TComp(arglist_struct,[]))],
             locUnknown
@@ -598,7 +616,7 @@ class cpsConverter = fun file ->
           (* cpc_arguments = cpc_dealloc(cpc_current_continuation,sizeof(arglist_struct)) *)
           Call(
             Some (Var cpc_arguments, NoOffset),
-            Lval (Var cpc_dealloc.svar, NoOffset),
+            Lval (Var cpc_dealloc, NoOffset),
             [Lval (Var current_continuation, NoOffset);
             SizeOf (TComp(arglist_struct,[]))],
             locUnknown
@@ -677,10 +695,10 @@ let replace_vars fd map =
   fd.sbody <- visitCilBlock visitor fd.sbody
 
 class replaceVisitor = fun enclosing -> object(self)
-    inherit (enclosingFunction (Some enclosing))
+    inherit (enclosingFunction enclosing)
 
     method vvrbl (v:varinfo) : varinfo visitAction =
-      let map = match ef with Some f -> get_map f | None -> assert false in
+      let map = assert(not (ef == dummyFunDec)); get_map ef in
       try
         ChangeTo(
           let r = List.assoc v map in
@@ -744,8 +762,9 @@ let free_vars fd =
 let remove_free_vars enclosing_fun loc =
   let rec make_globals gfuns = function
     | [] ->
-        GVarDecl(enclosing_fun.svar,locUnknown) ::
-        GFun(remove_local_fun enclosing_fun,loc) :: (* List.rev *) gfuns
+        List.rev_append gfuns
+        [GVarDecl(enclosing_fun.svar,locUnknown);
+        GFun(remove_local_fun enclosing_fun,loc)]
     | fd :: tl ->
         GVarDecl(fd.svar,locUnknown) ::
           make_globals (GFun(remove_local_fun fd,locUnknown) :: gfuns) tl in
@@ -791,8 +810,9 @@ let remove_free_vars enclosing_fun loc =
         S.iter (fun v -> E.log "- %s(%d)\n" v.vname v.vid) fv;
         introduce_new_vars fd (S.elements fv);
         (* XXX It is necessary to restart from scratch with a fresh list of
-         * local functions, for they have changed when introducing new vars *)
+         * local functions, for they have changed when introducing new vars
         E.log "Result:\n%a\n**************\n" d_global (GFun (enclosing_fun,loc));
+        *)
         iter (collect_local_fun enclosing_fun)
       end
   | [] -> make_globals [] (collect_local_fun enclosing_fun) in
@@ -1020,6 +1040,7 @@ let init file = begin
   cpc_dealloc := find_function "cpc_dealloc" file;
   cpc_invoke := find_function "cpc_invoke_continuation" file;
   cpc_push := find_function "cpc_continuation_push" file;
+  cpc_schedule := find_function "cpc_schedule" file;
   if !cpc_invoke = None then
     cpc_invoke := find_function "cpc_really_invoke_continuation" file;
 end
