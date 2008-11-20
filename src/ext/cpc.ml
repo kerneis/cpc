@@ -17,6 +17,7 @@ let cpc_dealloc : varinfo option ref = ref None
 let cpc_invoke : varinfo option ref = ref None
 let cpc_push : varinfo option ref = ref None
 let cpc_schedule : varinfo option ref = ref None
+let cpc_patch : varinfo option ref = ref None
 
 exception FoundFun of fundec
 exception FoundVar of varinfo
@@ -472,6 +473,7 @@ class cpsConverter = fun file ->
   let cpc_invoke = extract cpc_invoke "cpc_invoke_continuation (function)" in
   let cpc_push = extract cpc_push "cpc_continuation_push (function)" in
   let cpc_schedule = extract cpc_schedule "cpc_schedule (function)" in
+  let cpc_patch = extract cpc_patch "cpc_continuation_patch (function)" in
   let Some print = find_function "printf" file in
   let debug s =
           Call(None,Lval(Var print,
@@ -485,9 +487,22 @@ class cpsConverter = fun file ->
   val mutable current_continuation = makeVarinfo false "dummyVar" voidType
 
 
-  method private convert_instr ?(cc=current_continuation) = function
+  method private convert_instr ?(apply_later=false) i =
+    let cc,pre,post =
+      if apply_later
+      then
+        let var = (makeTempVar ef ~name:"cpc_apply_later" cpc_cont_ptr) in
+        (var,
+        [(* apply_later = (void* ) 0; *)
+        Set((Var var, NoOffset),
+          mkCast (integer 0) voidPtrType,locUnknown)],
+        [(* cpc_schedule(apply_later); *)
+        Call(None,Lval(Var cpc_schedule, NoOffset),
+          [Lval(Var var, NoOffset)],locUnknown)])
+      else (current_continuation,[],[]) in
+    match i with
     (* Cps call without assignment *)
-    | Call (None, Lval (Var f, NoOffset), args, _) -> [
+    | Call (None, Lval (Var f, NoOffset), args, _) -> pre @ [
       (* cc = new_arglist_fun(... args ..., cc);
          cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
         Call (
@@ -502,28 +517,42 @@ class cpsConverter = fun file ->
           [Lval(Var cc, NoOffset);
           mkCast (Lval(Var f, NoOffset)) cpc_fun_ptr],
           locUnknown
-        )]
+        )] @ post
         (* Cps call with assignment *)
     | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
         E.s (E.unimp "cps call with assignment\n")
     | _ -> assert false
 
   method private do_convert return =
+    (* The stack should be a list of instructions, with an optional
+    cpc_construct in second position *)
+    let stack_tail, final_instr = match stack with
+    | [] | [{skind=Instr _}]
+    | {skind=Instr _} :: {skind=Instr _} :: _ -> stack, []
+    | {skind=Instr [i]} :: {skind=CpcYield _} :: tl ->
+        (tl, self#convert_instr ~apply_later:true i)
+    | {skind=Instr l} :: {skind=CpcWait _} :: tl ->
+        E.s (E.unimp "cpc_wait\n")
+    | {skind=Instr l} :: {skind=CpcSleep _} :: tl ->
+        E.s (E.unimp "cpc_sleep\n")
+    | {skind=Instr l} :: {skind=CpcDone _} :: tl ->
+        E.s (E.unimp "cpc_done\n")
+    | {skind=Instr l} :: {skind=CpcIoWait _} :: tl ->
+        E.s (E.unimp "cpc_io_wait\n")
+    | _ -> assert false in
     let rec aux = function
     | {skind=Instr l} :: tl ->
         (List.flatten(List.rev_map self#convert_instr l)) @ aux tl
-    | {skind=CpcYield _} :: tl
-    | {skind=CpcWait _} :: tl
-    | {skind=CpcSleep _} :: tl
-    | {skind=CpcDone _} :: tl
-    | {skind=CpcIoWait _} :: tl -> aux tl
     |  _ :: _ -> assert false
     | [] -> match return with
+      (* End of stack, insert cpc_invoke *)
       | None ->
           [Call(None, Lval(Var cpc_invoke, NoOffset),
           [Lval(Var current_continuation, NoOffset)], locUnknown)]
-      | Some _ -> E.s (E.unimp "cps function returning non-void\n")
-    in mkStmt (Instr (aux stack))
+      | Some _ -> (* returning something, we need to patch the continuation *)
+          (* TODO *)
+          E.s (E.unimp "cpc_patch\n")
+    in mkStmt (Instr ((aux stack_tail)@final_instr))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   | CpcYield _ | CpcDone _
@@ -543,16 +572,8 @@ class cpsConverter = fun file ->
   | CpcWait _ | CpcSleep _
   | CpcIoWait _ -> assert false
   | CpcSpawn (f, args, _) ->
-      assert( not(ef == dummyFunDec));
-      let apply_later =
-        makeTempVar ef ~name:"cpc_apply_later" cpc_cont_ptr in
-      s.skind <- Instr (
-      Set((Var apply_later, NoOffset),
-        mkCast (integer 0) voidPtrType,locUnknown) ::
-      (self#convert_instr ~cc:apply_later (Call(None,f,args,locUnknown)))
-      @[(* cpc_schedule(apply_later); *)
-        Call(None,Lval(Var cpc_schedule, NoOffset),[Lval(Var apply_later,
-        NoOffset)],locUnknown)]);
+      s.skind <- Instr (self#convert_instr ~apply_later:true
+        (Call(None,f,args,locUnknown)));
       SkipChildren
   | _ -> DoChildren
 
@@ -1058,6 +1079,7 @@ let init file = begin
   cpc_invoke := find_function "cpc_invoke_continuation" file;
   cpc_push := find_function "cpc_continuation_push" file;
   cpc_schedule := find_function "cpc_schedule" file;
+  cpc_patch := find_function "cpc_continuation_patch" file;
   if !cpc_invoke = None then
     cpc_invoke := find_function "cpc_really_invoke_continuation" file;
 end
