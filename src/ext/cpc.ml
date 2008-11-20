@@ -465,12 +465,17 @@ let extract var name = match !var with
 class cpsConverter = fun file ->
   let cpc_cont_ptr =
     TPtr(TComp(extract cpc_continuation "cpc_continuation (struct)",[]),[]) in
+  (* TODO: merge extract and find_function/find_struct/etc. *)
   let cpc_fun_ptr = TPtr(extract cpc_function "cpc_function (type)",[]) in
   let cpc_alloc = extract cpc_alloc "cpc_alloc (function)" in
   let cpc_dealloc =  extract cpc_dealloc "cpc_dealloc (function)" in
-  (*let cpc_invoke = extract cpc_invoke "cpc_invoke_continuation (function)" in*)
+  let cpc_invoke = extract cpc_invoke "cpc_invoke_continuation (function)" in
   let cpc_push = extract cpc_push "cpc_continuation_push (function)" in
   let cpc_schedule = extract cpc_schedule "cpc_schedule (function)" in
+  let Some print = find_function "printf" file in
+  let debug s =
+          Call(None,Lval(Var print,
+          NoOffset),[mkString (Printf.sprintf "** %s\n" s)],locUnknown) in
   object(self)
   inherit (enclosingFunction dummyFunDec)
 
@@ -505,16 +510,20 @@ class cpsConverter = fun file ->
 
   method private do_convert return =
     let rec aux = function
-    | [] -> [return]
     | {skind=Instr l} :: tl ->
-        mkStmt(Instr(List.flatten(List.rev_map self#convert_instr l))) :: aux tl
+        (List.flatten(List.rev_map self#convert_instr l)) @ aux tl
     | {skind=CpcYield _} :: tl
     | {skind=CpcWait _} :: tl
     | {skind=CpcSleep _} :: tl
     | {skind=CpcDone _} :: tl
     | {skind=CpcIoWait _} :: tl -> aux tl
-    | _ -> assert false
-    in aux stack
+    |  _ :: _ -> assert false
+    | [] -> match return with
+      | None ->
+          [Call(None, Lval(Var cpc_invoke, NoOffset),
+          [Lval(Var current_continuation, NoOffset)], locUnknown)]
+      | Some _ -> E.s (E.unimp "cps function returning non-void\n")
+    in mkStmt (Instr (aux stack))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   | CpcYield _ | CpcDone _
@@ -523,9 +532,11 @@ class cpsConverter = fun file ->
       stack <- (copyClearStmt s file stack)::stack;
       s.skind <- Instr [];
       SkipChildren
-  | Return _ when s.cps ->
+  | Return (ret_exp,loc) when s.cps ->
       let res =
-        mkStmt (Block (mkBlock (self#do_convert s))) in
+        mkStmt (Block (mkBlock [
+          self#do_convert ret_exp;
+          mkStmt (Return (None, loc))])) in
       stack <- [];
       ChangeTo res
   | CpcYield _ | CpcDone _
@@ -536,6 +547,8 @@ class cpsConverter = fun file ->
       let apply_later =
         makeTempVar ef ~name:"cpc_apply_later" cpc_cont_ptr in
       s.skind <- Instr (
+      Set((Var apply_later, NoOffset),
+        mkCast (integer 0) voidPtrType,locUnknown) ::
       (self#convert_instr ~cc:apply_later (Call(None,f,args,locUnknown)))
       @[(* cpc_schedule(apply_later); *)
         Call(None,Lval(Var cpc_schedule, NoOffset),[Lval(Var apply_later,
@@ -571,6 +584,8 @@ class cpsConverter = fun file ->
       new_arglist_fun.sbody <- (
         let field_args, last_arg = cut_last new_arglist_fun.sformals in
         mkBlock ([mkStmt(Instr (
+          (* XXX DEBUGING *)
+          (debug ("Entering "^new_arglist_fun.svar.vname)) ::
           (* temp_arglist = cpc_alloc(&last_arg,sizeof(arglist_struct)) *)
           Call(
             Some (Var temp_arglist, NoOffset),
@@ -613,6 +628,8 @@ class cpsConverter = fun file ->
         | _ -> assert false end;
       fd.sbody.bstmts <-
         mkStmt(Instr (
+          (* XXX DEBUGING *)
+          (debug ("Entering "^fd.svar.vname)) ::
           (* cpc_arguments = cpc_dealloc(cpc_current_continuation,sizeof(arglist_struct)) *)
           Call(
             Some (Var cpc_arguments, NoOffset),

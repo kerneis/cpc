@@ -2,6 +2,7 @@
 Copyright (c) 2004, 2005 by Juliusz Chroboczek.
 Experimental; do not redistribute.
 */
+#include <string.h>
 
 #pragma cilnoremove("type cpc_continuation", "type cpc_condvar")
 struct cpc_continuation;
@@ -98,13 +99,16 @@ cpc_continuation_push(cpc_continuation *c, cpc_function *f)
     return c;
 }
 
-#define cpc_continuation_patch(cont, size, value) \
-    do { \
-        void *cpc_arg; \
-        cpc_arg = \
-            ((cont)->c + (cont)->length - sizeof(cpc_function*) - size); \
-        memcpy(cpc_arg, &value, size); \
-    } while(0)
+#pragma cilnoremove("cpc_continuation_patch")
+static inline void
+cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
+{
+  void *cpc_arg;
+  cpc_arg =
+    ((cont)->c + (cont)->length - sizeof(cpc_function*) - size);
+  memcpy(cpc_arg, value, size);
+  return;
+}
 
 #pragma cilnoremove("cpc_schedule")
 void cpc_schedule(struct cpc_continuation *cont);
