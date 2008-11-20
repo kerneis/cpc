@@ -474,6 +474,10 @@ class cpsConverter = fun file ->
   let cpc_push = extract cpc_push "cpc_continuation_push (function)" in
   let cpc_schedule = extract cpc_schedule "cpc_schedule (function)" in
   let cpc_patch = extract cpc_patch "cpc_continuation_patch (function)" in
+  let schedule var =
+    (* cpc_schedule(apply_later); *)
+    [Call(None,Lval(Var cpc_schedule, NoOffset),
+      [Lval(Var var, NoOffset)],locUnknown)] in
   let Some print = find_function "printf" file in
   let debug s =
           Call(None,Lval(Var print,
@@ -492,13 +496,11 @@ class cpsConverter = fun file ->
       if apply_later
       then
         let var = (makeTempVar ef ~name:"cpc_apply_later" cpc_cont_ptr) in
-        (var,
+        var,
         [(* apply_later = (void* ) 0; *)
         Set((Var var, NoOffset),
           mkCast (integer 0) voidPtrType,locUnknown)],
-        [(* cpc_schedule(apply_later); *)
-        Call(None,Lval(Var cpc_schedule, NoOffset),
-          [Lval(Var var, NoOffset)],locUnknown)])
+        schedule var
       else (current_continuation,[],[]) in
     match i with
     (* Cps call without assignment *)
@@ -530,7 +532,7 @@ class cpsConverter = fun file ->
     | [] | [{skind=Instr _}]
     | {skind=Instr _} :: {skind=Instr _} :: _ -> stack, []
     | {skind=Instr [i]} :: {skind=CpcYield _} :: tl ->
-        (tl, self#convert_instr ~apply_later:true i)
+        (tl, self#convert_instr i @ schedule current_continuation)
     | {skind=Instr l} :: {skind=CpcWait _} :: tl ->
         E.s (E.unimp "cpc_wait\n")
     | {skind=Instr l} :: {skind=CpcSleep _} :: tl ->
@@ -545,14 +547,15 @@ class cpsConverter = fun file ->
         (List.flatten(List.rev_map self#convert_instr l)) @ aux tl
     |  _ :: _ -> assert false
     | [] -> match return with
-      (* End of stack, insert cpc_invoke *)
-      | None ->
+      (* End of stack, insert cpc_invoke if we pushed something *)
+      | None -> if final_instr = [] then
           [Call(None, Lval(Var cpc_invoke, NoOffset),
           [Lval(Var current_continuation, NoOffset)], locUnknown)]
+          else final_instr
       | Some _ -> (* returning something, we need to patch the continuation *)
           (* TODO *)
           E.s (E.unimp "cpc_patch\n")
-    in mkStmt (Instr ((aux stack_tail)@final_instr))
+    in mkStmt (Instr (aux stack_tail))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   | CpcYield _ | CpcDone _
