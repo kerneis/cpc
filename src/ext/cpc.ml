@@ -15,6 +15,7 @@ let cpc_function : typ option ref = ref None
 let cpc_alloc : fundec option ref = ref None
 let cpc_dealloc : fundec option ref = ref None
 let cpc_invoke : fundec option ref = ref None
+let cpc_push : fundec option ref = ref None
 
 exception FoundFun of fundec
 exception FoundVar of varinfo
@@ -188,8 +189,8 @@ let find_type name file =
     inherit nopCilVisitor
 
     method vglob = function
-      | GType ({tname = n; ttype = t},_) when n = name ->
-          raise (FoundType t)
+      | GType ({tname = n} as typeinfo,_) when n = name ->
+          raise (FoundType (TNamed (typeinfo, [])))
       | _ -> DoChildren
   end in
   try
@@ -452,22 +453,18 @@ end
 
 (******************* CPS Conversion ******************************************)
 
+let extract var name = match !var with
+  | Some x -> x
+  | None -> E.s (E.bug "couldn't find %s in the runtime\n" name)
+
 class cpsConverter = fun file ->
-  let cpc_cont_ptr = match !cpc_continuation with
-  | Some c -> TPtr(TComp(c,[]),[])
-  | None -> E.s (E.bug "couldn't find struct cpc_continuation\n") in
-  let cpc_alloc = match !cpc_alloc with
-  | Some fd -> fd
-  | None -> E.s (E.bug "couldn't find runtime function cpc_alloc\n")
-  in
-  let cpc_dealloc = match !cpc_dealloc with
-  | Some fd -> fd
-  | None -> E.s (E.bug "couldn't find runtime function cpc_dealloc\n")
-  in
-  let cpc_invoke = match !cpc_invoke with
-  | Some fd -> fd
-  | None -> E.s (E.bug "couldn't find runtime function cpc_invoke_continuation\n")
-  in
+  let cpc_cont_ptr =
+    TPtr(TComp(extract cpc_continuation "cpc_continuation (struct)",[]),[]) in
+  let cpc_fun_ptr = TPtr(extract cpc_function "cpc_function (type)",[]) in
+  let cpc_alloc = extract cpc_alloc "cpc_alloc (function)" in
+  let cpc_dealloc =  extract cpc_dealloc "cpc_dealloc (function)" in
+  (*let cpc_invoke = extract cpc_invoke "cpc_invoke_continuation (function)" in*)
+  let cpc_push = extract cpc_push "cpc_continuation_push (function)" in
   object(self)
   inherit nopCilVisitor
 
@@ -479,19 +476,26 @@ class cpsConverter = fun file ->
   method private do_convert return =
     let convert_instr = function
       (* Cps call without assignment *)
-      | Call (None, Lval (Var f, NoOffset), args, _) ->
-          (*
-          cpc_current_continuation = my_cpc__my_cpc__my_cpc__while_2_32_new_arglist(fd, cpc_current_continuation);
-          cpc_current_continuation = cpc_continuation_push(cpc_current_continuation,((cpc_function* )my_cpc__my_cpc__while_2_32));
-          *)
-          [Call (
+      | Call (None, Lval (Var f, NoOffset), args, _) -> [
+        (*
+        cpc_current_continuation =
+          new_arglist_fun(... args ..., cpc_current_continuation);
+        cpc_current_continuation =
+          cpc_continuation_push(cpc_current_continuation,((cpc_function* )f));
+        *)
+          Call (
             Some(Var current_continuation , NoOffset),
             List.assoc f newarglist_map,
             args@[Lval(Var current_continuation, NoOffset)],
             locUnknown
           );
-          (* FIXME: incomplete *)
-            ]
+          Call (
+            Some(Var current_continuation , NoOffset),
+            Lval(Var cpc_push.svar,NoOffset),
+            [Lval(Var current_continuation, NoOffset);
+            mkCast (Lval(Var f, NoOffset)) cpc_fun_ptr],
+            locUnknown
+          )]
           (* Cps call with assignment *)
       | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
           E.s (E.unimp "cps call with assignment\n")
@@ -1015,6 +1019,7 @@ let init file = begin
   cpc_alloc := find_function "cpc_alloc" file;
   cpc_dealloc := find_function "cpc_dealloc" file;
   cpc_invoke := find_function "cpc_invoke_continuation" file;
+  cpc_push := find_function "cpc_continuation_push" file;
   if !cpc_invoke = None then
     cpc_invoke := find_function "cpc_really_invoke_continuation" file;
 end

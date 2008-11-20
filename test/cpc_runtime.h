@@ -3,7 +3,7 @@ Copyright (c) 2004, 2005 by Juliusz Chroboczek.
 Experimental; do not redistribute.
 */
 
-#pragma cilnoremove("type cpc_continuation", "type cpc_function", "type cpc_condvar")
+#pragma cilnoremove("type cpc_continuation", "type cpc_condvar")
 struct cpc_continuation;
 typedef void cpc_function(void*);
 typedef struct cpc_condvar cpc_condvar;
@@ -86,6 +86,7 @@ cpc_invoke_continuation(struct cpc_continuation *c)
 #define CPC_IO_IN 1
 #define CPC_IO_OUT 2
 
+#pragma cilnoremove("cpc_continuation_push")
 static inline struct cpc_continuation *
 cpc_continuation_push(cpc_continuation *c, cpc_function *f)
 {
