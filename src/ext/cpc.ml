@@ -253,7 +253,7 @@ exception AddGoto of mark_context
 (* Functionalize a statement with a label *)
 exception FunctionalizeGoto of stmt * mark_context
 
-exception SplitCpc of stmt
+exception SplitCpc of stmt * stmt
 
 class markCps = fun file -> object(self)
   inherit nopCilVisitor
@@ -386,7 +386,7 @@ class markCps = fun file -> object(self)
         SkipChildren
     | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcYield _ when c.cps_fun ->
         s.cps <- true; (* leave a mark for next time *)
-        raise (SplitCpc s)
+        raise (SplitCpc (s,c.last_stmt))
 
     (* Control flow in cps context *)
     | Goto (g, _) when c.cps_con ->
@@ -1145,16 +1145,18 @@ let rec doit (f: file) =
           doit f
       | _ -> functionalize start f; doit f
       end
-  | SplitCpc ({skind=CpcYield _} as s)
-  | SplitCpc ({skind=CpcWait _} as s)
-  | SplitCpc ({skind=CpcSleep _} as s)
-  | SplitCpc ({skind=CpcIoWait _} as s) ->
+  | SplitCpc ({skind=CpcYield _} as s,last_stmt)
+  | SplitCpc ({skind=CpcWait _} as s,last_stmt)
+  | SplitCpc ({skind=CpcSleep _} as s,last_stmt)
+  | SplitCpc ({skind=CpcIoWait _} as s,last_stmt) ->
       let (s1,s2) = (copyClearStmt s f [], mkStmt (Instr [])) in
       E.log "SplitCpc\n";
       s.skind <- Block (mkBlock ([s1; s2]));
+      if last_stmt != dummyStmt && last_stmt.cps
+      then add_goto last_stmt s f;
       add_goto s1 s2 f;
       doit f
-  | SplitCpc s ->
+  | SplitCpc (s,_) ->
       E.s (E.bug "SplitCpc raised with wrong argument %a" d_stmt s)
   | Exit -> E.log "Exit\n";()
 
