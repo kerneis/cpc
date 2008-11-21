@@ -196,13 +196,9 @@ let computeUseDefStmtKind ?(acc_used=VS.empty)
         List.iter (fun i -> ignore (visitCilInstr useDefVisitor i)) il
     | TryExcept _ | TryFinally _ -> ()
     | Block _ -> ()
-    | CpcSleep (e, None, _)
     | CpcWait (e, _) -> ve e
-    | CpcIoWait (e, e', None, _)
-    | CpcSleep (e, Some(e',None), _) ->
-        ve e; ve e'
-    | CpcIoWait (e, e', Some e'', _)
-    | CpcSleep (e, Some(e',Some e''), _) ->
+    | CpcIoWait (e, e', e'', _)
+    | CpcSleep (e, e', e'', _) ->
         ve e; ve e'; ve e''
     | CpcSpawn (e, el, _) ->
         ve e;
@@ -250,13 +246,9 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
       !varUsed, !varDefs
   | TryExcept _ | TryFinally _ -> !varUsed, !varDefs
   | Block b -> handle_block b
-  | CpcSleep (e, None, _)
   | CpcWait (e, _) -> let _ = ve e in !varUsed, !varDefs
-  | CpcIoWait (e, e', None, _)
-  | CpcSleep (e, Some(e',None), _) ->
-      let _ = (ve e; ve e') in !varUsed, !varDefs
-  | CpcIoWait (e, e', Some e'', _)
-  | CpcSleep (e, Some(e',Some e''), _) ->
+  | CpcIoWait (e, e', e'', _)
+  | CpcSleep (e, e', e'', _) ->
       let _ = ve e; ve e'; ve e'' in !varUsed, !varDefs
   | CpcSpawn (e, el, _) ->
       ve e;

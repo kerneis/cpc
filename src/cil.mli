@@ -993,8 +993,8 @@ and stmtkind =
   | CpcSpawn of exp * exp list * location
   (*| CpcFork of stmt * location*)
   | CpcWait of exp * location
-  | CpcSleep of exp * (exp * exp option) option * location
-  | CpcIoWait of exp * exp * exp option * location
+  | CpcSleep of exp * exp * exp * location
+  | CpcIoWait of exp * exp * exp * location
   | CpcFun of fundec * location
 
 (** {b Instructions}. 

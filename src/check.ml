@@ -779,18 +779,11 @@ and checkStmt (s: stmt) =
           checkInstr(Call(None,e,el,l))
       | CpcWait (e, _) -> ignore(checkExp false e)
                           (* do not check the type of condition variables *)
-      | CpcSleep (e, None, _) -> checkExpType false e intType
-      | CpcSleep (e, Some(e', None), _) ->
-          checkExpType false e intType;
-          checkExpType false e' intType
-      | CpcSleep (e, Some(e', Some e''), _) ->
+      | CpcSleep (e, e', e'', _) ->
           checkExpType false e intType;
           checkExpType false e' intType;
           ignore(checkExp false e'')
-      | CpcIoWait (e, e', None, _) ->
-          ignore(checkExp false e);
-          ignore(checkExp false e')
-      | CpcIoWait (e, e', Some e'', _) ->
+      | CpcIoWait (e, e', e'', _) ->
           ignore(checkExp false e);
           ignore(checkExp false e');
           ignore(checkExp false e'')

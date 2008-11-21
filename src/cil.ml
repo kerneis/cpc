@@ -779,8 +779,8 @@ and stmtkind =
   | CpcSpawn of exp * exp list * location
   (*| CpcFork of stmt * location*)
   | CpcWait of exp * location
-  | CpcSleep of exp * (exp * exp option) option * location
-  | CpcIoWait of exp * exp * exp option * location
+  | CpcSleep of exp * exp * exp * location
+  | CpcIoWait of exp * exp * exp * location
   | CpcFun of fundec * location
 
 (** Instructions. They may cause effects directly but may not have control
@@ -1114,7 +1114,7 @@ let rec get_stmtLoc (statement : stmtkind) =
     | CpcSpawn (_, _, l) -> l
     (*| CpcFork (_, l) -> l*)
     | CpcWait (_,l) -> l
-    | CpcSleep (_, _, l) -> l
+    | CpcSleep (_, _, _, l) -> l
     | CpcIoWait (_, _, _, l) -> l
     | CpcFun (_, l) -> l
 
@@ -3900,25 +3900,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
                 ++ self#pExp () e
                 ++ text ");")
 
-    | CpcSleep(e1, None, l) ->
-        self#pLineDirective l
-          ++ text "cpc_sleep"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () e1
-                ++ text ");")
-
-    | CpcSleep(e1, Some (e2, None), l) ->
-        self#pLineDirective l
-          ++ text "cpc_sleep"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () e1
-                ++ text ", "
-                ++ self#pExp () e2
-                ++ text ");")
-
-    | CpcSleep(e1, Some (e2, Some e3), l) ->
+    | CpcSleep(e1, e2, e3, l) ->
         self#pLineDirective l
           ++ text "cpc_sleep"
           ++ (align
@@ -3930,17 +3912,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
                 ++ self#pExp () e3
                 ++ text ");")
 
-    | CpcIoWait(e1, e2, None, l) ->
-        self#pLineDirective l
-          ++ text "cpc_io_wait"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () e1
-                ++ text ", "
-                ++ self#pExp () e2
-                ++ text ");")
-
-    | CpcIoWait(e1, e2, Some e3, l) ->
+    | CpcIoWait(e1, e2, e3, l) ->
         self#pLineDirective l
           ++ text "cpc_io_wait"
           ++ (align
@@ -5407,19 +5379,7 @@ and childrenStmt (toPrepend: instr list ref) (vis:cilVisitor) (s:stmt): stmt =
         let e' = fExp e in
         toPrepend := vis#unqueueInstr (); (* insert these before cpc_wait  *)
         if e' != e then CpcWait (e', l) else s.skind
-    | CpcSleep (e1, None, l) ->
-        let e1' = fExp e1 in
-        toPrepend := vis#unqueueInstr (); (* insert these before cpc_sleep  *)
-        if e1' != e1 then CpcSleep (e1', None, l) else s.skind
-    | CpcSleep (e1, Some (e2, None), l) ->
-        let e1' = fExp e1 in
-        let q1 = vis#unqueueInstr () in
-        let e2' = fExp e2 in
-        toPrepend := q1 @ ( vis#unqueueInstr () );
-        if e1' != e1 || e2' != e2 then
-          CpcSleep (e1', Some (e2', None), l)
-        else s.skind
-    | CpcSleep (e1, Some (e2, Some e3), l) ->
+    | CpcSleep (e1, e2, e3, l) ->
         let e1' = fExp e1 in
         let q1 = vis#unqueueInstr () in
         let e2' = fExp e2 in
@@ -5427,17 +5387,9 @@ and childrenStmt (toPrepend: instr list ref) (vis:cilVisitor) (s:stmt): stmt =
         let e3' = fExp e3 in
         toPrepend := q1 @ q2 @ ( vis#unqueueInstr () );
         if e1' != e1 || e2' != e2 || e3' != e3 then
-          CpcSleep (e1', Some (e2', Some e3'), l)
+          CpcSleep (e1', e2', e3', l)
         else s.skind
-    | CpcIoWait (e1, e2, None, l) ->
-        let e1' = fExp e1 in
-        let q1 = vis#unqueueInstr () in
-        let e2' = fExp e2 in
-        toPrepend := q1 @ ( vis#unqueueInstr () );
-        if e1' != e1 || e2' != e2 then
-          CpcIoWait (e1', e2', None, l)
-        else s.skind
-    | CpcIoWait (e1, e2, Some e3, l) ->
+    | CpcIoWait (e1, e2, e3, l) ->
         let e1' = fExp e1 in
         let q1 = vis#unqueueInstr () in
         let e2' = fExp e2 in
@@ -5445,7 +5397,7 @@ and childrenStmt (toPrepend: instr list ref) (vis:cilVisitor) (s:stmt): stmt =
         let e3' = fExp e3 in
         toPrepend := q1 @ q2 @ ( vis#unqueueInstr () );
         if e1' != e1 || e2' != e2 || e3' != e3 then
-          CpcIoWait (e1', e2', Some e3', l)
+          CpcIoWait (e1', e2', e3', l)
         else s.skind
     | CpcFun (f, l) ->
         let f' = visitCilFunction vis f in

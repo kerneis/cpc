@@ -60,6 +60,8 @@ let debugGlobal = false
 
 let continueOnError = true
 
+let null = mkCast (integer 0) voidPtrType
+
 let copy_into h h' =
   H.clear h';
   (* we have to create a list because we get the bindings in reverse order *)
@@ -6362,33 +6364,33 @@ and doStatement (s : A.statement) : chunk =
         let loc' = convLoc loc in
         currentLoc := loc';
         let (_, e', _) = doExp false e (AExp None) in
-        s2c (mkStmt (CpcSleep (e', None, loc')))
+        s2c (mkStmt (CpcSleep (e', integer 0, null, loc')))
      | CPC_SLEEP (e1, e2, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (_, e1', _) = doExp false e1 (AExp None) in
         let (_, e2', _) = doExp false e2 (AExp None) in
-        s2c (mkStmt (CpcSleep (e1', Some(e2',None), loc')))
+        s2c (mkStmt (CpcSleep (e1', e2', null, loc')))
      | CPC_SLEEP (e1, e2, e3, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (_, e1', _) = doExp false e1 (AExp None) in
         let (_, e2', _) = doExp false e2 (AExp None) in
         let (_, e3', _) = doExp false e3 (AExp None) in
-        s2c (mkStmt (CpcSleep (e1', Some(e2', Some e3'), loc')))
+        s2c (mkStmt (CpcSleep (e1', e2', e3', loc')))
      | CPC_IO_WAIT (e1, e2, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (_, e1', _) = doExp false e1 (AExp None) in
         let (_, e2', _) = doExp false e2 (AExp None) in
-        s2c (mkStmt (CpcIoWait (e1', e2', None, loc')))
+        s2c (mkStmt (CpcIoWait (e1', e2', null, loc')))
      | CPC_IO_WAIT (e1, e2, e3, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (_, e1', _) = doExp false e1 (AExp None) in
         let (_, e2', _) = doExp false e2 (AExp None) in
         let (_, e3', _) = doExp false e3 (AExp None) in
-        s2c (mkStmt (CpcIoWait (e1', e2', Some e3', loc')))
+        s2c (mkStmt (CpcIoWait (e1', e2', e3', loc')))
      | CPC_FUN d -> doDecl false d
 
 
