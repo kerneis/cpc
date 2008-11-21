@@ -10,15 +10,6 @@ exception TrivializeStmt of stmt
 
 let is_label = function Label _ -> true | _ -> false
 
-let cpc_continuation : compinfo option ref = ref None
-let cpc_function : typ option ref = ref None
-let cpc_alloc : varinfo option ref = ref None
-let cpc_dealloc : varinfo option ref = ref None
-let cpc_invoke : varinfo option ref = ref None
-let cpc_push : varinfo option ref = ref None
-let cpc_schedule : varinfo option ref = ref None
-let cpc_patch : varinfo option ref = ref None
-
 exception FoundFun of fundec
 exception FoundVar of varinfo
 
@@ -183,9 +174,8 @@ let find_struct name file =
   end in
   try
     visitCilFileSameGlobals visitor file;
-    E.log "compinfo not found for: %s\n" name;
-    None
-  with FoundCompinfo c -> Some c
+    E.s (E.bug "compinfo not found for: %s\n" name)
+  with FoundCompinfo c -> c
 
 exception FoundType of typ
 
@@ -200,9 +190,8 @@ let find_type name file =
   end in
   try
     visitCilFileSameGlobals visitor file;
-    E.log "typeinfo not found for: %s\n" name;
-    None
-  with FoundType t -> Some t
+    E.s (E.bug "typeinfo not found for: %s\n" name)
+  with FoundType t -> t
 
 let find_function name file =
   let visitor = object(self)
@@ -216,9 +205,8 @@ let find_function name file =
   end in
   try
     visitCilFileSameGlobals visitor file;
-    E.log "function not found: %s\n" name;
-    None
-  with FoundVar v -> Some v
+    E.s (E.bug "function not found: %s\n" name)
+  with FoundVar v -> v
 
 (******************** CPS Marking ********************************************)
 
@@ -465,20 +453,21 @@ let extract var name = match !var with
 
 class cpsConverter = fun file ->
   let cpc_cont_ptr =
-    TPtr(TComp(extract cpc_continuation "cpc_continuation (struct)",[]),[]) in
-  (* TODO: merge extract and find_function/find_struct/etc. *)
-  let cpc_fun_ptr = TPtr(extract cpc_function "cpc_function (type)",[]) in
-  let cpc_alloc = extract cpc_alloc "cpc_alloc (function)" in
-  let cpc_dealloc =  extract cpc_dealloc "cpc_dealloc (function)" in
-  let cpc_invoke = extract cpc_invoke "cpc_invoke_continuation (function)" in
-  let cpc_push = extract cpc_push "cpc_continuation_push (function)" in
-  let cpc_schedule = extract cpc_schedule "cpc_schedule (function)" in
-  let cpc_patch = extract cpc_patch "cpc_continuation_patch (function)" in
+    TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
+  let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
+  let cpc_alloc = find_function "cpc_alloc" file in
+  let cpc_dealloc =  find_function "cpc_dealloc" file in
+  let cpc_invoke =
+    try find_function "cpc_invoke_continuation" file
+    with E.Error -> find_function "cpc_really_invoke_continuation" file in
+  let cpc_push = find_function "cpc_continuation_push" file in
+  let cpc_schedule = find_function "cpc_schedule" file in
+  let cpc_patch = find_function "cpc_continuation_patch" file in
   let schedule var =
     (* cpc_schedule(apply_later); *)
     [Call(None,Lval(Var cpc_schedule, NoOffset),
       [Lval(Var var, NoOffset)],locUnknown)] in
-  let Some print = find_function "printf" file in
+  let print = find_function "printf" file in
   let debug s =
           Call(None,Lval(Var print,
           NoOffset),[mkString (Printf.sprintf "** %s\n" s)],locUnknown) in
@@ -1075,16 +1064,6 @@ let rec functionalize start f =
 
 let init file = begin
   lineDirectiveStyle := None;
-  cpc_continuation := find_struct "cpc_continuation" file;
-  cpc_function := find_type "cpc_function" file;
-  cpc_alloc := find_function "cpc_alloc" file;
-  cpc_dealloc := find_function "cpc_dealloc" file;
-  cpc_invoke := find_function "cpc_invoke_continuation" file;
-  cpc_push := find_function "cpc_continuation_push" file;
-  cpc_schedule := find_function "cpc_schedule" file;
-  cpc_patch := find_function "cpc_continuation_patch" file;
-  if !cpc_invoke = None then
-    cpc_invoke := find_function "cpc_really_invoke_continuation" file;
 end
 
 let pause = ref false
