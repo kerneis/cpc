@@ -4,6 +4,8 @@ Experimental; do not redistribute.
 */
 #include <string.h>
 
+#pragma cilnoremove("printf")
+
 #pragma cilnoremove("type cpc_continuation", "type cpc_condvar")
 struct cpc_continuation;
 typedef void cpc_function(void*);
