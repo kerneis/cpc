@@ -1120,6 +1120,7 @@ let rec doit (f: file) =
     visitCilFileSameGlobals (new markCps f) f;
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
+    uniqueVarNames f; (* Lambda-lifting may introduce duplicate names *)
     visitCilFile (new cpsConverter f) f;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
