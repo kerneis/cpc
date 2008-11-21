@@ -458,16 +458,29 @@ let extract var name = match !var with
   | None -> E.s (E.bug "couldn't find %s in the runtime\n" name)
 
 class cpsConverter = fun file ->
+  (* Extraction of types, struct, and functions from runtime *)
   let cpc_cont_ptr =
     TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
   let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
+  let size_t = find_type "size_t" file in
   let cpc_alloc = find_function "cpc_alloc" file in
   let cpc_dealloc =  find_function "cpc_dealloc" file in
   let cpc_invoke =
     try find_function "cpc_invoke_continuation" file
     with E.Error -> find_function "cpc_really_invoke_continuation" file in
   let cpc_push = find_function "cpc_continuation_push" file in
-  (*let cpc_patch = find_function "cpc_continuation_patch" file in*)
+  let cpc_patch = find_function "cpc_continuation_patch" file in
+  let patch cont value f =
+    (* typ temp = value;
+     * cpc_patch(cont, sizeof(typ), &temp); *)
+    let typ = typeOf value in
+    let temp = (Var (makeTempVar f ~name:"patch" typ), NoOffset) in
+    [ Set(temp, value, locUnknown);
+      Call(None,Lval(Var cpc_patch, NoOffset), [
+      Lval(Var cont, NoOffset);
+      mkCast (sizeOf typ) size_t;
+      mkCast (mkAddrOf temp) voidPtrType],
+      locUnknown)] in
   let cpc_schedule = find_function "cpc_schedule" file in
   let schedule cc =
     (* cpc_schedule(apply_later); *)
@@ -519,8 +532,8 @@ class cpsConverter = fun file ->
         schedule var
       else (current_continuation,[],[]) in
     match i with
-    (* Cps call without assignment *)
-    | Call (None, Lval (Var f, NoOffset), args, _) -> pre @ [
+    (* Cps call with or without assignment (we don't care at this level) *)
+    | Call (_, Lval (Var f, NoOffset), args, _) -> pre @ [
       (* cc = new_arglist_fun(... args ..., cc);
          cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
         Call (
@@ -536,9 +549,6 @@ class cpsConverter = fun file ->
           mkCast (Lval(Var f, NoOffset)) cpc_fun_ptr],
           locUnknown
         )] @ post
-        (* Cps call with assignment *)
-    | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
-        E.s (E.unimp "cps call with assignment\n")
     | _ -> assert false
 
   method private do_convert return =
@@ -560,15 +570,17 @@ class cpsConverter = fun file ->
     | [{skind=Instr [i]} ; {skind=CpcIoWait (x, y, condvar, _)}] ->
         self#convert_instr i @ io_wait x y condvar current_continuation
     | _ ->
+        (* convert cps calls to cpc_push *)
         (List.flatten (List.map (fun l ->
         (List.flatten(List.rev_map self#convert_instr l))) (extract stack))) @
-      (match return with
-      | None ->
-          [Call(None, Lval(Var cpc_invoke, NoOffset),
-          [Lval(Var current_continuation, NoOffset)], locUnknown)]
-      | Some _ -> (* returning something, we need to patch the continuation *)
-          (* TODO *)
-          E.s (E.unimp "cpc_patch\n"))
+        (* cpc_invoke(current_continuation); *)
+        [Call(None, Lval(Var cpc_invoke, NoOffset),
+        [Lval(Var current_continuation, NoOffset)], locUnknown)] @
+        (* patch if we don't return void *)
+        (match return with None -> [] | Some ret_exp ->
+        (* XXX DEBUGING *)
+        debug ("patching before exiting "^ef.svar.vname) ::
+        patch current_continuation ret_exp ef)
   ))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
@@ -648,6 +660,9 @@ class cpsConverter = fun file ->
       struct_map <- (v, arglist_struct) :: struct_map;
       newarglist_map <-
         (v, Lval (Var new_arglist_fun.svar, NoOffset)) :: newarglist_map;
+      if v.vstorage = Extern then
+        (* mark it as completed (will be done later for non-extern function *)
+        v.vcps <- false;
       ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
       end
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps = true};sformals = args} as fd, _) ->
