@@ -360,12 +360,18 @@ class markCps = fun file -> object(self)
         end;
         SkipChildren
     | CpcDone _ when c.cps_fun ->
-        (* just like a Return *)
-        s.cps <- true;
+        if s.cps then SkipChildren else begin
+        (* XXX DO NOT USE copyClearStmt HERE --- it's needlessly expensive and
+         * we can keep the labels here *)
+        let copy = mkStmt s.skind in
+        let return = mkStmt (Return (None, locUnknown)) in
+        copy.cps <- true;
         c.cps_con <- false;
         c.last_stmt <- dummyStmt;
         c.next_stmt <- dummyStmt;
+        s.skind <- Block (mkBlock [copy; return]);
         SkipChildren
+        end
 
     (* cpc constructs should be split, except if it has already been done *)
     | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcYield _ when s.cps ->
@@ -461,12 +467,33 @@ class cpsConverter = fun file ->
     try find_function "cpc_invoke_continuation" file
     with E.Error -> find_function "cpc_really_invoke_continuation" file in
   let cpc_push = find_function "cpc_continuation_push" file in
+  (*let cpc_patch = find_function "cpc_continuation_patch" file in*)
   let cpc_schedule = find_function "cpc_schedule" file in
-  let cpc_patch = find_function "cpc_continuation_patch" file in
-  let schedule var =
+  let schedule cc =
     (* cpc_schedule(apply_later); *)
     [Call(None,Lval(Var cpc_schedule, NoOffset),
-      [Lval(Var var, NoOffset)],locUnknown)] in
+      [Lval(Var cc, NoOffset)],locUnknown)] in
+  let cpc_sleep = find_function "cpc_prim_sleep" file in
+  let sleep x y condvar cc =
+    (* cpc_prim_sleep(x, y, condvar, cc); *)
+    [Call(None,Lval(Var cpc_sleep, NoOffset), [
+      x; y; condvar;
+      Lval(Var cc, NoOffset)],
+      locUnknown)] in
+  let cpc_wait = find_function "cpc_prim_wait" file in
+  let wait condvar cc =
+    (* cpc_prim_wait(condvar, cc); *)
+    [Call(None,Lval(Var cpc_wait, NoOffset), [
+      condvar;
+      Lval(Var cc, NoOffset)],
+      locUnknown)] in
+  let cpc_io_wait = find_function "cpc_prim_io_wait" file in
+  let io_wait x y condvar cc =
+    (* cpc_prim_io_wait(x, y, condvar, cc); *)
+    [Call(None,Lval(Var cpc_io_wait, NoOffset), [
+      x; y; condvar;
+      Lval(Var cc, NoOffset)],
+      locUnknown)] in
   let print = find_function "printf" file in
   let debug s =
           Call(None,Lval(Var print,
@@ -515,36 +542,34 @@ class cpsConverter = fun file ->
     | _ -> assert false
 
   method private do_convert return =
-    (* The stack should be a list of instructions, with an optional
-    cpc_construct in second position *)
-    let stack_tail, final_instr = match stack with
-    | [] | [{skind=Instr _}]
-    | {skind=Instr _} :: {skind=Instr _} :: _ -> stack, []
-    | {skind=Instr [i]} :: {skind=CpcYield _} :: tl ->
-        (tl, self#convert_instr i @ schedule current_continuation)
-    | {skind=Instr l} :: {skind=CpcWait _} :: tl ->
-        E.s (E.unimp "cpc_wait\n")
-    | {skind=Instr l} :: {skind=CpcSleep _} :: tl ->
-        E.s (E.unimp "cpc_sleep\n")
-    | {skind=Instr l} :: {skind=CpcDone _} :: tl ->
-        E.s (E.unimp "cpc_done\n")
-    | {skind=Instr l} :: {skind=CpcIoWait _} :: tl ->
-        E.s (E.unimp "cpc_io_wait\n")
-    | _ -> assert false in
-    let rec aux = function
-    | {skind=Instr l} :: tl ->
-        (List.flatten(List.rev_map self#convert_instr l)) @ aux tl
-    |  _ :: _ -> assert false
-    | [] -> match return with
-      (* End of stack, insert cpc_invoke if we pushed something *)
-      | None -> if final_instr = [] then
+    let extract = List.map (function
+      {skind=Instr l} -> l | _ -> assert false) in
+    mkStmt (Instr (
+    (* The stack should be a list of cps calls, or a cpc_construct
+       followed by a cps call (except for cpc_done). *)
+    match stack with
+    | [{skind=Instr [i]} ; {skind=CpcYield _}] ->
+        self#convert_instr i @ schedule current_continuation
+    | [{skind=Instr [i]} ; {skind=CpcWait (condvar, _)}] ->
+        self#convert_instr i @ wait condvar current_continuation
+    | [{skind=Instr [i]} ; {skind=CpcSleep (x, y, condvar, _)}] ->
+        self#convert_instr i @ sleep x y condvar current_continuation
+    | [{skind=CpcDone _}] ->
+        (* XXX DEBUGING *)
+        [debug ("cpc_done: discarding continuation")]
+    | [{skind=Instr [i]} ; {skind=CpcIoWait (x, y, condvar, _)}] ->
+        self#convert_instr i @ io_wait x y condvar current_continuation
+    | _ ->
+        (List.flatten (List.map (fun l ->
+        (List.flatten(List.rev_map self#convert_instr l))) (extract stack))) @
+      (match return with
+      | None ->
           [Call(None, Lval(Var cpc_invoke, NoOffset),
           [Lval(Var current_continuation, NoOffset)], locUnknown)]
-          else final_instr
       | Some _ -> (* returning something, we need to patch the continuation *)
           (* TODO *)
-          E.s (E.unimp "cpc_patch\n")
-    in mkStmt (Instr (aux stack_tail))
+          E.s (E.unimp "cpc_patch\n"))
+  ))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   | CpcYield _ | CpcDone _

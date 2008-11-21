@@ -113,11 +113,14 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
 #pragma cilnoremove("cpc_schedule")
 void cpc_schedule(struct cpc_continuation *cont);
 extern void cpc_main_loop(void);
+#pragma cilnoremove("cpc_prim_sleep")
 extern void cpc_prim_sleep(int, int, cpc_condvar*, cpc_continuation*);
 cpc_condvar *cpc_condvar_get(void);
 cpc_condvar *cpc_condvar_retain(cpc_condvar*);
 void cpc_condvar_release(cpc_condvar*);
+#pragma cilnoremove("cpc_prim_wait")
 void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
 void cpc_signal(cpc_condvar*);
 void cpc_signal_all(cpc_condvar*);
+#pragma cilnoremove("cpc_prim_io_wait")
 void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*);
