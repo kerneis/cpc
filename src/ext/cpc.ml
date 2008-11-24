@@ -945,8 +945,6 @@ class functionalizeGoto start file =
 
         val mutable acc = false (* are we in an accumulating phase?*)
         val mutable stack = []
-        val mutable do_return = false (* does the stack contain return
-        statements *)
         val mutable last_stmt = dummyStmt; (* last stmt processed -- the
         final goto must be added there when we're done accumulating *)
         val mutable new_start = dummyStmt; (* copy of start in the stack
@@ -955,7 +953,7 @@ class functionalizeGoto start file =
         method private unstack_block b =
           let return_val, return_exp =
             begin match ret_var with
-              | Some ret_var when do_return ->
+              | Some ret_var ->
               let ret_val = Var ret_var,NoOffset in
               setFunctionType fd (TFun (ret_type,Some [],false,[]));
               (Some ret_val, Some (Lval ret_val))
@@ -992,8 +990,7 @@ class functionalizeGoto start file =
           if s == start then acc <- true;
           (if acc then match has_return s with
           | None -> ()
-          | Some r when typeSig ret_type = typeSig r ->
-              do_return <- true
+          | Some r when typeSig ret_type = typeSig r -> ()
           | _ -> E.s (E.error "conflicting return types\n"));
           ChangeDoChildrenPost(s,
           (fun s ->
