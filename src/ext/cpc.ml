@@ -390,8 +390,10 @@ class markCps = fun file -> object(self)
     | If _ | Switch _ | Loop _ when c.cps_con ->
         E.log "control flow in cps context\n";
         raise (AddGoto c)
-    | _ when c.last_var != None ->
-        E.log "return variable ignored in cps context\n";
+    | _ when c.cps_con && c.last_var != None ->
+        E.log "return variable %s ignored in cps context:\n%a\n"
+        (match c.last_var with None -> assert false
+        | Some v -> v.vname) d_stmt s;
         raise (AddGoto c)
 
     (* Control flow otherwise *)
