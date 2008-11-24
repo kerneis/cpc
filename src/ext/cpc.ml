@@ -509,6 +509,7 @@ class cpsConverter = fun file ->
       x; y; condvar;
       Lval(Var cc, NoOffset)],
       locUnknown)] in
+  (* XXX DEBUGING *)
   let print = find_function "printf" file in
   let debug s =
           Call(None,Lval(Var print,
@@ -554,8 +555,10 @@ class cpsConverter = fun file ->
     | _ -> assert false
 
   method private do_convert return =
-    let extract = List.map (function
-      {skind=Instr l} -> l | _ -> assert false) in
+    let extract = E.log "***\n";List.map (function
+      {skind=Instr l} as s ->
+        (E.log "do_convert/extract: %a\n" d_stmt s; l)
+      | s -> (E.bug "do_convert/extract: %a\n" d_stmt s;[])) in
     mkStmt (Instr (
     (* The stack should be a list of cps calls, or a cpc_construct
        followed by a cps call (except for cpc_done). *)
