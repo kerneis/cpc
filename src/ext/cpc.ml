@@ -578,14 +578,14 @@ class cpsConverter = fun file ->
         (* convert cps calls to cpc_push *)
         (List.flatten (List.map (fun l ->
         (List.flatten(List.rev_map self#convert_instr l))) (extract stack))) @
-        (* cpc_invoke(current_continuation); *)
-        [Call(None, Lval(Var cpc_invoke, NoOffset),
-        [Lval(Var current_continuation, NoOffset)], locUnknown)] @
-        (* patch if we don't return void *)
+        (* patch if we don't return void --- Do this BEFORE cpc_invoke!*)
         (match return with None -> [] | Some ret_exp ->
         (* XXX DEBUGING *)
         debug ("patching before exiting "^ef.svar.vname) ::
-        patch current_continuation ret_exp ef)
+        patch current_continuation ret_exp ef) @
+        (* cpc_invoke(current_continuation); *)
+        [Call(None, Lval(Var cpc_invoke, NoOffset),
+        [Lval(Var current_continuation, NoOffset)], locUnknown)]
   ))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
