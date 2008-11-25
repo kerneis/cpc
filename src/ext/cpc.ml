@@ -854,7 +854,7 @@ let remove_free_vars enclosing_fun loc =
         method vinst = function
           | Call(lval, Lval ((Var f, NoOffset) as l), args, loc)
           when f == fd.svar ->
-            let args' = args @ new_args in
+            let args' = new_args @ args in
             E.log "inserting in %a\n" d_lval l;
             ChangeDoChildrenPost([Call(lval, Lval(Var f, NoOffset), args',
             loc)], fun x -> x)
@@ -863,13 +863,13 @@ let remove_free_vars enclosing_fun loc =
         method vstmt s = match s.skind with
           | CpcSpawn(Lval ((Var f, NoOffset) as l), args, loc)
           when f == fd.svar ->
-            let args' = args @ new_args in
+            let args' = new_args @ args in
             E.log "inserting in %a\n" d_lval l;
             s.skind <- CpcSpawn(Lval(Var f, NoOffset), args', loc);
             DoChildren
           | _ -> DoChildren
       end in
-    setFormals fd (fd.sformals @ new_formals);
+    setFormals fd (new_formals @ fd.sformals);
     (* XXX Beware, order matters! replaceVar must be called BEFORE insert, to
      * update the global map (h) which is then used by insert *)
     replace_vars fd map;
