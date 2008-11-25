@@ -670,7 +670,8 @@ class cpsConverter = fun file ->
         v.vcps <- false;
       ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
       end
-  | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps = true};sformals = args} as fd, _) ->
+  | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
+  true};sformals = args} as fd, _) as g ->
       E.log "GFun %s\n" fd.svar.vname;
       let new_arg = ["cpc_current_continuation", cpc_cont_ptr, []] in
       let arglist_struct = List.assoc fd.svar struct_map in
@@ -706,7 +707,7 @@ class cpsConverter = fun file ->
           )  args arglist_struct.cfields))
         :: fd.sbody.bstmts;
       fd.svar.vcps <- false; (* this is not a cps function anymore *)
-      DoChildren
+      ChangeDoChildrenPost([g], fun g -> assert(stack=[]); g)
   | _ -> DoChildren
 end
 
@@ -719,6 +720,16 @@ class cleaner = object(self)
     ChangeDoChildrenPost (b, fun b ->
       b.bstmts <- compactStmts b.bstmts;
       b)
+end
+
+class removeFusionAvoidance = object(self)
+  inherit nopCilVisitor
+
+  method vstmt = function
+  | {skind=Instr _; labels =  [Label ("__fusion_avoidance",_, false)]} as s ->
+      s.labels <- [];
+      DoChildren
+  | _ -> DoChildren
 end
 
 (********************* Lambda-lifting ****************************************)
@@ -1123,6 +1134,7 @@ let rec doit (f: file) =
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
     uniqueVarNames f; (* Lambda-lifting may introduce duplicate names *)
+    (*visitCilFile (new removeFusionAvoidance) f;*)
     visitCilFile (new cpsConverter f) f;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
