@@ -22,7 +22,7 @@ let cut_last l = let l' = List.rev l in
 
 let first_instr s = match s.skind with
   | Instr (hd::_) -> hd
-  | _ -> raise (Invalid_argument "firs_instr")
+  | _ -> raise (Invalid_argument "first_instr")
 
 class replaceGotos start replace_with =
   object(self)
@@ -560,6 +560,15 @@ class cpsConverter = fun file ->
       {skind=Instr l} as s ->
         (E.log "do_convert/extract: %a\n" d_stmt s; l)
       | s -> (E.bug "do_convert/extract: %a\n" d_stmt s;[])) in
+    let is_last_var v = match stack with
+    | {skind=Instr l} :: _ ->
+        assert (l!=[]);
+        begin match List.hd(List.rev l) with
+        | Call (Some (Var v', NoOffset),_,_,_) -> v = v'
+        | _ -> false
+        end
+    | [] -> false
+    | _ -> assert false in
     mkStmt (Instr (
     (* The stack should be a list of cps calls, or a cpc_construct
        followed by a cps call (except for cpc_done). *)
@@ -578,9 +587,12 @@ class cpsConverter = fun file ->
     | _ ->
         (* convert cps calls to cpc_push *)
         (List.flatten (List.map (fun l ->
-        (List.flatten(List.rev_map self#convert_instr l))) (extract stack))) @
-        (* patch if we don't return void --- Do this BEFORE cpc_invoke!*)
-        (match return with None -> [] | Some ret_exp ->
+        (List.flatten (List.rev_map self#convert_instr l))) (extract stack))) @
+        (* patch if we don't return void and if the last cps call did not patch
+         * for us --- Do this BEFORE cpc_invoke!*)
+        (match return with None -> []
+        | Some (Lval(Var v, NoOffset)) when is_last_var v -> []
+        | Some ret_exp ->
         (* XXX DEBUGING *)
         debug ("patching before exiting "^ef.svar.vname) ::
         patch current_continuation ret_exp ef) @
