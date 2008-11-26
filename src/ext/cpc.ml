@@ -722,16 +722,6 @@ class cleaner = object(self)
       b)
 end
 
-class removeFusionAvoidance = object(self)
-  inherit nopCilVisitor
-
-  method vstmt = function
-  | {skind=Instr _; labels =  [Label ("__fusion_avoidance",_, false)]} as s ->
-      s.labels <- [];
-      DoChildren
-  | _ -> DoChildren
-end
-
 (********************* Lambda-lifting ****************************************)
 
 module S = Set.Make(
@@ -1136,7 +1126,6 @@ let rec doit (f: file) =
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
     uniqueVarNames f; (* Lambda-lifting may introduce duplicate names *)
-    visitCilFile (new removeFusionAvoidance) f;
     visitCilFile (new cpsConverter f) f;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
@@ -1167,7 +1156,7 @@ let rec doit (f: file) =
         then add_goto s1 s2 f
         else
           (* avoid fusion of s1 and s2 *)
-          s2.labels <- [Label ("__fusion_avoidance",locUnknown, false)];
+          s2.cps <- true;
         end;
       doit f
   | SplitInstr (s, _, _) ->
