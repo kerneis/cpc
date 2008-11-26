@@ -62,7 +62,7 @@ let eliminate_switch_loop s =
 
 let make_label =
   let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "__cpc_label_%d" !i
+  fun () -> incr i; Printf.sprintf "__cpc_label%u_%d" (int_of_float (Unix.time())) !i
 
 let add_goto src dst file =
   assert (src != dummyStmt && dst != dummyStmt);
@@ -1114,8 +1114,6 @@ let pause = ref false
 let rec doit (f: file) =
   try
     E.log "********************* doit ******************\n";
-    (* BEWARE, the cleaner can "eat" some cps flags --- do NOT call it after
-     * markCps *)
     visitCilFileSameGlobals (new cleaner) f;
     let r = if !pause then read_line () else "" in
     if r = "q" then E.log "quit!\n" else
