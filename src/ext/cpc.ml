@@ -357,6 +357,7 @@ class markCps = fun file -> object(self)
           c.cps_con <- false;
           c.last_stmt <- dummyStmt;
           c.next_stmt <- dummyStmt;
+          c.last_var <- None;
         end;
         SkipChildren
     | CpcDone _ when c.cps_fun ->
