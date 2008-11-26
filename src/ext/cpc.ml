@@ -1124,6 +1124,8 @@ let pause = ref false
 let rec doit (f: file) =
   try
     E.log "********************* doit ******************\n";
+    (* BEWARE, the cleaner can "eat" some cps flags --- do NOT call it after
+     * markCps *)
     visitCilFileSameGlobals (new cleaner) f;
     let r = if !pause then read_line () else "" in
     if r = "q" then E.log "quit!\n" else
@@ -1134,7 +1136,7 @@ let rec doit (f: file) =
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
     uniqueVarNames f; (* Lambda-lifting may introduce duplicate names *)
-    (*visitCilFile (new removeFusionAvoidance) f;*)
+    visitCilFile (new removeFusionAvoidance) f;
     visitCilFile (new cpsConverter f) f;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
