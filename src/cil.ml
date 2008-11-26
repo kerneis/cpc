@@ -3633,6 +3633,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
     fprint out !lineLength (indent ind (align ++ self#pBlock () b))
 
   method private pStmtNext (next: stmt) () (s: stmt) =
+    (text (if s.cps then "/* cps */" else "")) ++
     (* print the labels *)
     ((docList ~sep:line (fun l -> self#pLabel () l)) () s.labels)
       (* print the statement itself. If the labels are non-empty and the
