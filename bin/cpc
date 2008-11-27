@@ -1,0 +1,39 @@
+#!/bin/sh
+
+CPC='/home/gabriel/these/cil-cpc/obj/x86_LINUX/cilly.asm.exe'
+
+set -e
+
+defobject=a.out
+
+while getopts cgOto: f; do
+    case $f in
+        c) nolink=-c; unset defobject;;
+        g) debug=-g;;
+        O) optimise=-O3;;
+        t) tail=-t; taildef=-DCPC_TAIL_RECURSIVE_COMPILER;;
+        o) object="$OPTARG";;
+    esac
+done
+
+shift $(($OPTIND - 1))
+
+if [ $# -ne 1 ]; then
+    echo 'Syntax: cpc [flags] source' >&2
+    exit 1
+fi
+
+source="$1"
+
+defobject="${defobject:-"${source%.cpc}.o"}"
+object=${object:-"$defobject"}
+if [ -z "$nolink" ]; then
+    runtime="/usr/local/lib/cpc_runtime.o /usr/local/lib/libcpc.a"
+fi
+
+gcc -E -P -I runtime -Wall -D__extension__= -D'__attribute__(x)=' $taildef - \
+  <"$source" >"$source.i"
+#$CPC $tail "$source.i" "$source.i.c"
+$CPC "$source.i" --out "$source.i.c"
+gcc -I runtime -Wall $nolink $debug $optimise $taildef -o "$object" \
+  "$source.i.c" $runtime
