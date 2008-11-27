@@ -1,0 +1,27 @@
+#include <stdio.h>
+
+#include "cpc_lib.h"
+
+cps void
+cpsmain()
+{
+    /* Displays M1, A1, B1, then M2, A2, B2. */
+
+    cpc_barrier *barrier;
+    barrier = cpc_barrier_get(3);
+
+    cpc_spawn { printf("A1\n"); cpc_barrier_await(barrier); printf("A2\n"); }
+    cpc_spawn { printf("B1\n"); cpc_barrier_await(barrier); printf("B2\n"); }
+
+    printf("M1\n");
+    cpc_barrier_await(barrier);
+    printf("M2\n");
+}
+
+int
+main()
+{
+    cpc_spawn cpsmain();
+    cpc_main_loop();
+    return 0;
+}

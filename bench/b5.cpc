@@ -1,0 +1,48 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+volatile int arg;
+volatile int res;
+
+cpc_condvar *c1, *c2;
+
+cps void
+thread_routine(void)
+{
+    while(1) {
+        cpc_wait(c1);
+        res = arg;
+        cpc_signal(c2);
+    }
+}
+
+int
+main()
+{
+    int rc;
+    int i, j, s;
+
+    c1 = cpc_condvar_get();
+    c2 = cpc_condvar_get();
+
+    arg = -1;
+    res = 0;
+    cpc_spawn thread_routine();
+
+    cpc_spawn {
+        for(i = 0; i < 10; i++) {
+            s = 0;
+            for(j = 0; j < 10000; j++) {
+                res = -1;
+                arg = j;
+                cpc_signal(c1);
+                cpc_wait(c2);
+                s += res;
+                arg = -1;
+            }
+        }
+        printf("%d\n", s);
+    }
+    cpc_main_loop();
+    return 0;
+}

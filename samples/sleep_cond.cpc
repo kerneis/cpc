@@ -1,0 +1,27 @@
+#include <stdio.h>
+
+int
+main()
+{
+    /* Displays A1, B1; after 500ms, displays B2 and A2 (immediately). */
+
+    cpc_condvar *c;
+    c = cpc_condvar_get();
+    cpc_spawn { 
+        printf("A1\n"); 
+        cpc_sleep(1, 0, c);
+        cpc_signal(c);
+        printf("A2\n"); 
+    }
+    cpc_spawn { 
+        printf("B1\n"); 
+        cpc_sleep(0, 500000, c);
+        cpc_signal(c);
+        printf("B2\n"); 
+    }
+    cpc_main_loop();
+    cpc_condvar_release(c);
+    return 0;
+}
+
+    

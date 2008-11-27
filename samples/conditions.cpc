@@ -1,0 +1,17 @@
+#include <stdio.h>
+
+int
+main()
+{
+    /* Displays A1, B1, B2, A2. */
+
+    cpc_condvar *c;
+    c = cpc_condvar_get();
+    cpc_spawn { printf("A1\n"); cpc_wait(c); printf("A2\n"); }
+    cpc_spawn { printf("B1\n"); cpc_signal(c); printf("B2\n"); }
+    cpc_main_loop();
+    cpc_condvar_release(c);
+    return 0;
+}
+
+    

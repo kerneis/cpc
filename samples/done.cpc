@@ -1,0 +1,10 @@
+#include <stdio.h>
+
+int
+main()
+{
+    /* Displays A, B never happens. */
+    cpc_spawn { printf("A\n"); cpc_done; printf("B\n"); }
+    cpc_main_loop();
+    return 0;
+}

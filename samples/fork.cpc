@@ -1,0 +1,14 @@
+#include <stdio.h>
+
+int
+main()
+{
+
+    /* Displays B, A, B. */
+    cpc_spawn {
+        cpc_fork { printf("A\n"); }
+        printf("B\n");
+    }
+    cpc_main_loop();
+    return 0;
+}
