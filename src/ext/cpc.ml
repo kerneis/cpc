@@ -60,9 +60,15 @@ let eliminate_switch_loop s =
     (fun () -> failwith "break with no enclosing loop")
     (fun () -> failwith "continue with no enclosing loop") (-1)
 
+let timestamp () =
+  let t = Unix.gettimeofday() in
+  let sec = int_of_float t in
+  let msec = int_of_float ((t -. floor(t)) *. 1000.) in
+  Printf.sprintf "%u%u" sec msec
+
 let make_label =
   let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "__cpc_label%u_%d" (int_of_float (Unix.time())) !i
+  fun () -> incr i; Printf.sprintf "__cpc_label_%s_%d" (timestamp ()) !i
 
 let add_goto src dst file =
   assert (src != dummyStmt && dst != dummyStmt);
