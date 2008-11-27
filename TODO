@@ -13,10 +13,13 @@
 [src/ext/cfg.ml]
 * Check local functions support.
 [src/ext/cpc.ml]
-* Improve support of y = f(...) (when f is a cps function)
+* Remove bugs and warnings when -check is enabled
+* Fix cpc_done
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
   expressions, should we ignore them too?
   => probably yes, just like if, switch, etc.
 [src/frontc/cabs2cil.ml]
 * check transformation of CPC_FUN (scoping, globals, etc.)
+* set doCollapseCallCast to true to avoid some temporary variables?
+  (see [http://manju.cs.berkeley.edu/cil/cil007.html#toc10])

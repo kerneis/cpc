@@ -1123,9 +1123,13 @@ let init file = begin
 end
 
 let pause = ref false
+let stage = ref 10
+let set_stage x = stage := x
+
 
 let rec doit (f: file) =
   try
+    if !stage < 0 then raise Exit;
     E.log "********************* doit ******************\n";
     visitCilFileSameGlobals (new cleaner) f;
     let r = if !pause then read_line () else "" in
@@ -1134,12 +1138,20 @@ let rec doit (f: file) =
     else if r = "r" then (pause := false; doit f)
     else begin
     visitCilFileSameGlobals (new markCps f) f;
+    if !stage < 1 then raise Exit;
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
+    if !stage < 2 then raise Exit;
+    E.log "Alpha-conversion\n";
     uniqueVarNames f; (* Lambda-lifting may introduce duplicate names *)
+    if !stage < 3 then raise Exit;
+    E.log "Cps conversion\n";
     visitCilFile (new cpsConverter f) f;
+    if !stage < 4 then raise Exit;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
+    if !stage < 5 then raise Exit;
+    E.log "Alpha-conversion\n";
     uniqueVarNames f; (* just in case *)
     E.log "Finished!\n";
     end
@@ -1198,10 +1210,12 @@ let rec doit (f: file) =
 
 let feature : featureDescr =
   { fd_name = "cpc";
-    fd_enabled = ref false;
+    fd_enabled = ref true;
     fd_description = "cpc translation to C";
-    fd_extraopt = [];
+    fd_extraopt =
+      [("--stage",Arg.Int set_stage,"<n> how far you want to go");
+       ("--pause",Arg.Set pause,"step by step execution")];
     fd_doit = (fun f -> init f ; doit f);
-    fd_post_check = true;
+    fd_post_check = false; (* CIL doesn't like cast of function types *)
   }
 
