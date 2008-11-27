@@ -7,7 +7,6 @@
 #include <sys/socket.h>
 #include <netinet/tcp.h>
 
-#include "cpc_runtime.h"
 #include "cpc_barrier.h"
 #include "cpc_io.h"
 

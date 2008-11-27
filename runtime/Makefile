@@ -31,7 +31,8 @@ clean:
 	rm -f cpc_barrier.c cpc_io.c
 
 .cpc.cpi:
-	$(CC) -E -P $(CFLAGS) -D__extension__= -D'__attribute__(x)=' - \
+	$(CC) -E -P $(CFLAGS) -include cpc_runtime.h \
+	  -D__extension__= -D'__attribute__(x)=' - \
 	    <$< >$@
 
 .cpi.c:

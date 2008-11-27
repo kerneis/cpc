@@ -1,6 +1,7 @@
 CPC='../obj/x86_LINUX/cilly.asm.exe'
 
-CFLAGS=-O3 -Wall -g -I../runtime
+CLIBS=-I ../runtime
+CFLAGS=-O3 -Wall -g $(CLIBS)
 
 LDLIBS=-lcpc /usr/local/lib/cpc_runtime.o
 
@@ -8,14 +9,14 @@ LDLIBS=-lcpc /usr/local/lib/cpc_runtime.o
 
 .PHONY: all
 
-all: barrier conditions done fork loops sleep sleep_cond tcat \
+all: barrier conditions done loops sleep sleep_cond tcat \
      trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
      static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
 	 trivial-httpd-pth static-httpd-pth
 
 clean:
-	rm -f *.o *~ *.cpi
-	rm -f barrier conditions done fork loops sleep sleep_cond tcat \
+	rm -f *.o *~ *.cpi trivial-httpd.c
+	rm -f barrier conditions done loops sleep sleep_cond tcat \
 	 trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
  	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
 	 trivial-httpd-pth static-httpd-pth
@@ -25,8 +26,6 @@ barrier: barrier.o
 conditions: conditions.o
 
 done: done.o
-
-fork: fork.o
 
 loops: loops.o
 
@@ -39,7 +38,8 @@ tcat: tcat.o
 trivial-httpd: trivial-httpd.o
 trivial-httpd.o: trivial-httpd.c
 static-httpd.cpi: trivial-httpd.cpc
-	$(CPP) -P $(CFLAGS) -D__extension__= -D'__attribute__(x)=' \
+	$(CPP) -P $(CFLAGS) -include cpc_runtime.h \
+	-D__extension__= -D'__attribute__(x)=' \
 	-DSTATIC - <$< >$@
 static-httpd: static-httpd.o
 
@@ -67,7 +67,8 @@ static-httpd-pth.o: trivial-httpd-pth.c
 	-rm -f *.cpi
 
 .cpc.cpi:
-	$(CPP) -P $(CFLAGS)  -D__extension__= -D'__attribute__(x)=' - \
+	$(CPP) -P $(CFLAGS) -include cpc_runtime.h \
+	  -D__extension__= -D'__attribute__(x)=' - \
 	    <$< >$@
 
 .cpi.c:
