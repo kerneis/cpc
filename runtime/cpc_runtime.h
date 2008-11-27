@@ -3,6 +3,7 @@ Copyright (c) 2004, 2005 by Juliusz Chroboczek.
 Experimental; do not redistribute.
 */
 #include <string.h>
+#include <stdio.h>
 
 #pragma cilnoremove("printf")
 

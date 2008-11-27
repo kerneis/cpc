@@ -1,0 +1,153 @@
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/tcp.h>
+
+#include "cpc_runtime.h"
+#include "cpc_barrier.h"
+#include "cpc_io.h"
+
+int
+cpc_setup_descriptor(int fd, int nonagle)
+{
+    int rc;
+    int one = 1;
+
+    rc = fcntl(fd, F_GETFL, 0);
+    if(rc < 0) return -1;
+    rc = fcntl(fd, F_SETFL, rc | O_NONBLOCK);
+    if(rc < 0) return -1;
+    rc = setsockopt(fd, SOL_TCP, TCP_NODELAY, (char*)&one, sizeof(one));
+    return 1;
+}
+
+cps int
+cpc_write(int fd, void *buf, size_t count)
+{
+    int rc;
+ again:
+    rc = write(fd, buf, count);
+    if(rc < 0 && (errno == EAGAIN || errno == EINTR)) {
+        cpc_io_wait(fd, CPC_IO_OUT);
+        goto again;
+    }
+    return rc;
+}
+
+cps int
+cpc_write_timeout(int fd, void *buf, size_t count, int secs, int micros)
+{
+    cpc_condvar *c = cpc_condvar_get();
+    cpc_barrier *barrier = cpc_barrier_get(3);
+    int *done = malloc(sizeof(int));
+    int *ret = malloc(sizeof(int));
+    int rc;
+
+    *done = 0;
+
+    cpc_spawn {
+        cpc_sleep(secs, micros, c);
+        if(!*done) {
+            *done = 2;
+            cpc_signal(c);
+        }
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_spawn {
+    again:
+        rc = write(fd, buf, count);
+        if(rc < 0 && (errno == EAGAIN || errno == EINTR)) {
+            cpc_io_wait(fd, CPC_IO_OUT, c);
+            if(!*done)
+                goto again;
+        }
+        if(!*done) {
+            *done = 1;
+            cpc_signal(c);
+        }
+        *ret = rc;
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_barrier_await(barrier);
+    cpc_condvar_release(c);
+    rc = *ret;
+    free(ret);
+    if(*done == 1) {
+        free(done);
+        return rc;
+    } else {
+        free(done);
+        errno = EAGAIN;
+        return -1;
+    }
+}
+    
+cps int
+cpc_read(int fd, void *buf, size_t count)
+{
+    int rc;
+
+ again:
+    cpc_io_wait(fd, CPC_IO_IN);
+    rc = read(fd, buf, count);
+    if(rc < 0 && (errno == EAGAIN || errno == EINTR))
+        goto again;
+
+    return rc;
+}
+
+cps int
+cpc_read_timeout(int fd, void *buf, size_t count, int secs, int micros)
+{
+    cpc_condvar *c = cpc_condvar_get();
+    cpc_barrier *barrier = cpc_barrier_get(3);
+    int *done = malloc(sizeof(int));
+    int *ret = malloc(sizeof(int));
+    int rc;
+
+    *done = 0;
+
+    cpc_spawn {
+        cpc_sleep(secs, micros, c);
+        if(!*done) {
+            *done = 2;
+            cpc_signal(c);
+        }
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_spawn {
+    again:
+        cpc_io_wait(fd, CPC_IO_IN, c);
+        rc = read(fd, buf, count);
+        if(!*done && rc < 0 && (errno == EAGAIN || errno == EINTR))
+            goto again;
+        if(!*done) {
+            *done = 1;
+            cpc_signal(c);
+        }
+        *ret = rc;
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_barrier_await(barrier);
+    cpc_condvar_release(c);
+
+    rc = *ret;
+    free(ret);
+
+    if(*done == 1) {
+        free(done);
+        return rc;
+    } else {
+        free(done);
+        errno = EAGAIN;
+        return -1;
+    }
+}

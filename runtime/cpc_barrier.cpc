@@ -1,0 +1,72 @@
+/*
+Copyright (c) 2005 by Juliusz Chroboczek.
+Copyright (c) 2005 by Edouard Boucher.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+#include <stdlib.h>
+#include <assert.h>
+
+#include "cpc_runtime.h"
+#include "cpc_barrier.h"
+
+struct cpc_barrier {
+    cpc_condvar *condition;
+    int count;
+};
+
+cpc_barrier *
+cpc_barrier_get(int count)
+{
+    cpc_barrier *barrier;
+    cpc_condvar *condition;
+
+    assert(count > 0);
+
+    condition = cpc_condvar_get();
+    if(condition == NULL)
+        return NULL;
+
+    barrier = malloc(sizeof(cpc_barrier));
+    if(barrier == NULL)
+        return NULL;
+
+    barrier->condition = condition;
+    barrier->count = count;
+
+    return barrier;
+}
+
+cps void
+cpc_barrier_await(cpc_barrier *barrier)
+{
+    assert(barrier->count > 0);
+    barrier->count--;
+    if(barrier->count > 0) {
+        cpc_wait(barrier->condition);
+        return;
+    } else {
+        cpc_signal_all(barrier->condition);
+        cpc_condvar_release(barrier->condition);
+        free(barrier);
+        cpc_yield;
+        return;
+    }
+}
