@@ -72,7 +72,7 @@ let make_label =
 
 let add_goto src dst file =
   assert (src != dummyStmt && dst != dummyStmt);
-  E.log "add goto from %a\nto %a\n" d_stmt src d_stmt dst;
+  (*E.log "add goto from %a\nto %a\n" d_stmt src d_stmt dst;*)
   let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
   (* XXX DO NOT USE copyClearStmt HERE --- we want to keep the labels *)
   let src' = {(mkEmptyStmt()) with skind=src.skind; cps = src.cps} in
@@ -84,7 +84,7 @@ let add_goto src dst file =
   dst.labels <- [Label (make_label(), dst_loc, false)]
 
 let add_goto_after src enclosing file stack =
-  E.log "add_goto_after: enclosing is %a\n" d_stmt enclosing;
+  (*E.log "add_goto_after: enclosing is %a\n" d_stmt enclosing;*)
   let dst = mkEmptyStmt() in
   let copy = copyClearStmt enclosing file stack in
   add_goto src dst file;
@@ -132,7 +132,7 @@ let last_var start file =
     None
   with
   | FoundVar v ->
-      E.log "found last_var %a\n" d_lval (Var v, NoOffset);
+      (*E.log "found last_var %a\n" d_lval (Var v, NoOffset);*)
       Some v
   | Not_found -> None
 
@@ -163,7 +163,7 @@ let enclosing_function start file =
   end in
   try
     visitCilFileSameGlobals visitor file;
-    E.log "enclosing function not found for: %a\n" d_stmt start;
+    (*E.log "enclosing function not found for: %a\n" d_stmt start;*)
     raise Not_found
   with FoundFun f -> f
 
@@ -320,14 +320,14 @@ class markCps = fun file -> object(self)
     (* Broken control flow *)
     if c.cps_con && c.next_stmt != s
     then begin
-      E.log "control flow broken in cps context: %a\ninstead of: %a\n***\n"
+      (*E.log "control flow broken in cps context: %a\ninstead of: %a\n***\n"
       d_stmt s
-      d_stmt c.next_stmt;
+      d_stmt c.next_stmt;*)
     raise (AddGoto c) end
 
     (* Potential goto into cps context *)
     else if c.cps_con && (List.exists is_label s.labels) then
-      (E.log "label in cps context! ";
+      ((*E.log "label in cps context! ";*)
       raise (FunctionalizeGoto (s,c)))
     else begin
       if c.cps_con then assert(s.labels = []); (* no Case or Default in cps
@@ -341,7 +341,7 @@ class markCps = fun file -> object(self)
         s.cps <- c.cps_con;
         SkipChildren
     | Instr (hd::_) when c.cps_con && not(self#is_cps hd) ->
-        E.log "not cps instruction in cps context: %a\n" d_instr hd;
+        (*E.log "not cps instruction in cps context: %a\n" d_instr hd;*)
         raise (AddGoto c)
     | Instr _ ->
         (* if in cps_context, c.last_var has been updated by the former
@@ -395,37 +395,40 @@ class markCps = fun file -> object(self)
     | Break _ | Continue _ when c.cps_con ->
         raise (TrivializeStmt c.enclosing_stmt);
     | If _ | Switch _ | Loop _ when c.cps_con ->
-        E.log "control flow in cps context\n";
+        (*E.log "control flow in cps context\n";*)
         raise (AddGoto c)
     | _ when c.cps_con && c.last_var != None ->
-        E.log "return variable %s ignored in cps context:\n%a\n"
+        (*E.log "return variable %s ignored in cps context:\n%a\n"
         (match c.last_var with None -> assert false
-        | Some v -> v.vname) d_stmt s;
+        | Some v -> v.vname) d_stmt s;*)
         raise (AddGoto c)
 
     (* Control flow otherwise *)
     | Goto (g, _)
         when enclosing_function s file != enclosing_function !g file ->
-          E.log "live goto!\n";
+          (*E.log "live goto!\n";*)
           raise (FunctionalizeGoto (!g,c))
     | Goto _ | Break _ | Continue _ -> SkipChildren
     | If _ -> ChangeDoChildrenPost (s, fun s ->
         if c.next_stmt != dummyStmt then begin
-          E.log "escaping cps context in if statement %a\n***\n" dn_stmt s;
+          (*E.log "escaping cps context in if statement %a\n***\n" dn_stmt s;*)
           raise (AddGoto c) end
         else s)
     | Switch _ ->
         c.enclosing_stmt <- s;
         ChangeDoChildrenPost (s, fun s ->
           if c.next_stmt != dummyStmt then begin
-            E.log "escaping cps context in switch statement %a\n***\n" dn_stmt s;
+            (*E.log "escaping cps context in switch statement %a\n***\n"
+             * dn_stmt
+             * s;*)
             raise (AddGoto c) end
           else s)
     | Loop _ ->
         c.enclosing_stmt <- s;
         ChangeDoChildrenPost (s, fun s ->
           if c.next_stmt != dummyStmt then begin
-            E.log "escaping cps context in loop statement %a\n***\n" dn_stmt s;
+            (*E.log "escaping cps context in loop statement %a\n***\n" dn_stmt
+             * s;*)
             assert(c.next_stmt == s);
             raise (TrivializeStmt s) end
           else s)
@@ -517,10 +520,12 @@ class cpsConverter = fun file ->
       Lval(Var cc, NoOffset)],
       locUnknown)] in
   (* XXX DEBUGING *)
-  let print = find_function "printf" file in
-  let debug s =
-          Call(None,Lval(Var print,
-          NoOffset),[mkString (Printf.sprintf "** %s\n" s)],locUnknown) in
+  let debug =
+    if !E.debugFlag then
+      let print = find_function "printf" file in
+      fun s -> [Call(None,Lval(Var print,
+      NoOffset),[mkString (Printf.sprintf "** %s\n" s)],locUnknown)]
+    else fun _ -> [] in
   object(self)
   inherit (enclosingFunction dummyFunDec)
 
@@ -562,9 +567,8 @@ class cpsConverter = fun file ->
     | _ -> assert false
 
   method private do_convert return =
-    let extract = E.log "***\n";List.map (function
-      {skind=Instr l} as s ->
-        (E.log "do_convert/extract: %a\n" d_stmt s; l)
+    let extract = List.map (function
+      | {skind=Instr l} -> l
       | s -> (E.bug "do_convert/extract: %a\n" d_stmt s;[])) in
     let is_last_var v = match stack with
     | {skind=Instr l} :: _ ->
@@ -587,7 +591,7 @@ class cpsConverter = fun file ->
         self#convert_instr i @ sleep x y condvar current_continuation
     | [{skind=CpcDone _}] ->
         (* XXX DEBUGING *)
-        [debug ("cpc_done: discarding continuation")]
+        debug ("cpc_done: discarding continuation")
     | [{skind=Instr [i]} ; {skind=CpcIoWait (x, y, condvar, _)}] ->
         self#convert_instr i @ io_wait x y condvar current_continuation
     | _ ->
@@ -600,7 +604,7 @@ class cpsConverter = fun file ->
         | Some (Lval(Var v, NoOffset)) when is_last_var v -> []
         | Some ret_exp ->
         (* XXX DEBUGING *)
-        debug ("patching before exiting "^ef.svar.vname) ::
+        debug ("patching before exiting "^ef.svar.vname) @
         patch current_continuation ret_exp ef) @
         (* cpc_invoke(current_continuation); *)
         [Call(None, Lval(Var cpc_invoke, NoOffset),
@@ -632,7 +636,7 @@ class cpsConverter = fun file ->
 
   method vglob = function
   | (GVarDecl ({vtype=TFun(_,args,_,_) ; vcps = true} as v, _) as g) ->
-      E.log "GVarDecl %s\n" v.vname;
+      (*E.log "GVarDecl %s\n" v.vname;*)
       (* do not deal with a declaration twice *)
       if List.mem_assq v struct_map then ChangeTo [] else begin
       let args = argsToList args in
@@ -659,7 +663,7 @@ class cpsConverter = fun file ->
         let field_args, last_arg = cut_last new_arglist_fun.sformals in
         mkBlock ([mkStmt(Instr (
           (* XXX DEBUGING *)
-          (debug ("Entering "^new_arglist_fun.svar.vname)) ::
+          (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
           (* temp_arglist = cpc_alloc(&last_arg,sizeof(arglist_struct)) *)
           Call(
             Some (Var temp_arglist, NoOffset),
@@ -675,7 +679,7 @@ class cpsConverter = fun file ->
               Lval(Var v, NoOffset),
               locUnknown
             )
-          ) field_args arglist_struct.cfields));
+          ) field_args arglist_struct.cfields)));
         (* return last_arg *)
         mkStmt(Return (
           Some (Lval(Var last_arg,NoOffset)),
@@ -691,7 +695,7 @@ class cpsConverter = fun file ->
       end
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
   true};sformals = args} as fd, _) as g ->
-      E.log "GFun %s\n" fd.svar.vname;
+      (*E.log "GFun %s\n" fd.svar.vname;*)
       let new_arg = ["cpc_current_continuation", cpc_cont_ptr, []] in
       let arglist_struct = List.assoc fd.svar struct_map in
       let cpc_arguments =
@@ -707,7 +711,7 @@ class cpsConverter = fun file ->
       fd.sbody.bstmts <-
         mkStmt(Instr (
           (* XXX DEBUGING *)
-          (debug ("Entering "^fd.svar.vname)) ::
+          (debug ("Entering "^fd.svar.vname)) @ (
           (* cpc_arguments = cpc_dealloc(cpc_current_continuation,sizeof(arglist_struct)) *)
           Call(
             Some (Var cpc_arguments, NoOffset),
@@ -723,7 +727,7 @@ class cpsConverter = fun file ->
               Lval (mkMem (Lval (Var cpc_arguments,NoOffset)) (Field (f, NoOffset))),
               locUnknown
             )
-          )  args arglist_struct.cfields))
+          )  args arglist_struct.cfields)))
         :: fd.sbody.bstmts;
       fd.svar.vcps <- false; (* this is not a cps function anymore *)
       ChangeDoChildrenPost([g], fun g -> assert(stack=[]); g)
@@ -773,7 +777,7 @@ let replace_vars fd map =
       try
         ChangeTo(
           let r = List.assoc v current_map in
-          E.log "%s(%d)->%s(%d)\n" v.vname v.vid r.vname r.vid;
+          (*E.log "%s(%d)->%s(%d)\n" v.vname v.vid r.vname r.vid;*)
           r)
     with
     Not_found -> SkipChildren
@@ -797,7 +801,7 @@ class replaceVisitor = fun enclosing -> object(self)
       try
         ChangeTo(
           let r = List.assoc v map in
-          E.log "%s(%d)->%s(%d)\n" v.vname v.vid r.vname r.vid;
+          (*E.log "%s(%d)->%s(%d)\n" v.vname v.vid r.vname r.vid;*)
           r)
       with Not_found -> SkipChildren
 
@@ -872,19 +876,19 @@ let remove_free_vars enclosing_fun loc =
         inherit (replaceVisitor enclosing_fun)
 
         method vinst = function
-          | Call(lval, Lval ((Var f, NoOffset) as l), args, loc)
+          | Call(lval, Lval ((Var f, NoOffset) as _l), args, loc)
           when f == fd.svar ->
             let args' = new_args @ args in
-            E.log "inserting in %a\n" d_lval l;
+            (*E.log "inserting in %a\n" d_lval l;*)
             ChangeDoChildrenPost([Call(lval, Lval(Var f, NoOffset), args',
             loc)], fun x -> x)
           | _ -> SkipChildren
 
         method vstmt s = match s.skind with
-          | CpcSpawn(Lval ((Var f, NoOffset) as l), args, loc)
+          | CpcSpawn(Lval ((Var f, NoOffset) as _l), args, loc)
           when f == fd.svar ->
             let args' = new_args @ args in
-            E.log "inserting in %a\n" d_lval l;
+            (*E.log "inserting in %a\n" d_lval l;*)
             s.skind <- CpcSpawn(Lval(Var f, NoOffset), args', loc);
             DoChildren
           | _ -> DoChildren
@@ -894,15 +898,15 @@ let remove_free_vars enclosing_fun loc =
      * update the global map (h) which is then used by insert *)
     replace_vars fd map;
     enclosing_fun.sbody <- visitCilBlock insert enclosing_fun.sbody;
-    E.log "%a\n" d_global (GVarDecl(fd.svar,locUnknown)) in
+    (*E.log "%a\n" d_global (GVarDecl(fd.svar,locUnknown))*) in
   let rec iter = function
   | fd :: tl ->
       let fv = free_vars fd in
       if S.is_empty fv
       then iter tl
       else begin
-        E.log "free variables in %s:\n" fd.svar.vname;
-        S.iter (fun v -> E.log "- %s(%d)\n" v.vname v.vid) fv;
+        (*E.log "free variables in %s:\n" fd.svar.vname;
+        S.iter (fun v -> E.log "- %s(%d)\n" v.vname v.vid) fv;*)
         introduce_new_vars fd (S.elements fv);
         (* XXX It is necessary to restart from scratch with a fresh list of
          * local functions, for they have changed when introducing new vars
@@ -1113,9 +1117,9 @@ let rec functionalize start f =
   with
   | BreakContinue s ->
       assert( s != dummyStmt);
-      E.log "found escaping break or continue: trivializing\n%a\n" d_stmt s;
+      (*E.log "found escaping break or continue: trivializing\n%a\n" d_stmt s;*)
       eliminate_switch_loop s;
-      E.log "***\nresult:\n%a\n" d_stmt s;
+      (*E.log "***\nresult:\n%a\n" d_stmt s;*)
   (*| LiveStmt s ->
       E.log "found a live label: functionalizing it\n%a\n" d_stmt s;
       functionalize s f*)
@@ -1136,7 +1140,7 @@ let set_stage x = stage := x
 let rec doit (f: file) =
   try
     if !stage < 0 then raise Exit;
-    E.log "********************* doit ******************\n";
+    (*E.log "********************* doit ******************\n";*)
     visitCilFileSameGlobals (new cleaner) f;
     let r = if !pause then read_line () else "" in
     if r = "q" then E.log "quit!\n" else
@@ -1165,7 +1169,7 @@ let rec doit (f: file) =
   | TrivializeStmt s when s = dummyStmt ->
       E.s (E.error "break or continue with no enclosing loop")
   | TrivializeStmt s ->
-      E.log "TrivializeStmt %a\n" d_stmt s;
+      (*E.log "TrivializeStmt %a\n" d_stmt s;*)
       eliminate_switch_loop s;
       doit f
   | AddGoto {last_stmt = src; next_stmt = dst} ->
@@ -1179,7 +1183,8 @@ let rec doit (f: file) =
       let (l1,l2) = split_instr [] l in
         begin
         let (s1, s2) = (mkStmt (Instr l1), mkStmt (Instr l2)) in
-        E.log "SplitInstr %a\n:\n%a\n***\n%a\n" d_stmt s d_stmt s1 d_stmt s2;
+        (*E.log "SplitInstr %a\n:\n%a\n***\n%a\n" d_stmt s d_stmt s1 d_stmt
+         * s2;*)
         s.skind <- Block (mkBlock ([s1; s2]));
         if shall_add_goto
         then add_goto s1 s2 f
@@ -1191,10 +1196,10 @@ let rec doit (f: file) =
   | SplitInstr (s, _, _) ->
       E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
   | FunctionalizeGoto (start,c) ->
-      E.log "functionalize goto\n";
+      (*E.log "functionalize goto\n";*)
       begin match c.enclosing_stmt.skind with
       | Switch _ | Loop _ ->
-          E.log "enclosing is a switch or a loop: trivializing first\n";
+          (*E.log "enclosing is a switch or a loop: trivializing first\n";*)
           eliminate_switch_loop c.enclosing_stmt;
           doit f
       | _ -> functionalize start f; doit f
@@ -1204,7 +1209,7 @@ let rec doit (f: file) =
   | SplitCpc ({skind=CpcSleep _} as s,last_stmt)
   | SplitCpc ({skind=CpcIoWait _} as s,last_stmt) ->
       let (s1,s2) = (copyClearStmt s f [], mkStmt (Instr [])) in
-      E.log "SplitCpc\n";
+      (*E.log "SplitCpc\n";*)
       s.skind <- Block (mkBlock ([s1; s2]));
       if last_stmt != dummyStmt && last_stmt.cps
       then add_goto last_stmt s f;
