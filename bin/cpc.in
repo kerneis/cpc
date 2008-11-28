@@ -31,7 +31,8 @@ if [ -z "$nolink" ]; then
     runtime="/usr/local/lib/cpc_runtime.o /usr/local/lib/libcpc.a"
 fi
 
-gcc -E -P -I runtime -Wall -D__extension__= -D'__attribute__(x)=' $taildef - \
+gcc -E -P -I runtime -include cpc_runtime.h -Wall \
+  -D__extension__= -D'__attribute__(x)=' $taildef - \
   <"$source" >"$source.i"
 #$CPC $tail "$source.i" "$source.i.c"
 $CPC "$source.i" --out "$source.i.c"
