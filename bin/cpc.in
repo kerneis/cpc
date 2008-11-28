@@ -1,6 +1,6 @@
 #!/bin/sh
 
-CPC='/home/gabriel/these/cil-cpc/obj/x86_LINUX/cilly.asm.exe'
+CPC='@CILHOME@/obj/@ARCHOS@/cilly.asm.exe'
 
 set -e
 

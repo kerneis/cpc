@@ -5802,6 +5802,15 @@ chmod -w Makefile.features
   fi
 }
 {
+  if test -f bin/cpc.in; then
+    ac_config_files="$ac_config_files bin/cpc"
+
+  else
+    true
+    #echo "skipping [bin/cpc] because it's not in this distribution"
+  fi
+}
+{
   if test -f bin/patcher.bat.in; then
     ac_config_files="$ac_config_files bin/patcher.bat"
 
