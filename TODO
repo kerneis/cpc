@@ -4,17 +4,20 @@
 * Handle CPC constructs in computeCFGInfo (function succpred_stmt)
   => needs careful analysis. Handling in xform_switch_stmt is probably
      broken too, btw. Anyway, this is now done in src/ext/cfg.ml.
+* Improve xform_switch_stmt (needless to eliminate inner loops)
 * peepHole doesn't dive into CpcFun
   => I think one should lambda-lift CpcFun before using it anyway.
-     It is used in src/frontc/cabs2cil.ml too, but there is not
+     It is used in src/frontc/cabs2cil.ml too, but there is no
      local functions at this stage.
 [src/ext/...]
 * Check and correct the rough support of cpc constructs
 [src/ext/cfg.ml]
 * Check local functions support.
+  => look quite good, but who knows?
 [src/ext/cpc.ml]
 * Remove bugs and warnings when -check is enabled
 * Fix cpc_done
+* Improve lambda-lifting (hard job)
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
   expressions, should we ignore them too?
