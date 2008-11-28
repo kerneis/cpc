@@ -16,7 +16,6 @@
   => look quite good, but who knows?
 [src/ext/cpc.ml]
 * Remove bugs and warnings when -check is enabled
-* Fix cpc_done
 * Improve lambda-lifting (hard job)
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain

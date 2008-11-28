@@ -498,6 +498,11 @@ class cpsConverter = fun file ->
     (* cpc_schedule(apply_later); *)
     [Call(None,Lval(Var cpc_schedule, NoOffset),
       [Lval(Var cc, NoOffset)],locUnknown)] in
+  let cpc_continuation_free = find_function "cpc_continuation_free" file in
+  let continuation_free cc =
+    (* cpc_continuation_free(cc); *)
+    [Call(None,Lval(Var cpc_continuation_free, NoOffset),
+      [Lval(Var cc, NoOffset)],locUnknown)] in
   let cpc_sleep = find_function "cpc_prim_sleep" file in
   let sleep x y condvar cc =
     (* cpc_prim_sleep(x, y, condvar, cc); *)
@@ -591,7 +596,8 @@ class cpsConverter = fun file ->
         self#convert_instr i @ sleep x y condvar current_continuation
     | [{skind=CpcDone _}] ->
         (* XXX DEBUGING *)
-        debug ("cpc_done: discarding continuation")
+        debug ("cpc_done: discarding continuation") @
+        continuation_free current_continuation
     | [{skind=Instr [i]} ; {skind=CpcIoWait (x, y, condvar, _)}] ->
         self#convert_instr i @ io_wait x y condvar current_continuation
     | _ ->
