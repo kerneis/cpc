@@ -1205,6 +1205,6 @@ let feature : featureDescr =
       [("--stage",Arg.Int set_stage,"<n> how far you want to go");
        ("--pause",Arg.Set pause,"step by step execution")];
     fd_doit = (fun f -> init f ; doit f);
-    fd_post_check = false; (* CIL doesn't like cast of function types *)
+    fd_post_check = true;
   }
 

@@ -15,7 +15,6 @@
 * Check local functions support.
   => look quite good, but who knows?
 [src/ext/cpc.ml]
-* Remove bugs and warnings when -check is enabled
 * Inline cpc_patch
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
