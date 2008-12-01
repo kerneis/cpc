@@ -759,25 +759,16 @@ module S = Set.Make(
     let compare x y = compare x.vid y.vid
   end)
 
-module H = Hashtbl
+let make_fresh_varinfo fd =
+  let args = fd.sformals in
+  let new_args = List.map (fun v -> copyVarinfo v v.vname) args in
+  setFormals fd new_args;
+  List.combine args new_args
 
-let h = H.create 32
-
-let get_map fd =
-  try H.find h fd with Not_found -> []
-
-let extend_map fd map =
-  let l = get_map fd in
-  (* we shall not overwrite any previous binding *)
-  assert(List.for_all (fun (x,_) -> not (List.mem_assq x l)) map);
-  H.replace h fd (map @ l)
-
-(* extend the map associated to fd and replace variables accordingly *)
-let replace_vars fd map =
-  let visitor = object(self)
+class uniqueVarinfo = object(self)
     inherit nopCilVisitor
 
-    val mutable current_map = map
+    val mutable current_map = []
 
     method vvrbl (v:varinfo) : varinfo visitAction =
       try
@@ -789,27 +780,17 @@ let replace_vars fd map =
     Not_found -> SkipChildren
 
     method vstmt s = match s.skind with
-    | CpcFun(fd, _) ->
-        let m = current_map in
-        current_map <- (get_map fd)@m;
-        ChangeDoChildrenPost(s, fun s ->
-          current_map <- m; s)
+    | CpcFun _ ->
+        E.s (E.bug "uniqueVarinfo should be called after lambda-lifting\n")
     | _ -> DoChildren
-  end in
-  extend_map fd map;
-  fd.sbody <- visitCilBlock visitor fd.sbody
 
-class replaceVisitor = fun enclosing -> object(self)
-    inherit (enclosingFunction enclosing)
-
-    method vvrbl (v:varinfo) : varinfo visitAction =
-      let map = assert(not (ef == dummyFunDec)); get_map ef in
-      try
-        ChangeTo(
-          let r = List.assoc v map in
-          (*E.log "%s(%d)->%s(%d)\n" v.vname v.vid r.vname r.vid;*)
-          r)
-      with Not_found -> SkipChildren
+  method vglob = function
+  | GFun (fd, loc) as g when fd.svar.vcps ->
+      let map = make_fresh_varinfo fd in
+      current_map <- map;
+      ChangeDoChildrenPost([g], fun g ->
+        current_map <- []; g)
+  | _ -> SkipChildren
 
   end
 
@@ -874,20 +855,17 @@ let remove_free_vars enclosing_fun loc =
         GVarDecl(fd.svar,locUnknown) ::
           make_globals (GFun(remove_local_fun fd,locUnknown) :: gfuns) tl in
   let introduce_new_vars fd fv =
-    let new_formals = List.map (fun v -> copyVarinfo v v.vname) fv in
     let new_args = List.map (fun v -> Lval(Var v, NoOffset)) fv in
-    let map = List.combine fv new_formals in
     let insert =
       object(self)
-        inherit (replaceVisitor enclosing_fun)
+        inherit nopCilVisitor
 
         method vinst = function
           | Call(lval, Lval ((Var f, NoOffset) as _l), args, loc)
           when f == fd.svar ->
             let args' = new_args @ args in
             (*E.log "inserting in %a\n" d_lval l;*)
-            ChangeDoChildrenPost([Call(lval, Lval(Var f, NoOffset), args',
-            loc)], fun x -> x)
+            ChangeTo([Call(lval, Lval(Var f, NoOffset), args', loc)])
           | _ -> SkipChildren
 
         method vstmt s = match s.skind with
@@ -896,15 +874,13 @@ let remove_free_vars enclosing_fun loc =
             let args' = new_args @ args in
             (*E.log "inserting in %a\n" d_lval l;*)
             s.skind <- CpcSpawn(Lval(Var f, NoOffset), args', loc);
-            DoChildren
+            SkipChildren
           | _ -> DoChildren
       end in
-    setFormals fd (new_formals @ fd.sformals);
-    (* XXX Beware, order matters! replaceVar must be called BEFORE insert, to
-     * update the global map (h) which is then used by insert *)
-    replace_vars fd map;
+    setFormals fd (fv @ fd.sformals);
     enclosing_fun.sbody <- visitCilBlock insert enclosing_fun.sbody;
     (*E.log "%a\n" d_global (GVarDecl(fd.svar,locUnknown))*) in
+  let local_funs = collect_local_fun enclosing_fun in
   let rec iter = function
   | fd :: tl ->
       let fv = free_vars fd in
@@ -914,14 +890,10 @@ let remove_free_vars enclosing_fun loc =
         (*E.log "free variables in %s:\n" fd.svar.vname;
         S.iter (fun v -> E.log "- %s(%d)\n" v.vname v.vid) fv;*)
         introduce_new_vars fd (S.elements fv);
-        (* XXX It is necessary to restart from scratch with a fresh list of
-         * local functions, for they have changed when introducing new vars
-        E.log "Result:\n%a\n**************\n" d_global (GFun (enclosing_fun,loc));
-        *)
-        iter (collect_local_fun enclosing_fun)
+        iter local_funs
       end
-  | [] -> make_globals [] (collect_local_fun enclosing_fun) in
-  iter (collect_local_fun enclosing_fun)
+  | [] -> make_globals [] local_funs in
+  iter local_funs
 
 class lambdaLifter = object(self)
   inherit nopCilVisitor
@@ -989,12 +961,9 @@ class functionalizeGoto start file =
               (Some ret_val, Some (Lval ret_val))
               | _ -> None, None
             end in
-          let args, map = match last_var with
-          | None -> [], []
-          | Some v ->
-              let v' = copyVarinfo v v.vname in
-              setFormals fd [v'];
-              [Lval(Var v, NoOffset)], [(v, v')] in
+          let args = match last_var with
+          | None -> []
+          | Some v -> setFormals fd [v]; [Lval(Var v, NoOffset)] in
           let call_fun loc = [
             mkStmt (Instr
               [Call(return_val,Lval(Var fd.svar, NoOffset),args,loc)]);
@@ -1009,10 +978,7 @@ class functionalizeGoto start file =
           assert(new_start != dummyStmt);
           assert(new_start == List.hd fd.sbody.bstmts);
           assert(List.for_all is_label new_start.labels); (*No Case or Default*)
-          (* XXX Beware, order matters! replaceVars must be called AFTER
-           * replaceGotos, for fd.sbody might contain recursive calls to itself *)
           visitCilFileSameGlobals (new replaceGotos new_start call_fun) file;
-          replace_vars fd map;
           new_start.labels <- []
 
         method vstmt (s: stmt) : stmt visitAction =
@@ -1157,16 +1123,14 @@ let rec doit (f: file) =
     if !stage < 1 then raise Exit;
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
+    visitCilFileSameGlobals (new uniqueVarinfo) f;
     if !stage < 2 then raise Exit;
-    E.log "Alpha-conversion\n";
-    uniqueVarNames f; (* Lambda-lifting may introduce duplicate names *)
-    if !stage < 3 then raise Exit;
     E.log "Cps conversion\n";
     visitCilFile (new cpsConverter f) f;
-    if !stage < 4 then raise Exit;
+    if !stage < 3 then raise Exit;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
-    if !stage < 5 then raise Exit;
+    if !stage < 4 then raise Exit;
     E.log "Alpha-conversion\n";
     uniqueVarNames f; (* just in case *)
     E.log "Finished!\n";
