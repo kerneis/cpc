@@ -16,7 +16,7 @@
   => look quite good, but who knows?
 [src/ext/cpc.ml]
 * Remove bugs and warnings when -check is enabled
-* Improve lambda-lifting (hard job)
+* Inline cpc_patch
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
   expressions, should we ignore them too?
