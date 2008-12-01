@@ -566,7 +566,7 @@ class cpsConverter = fun file ->
           Some(Var cc , NoOffset),
           Lval(Var cpc_push, NoOffset),
           [Lval(Var cc, NoOffset);
-          mkCast (Lval(Var f, NoOffset)) cpc_fun_ptr],
+          mkCast (mkAddrOf (Var f, NoOffset)) cpc_fun_ptr],
           locUnknown
         )] @ post
     | _ -> assert false
