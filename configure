@@ -5802,21 +5802,21 @@ chmod -w Makefile.features
   fi
 }
 {
-  if test -f bin/cpc.in; then
-    ac_config_files="$ac_config_files bin/cpc"
-
-  else
-    true
-    #echo "skipping [bin/cpc] because it's not in this distribution"
-  fi
-}
-{
   if test -f bin/patcher.bat.in; then
     ac_config_files="$ac_config_files bin/patcher.bat"
 
   else
     true
     #echo "skipping [bin/patcher.bat] because it's not in this distribution"
+  fi
+}
+{
+  if test -f bin/cpc.in; then
+    ac_config_files="$ac_config_files bin/cpc"
+
+  else
+    true
+    #echo "skipping [bin/cpc] because it's not in this distribution"
   fi
 }
 {
@@ -6417,6 +6417,7 @@ do
     "test/Makefile") CONFIG_FILES="$CONFIG_FILES test/Makefile" ;;
     "bin/cilly.bat") CONFIG_FILES="$CONFIG_FILES bin/cilly.bat" ;;
     "bin/patcher.bat") CONFIG_FILES="$CONFIG_FILES bin/patcher.bat" ;;
+    "bin/cpc") CONFIG_FILES="$CONFIG_FILES bin/cpc" ;;
     "bin/CilConfig.pm") CONFIG_FILES="$CONFIG_FILES bin/CilConfig.pm" ;;
     "doc/index.html") CONFIG_FILES="$CONFIG_FILES doc/index.html" ;;
     "doc/header.html") CONFIG_FILES="$CONFIG_FILES doc/header.html" ;;
@@ -6972,6 +6973,7 @@ echo "$as_me: $ac_file is unchanged" >&6;}
     "test/Makefile":F) chmod a-w test/Makefile ;;
     "bin/cilly.bat":F) chmod a-w,a+x bin/cilly.bat ;;
     "bin/patcher.bat":F) chmod a-w,a+x bin/patcher.bat ;;
+    "bin/cpc":F) chmod a-w,a+x bin/cpc ;;
     "bin/CilConfig.pm":F) chmod a-w bin/CilConfig.pm ;;
     "doc/index.html":F) chmod a-w doc/index.html ;;
     "doc/header.html":F) chmod a-w doc/header.html ;;
