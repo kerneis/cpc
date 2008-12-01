@@ -23,5 +23,3 @@
   => probably yes, just like if, switch, etc.
 [src/frontc/cabs2cil.ml]
 * check transformation of CPC_FUN (scoping, globals, etc.)
-* set doCollapseCallCast to true to avoid some temporary variables?
-  (see [http://manju.cs.berkeley.edu/cil/cil007.html#toc10])
