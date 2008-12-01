@@ -753,11 +753,13 @@ end
 
 (********************* Lambda-lifting ****************************************)
 
-module S = Set.Make(
+module S = Usedef.VS (*Set.Make(
   struct
     type t = varinfo
     let compare x y = compare x.vid y.vid
-  end)
+  end)*)
+
+module L = Liveness
 
 let make_fresh_varinfo fd =
   let args = fd.sformals in
