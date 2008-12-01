@@ -474,6 +474,11 @@ class cpsConverter = fun file ->
   let cpc_cont_ptr =
     TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
   let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
+  let cpc_condvar_ptr = TPtr(find_type "cpc_condvar" file,[]) in
+  let check_null condvar =
+    if condvar = mkCast (integer 0) voidPtrType
+    then mkCast (integer 0) cpc_condvar_ptr
+    else condvar in
   let size_t = find_type "size_t" file in
   let cpc_alloc = find_function "cpc_alloc" file in
   let cpc_dealloc =  find_function "cpc_dealloc" file in
@@ -507,7 +512,7 @@ class cpsConverter = fun file ->
   let sleep x y condvar cc =
     (* cpc_prim_sleep(x, y, condvar, cc); *)
     [Call(None,Lval(Var cpc_sleep, NoOffset), [
-      x; y; condvar;
+      x; y; check_null condvar;
       Lval(Var cc, NoOffset)],
       locUnknown)] in
   let cpc_wait = find_function "cpc_prim_wait" file in
@@ -521,7 +526,7 @@ class cpsConverter = fun file ->
   let io_wait x y condvar cc =
     (* cpc_prim_io_wait(x, y, condvar, cc); *)
     [Call(None,Lval(Var cpc_io_wait, NoOffset), [
-      x; y; condvar;
+      x; y; check_null condvar;
       Lval(Var cc, NoOffset)],
       locUnknown)] in
   (* XXX DEBUGING *)
@@ -670,12 +675,12 @@ class cpsConverter = fun file ->
         mkBlock ([mkStmt(Instr (
           (* XXX DEBUGING *)
           (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
-          (* temp_arglist = cpc_alloc(&last_arg,sizeof(arglist_struct)) *)
+          (* temp_arglist = cpc_alloc(&last_arg,(int)sizeof(arglist_struct)) *)
           Call(
             Some (Var temp_arglist, NoOffset),
             Lval (Var cpc_alloc, NoOffset),
             [AddrOf (Var last_arg, NoOffset);
-            SizeOf (TComp(arglist_struct,[]))],
+            mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
             locUnknown
             ) ::
           (* temp_arglist -> field = field *)
@@ -718,12 +723,13 @@ class cpsConverter = fun file ->
         mkStmt(Instr (
           (* XXX DEBUGING *)
           (debug ("Entering "^fd.svar.vname)) @ (
-          (* cpc_arguments = cpc_dealloc(cpc_current_continuation,sizeof(arglist_struct)) *)
+          (* cpc_arguments = cpc_dealloc(cpc_current_continuation,
+                (int)sizeof(arglist_struct)) *)
           Call(
             Some (Var cpc_arguments, NoOffset),
             Lval (Var cpc_dealloc, NoOffset),
             [Lval (Var current_continuation, NoOffset);
-            SizeOf (TComp(arglist_struct,[]))],
+            mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
             locUnknown
             ) ::
           (* field = cpc_arguments -> field *)
