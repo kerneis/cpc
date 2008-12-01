@@ -548,7 +548,7 @@ class cpsConverter = fun file ->
         var,
         [(* apply_later = (void* ) 0; *)
         Set((Var var, NoOffset),
-          mkCast (integer 0) voidPtrType,locUnknown)],
+          mkCast (integer 0) cpc_cont_ptr,locUnknown)],
         schedule var
       else (current_continuation,[],[]) in
     match i with
