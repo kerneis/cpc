@@ -19,6 +19,9 @@ let external_patch = ref false
 
 let fst4 (x,_,_,_) = x
 
+(* override Cil.sizeOf *)
+let sizeOf t = SizeOf(t)
+
 let cut_last l = let l' = List.rev l in
   List.rev (List.tl l'), List.hd l'
 
