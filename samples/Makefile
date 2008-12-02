@@ -9,7 +9,7 @@ LDLIBS=-lcpc /usr/local/lib/cpc_runtime.o
 
 .PHONY: all
 
-all: barrier conditions done loops sleep sleep_cond tcat trivial-httpd
+all: barrier conditions done loops patch sleep sleep_cond tcat trivial-httpd
 
 servers: trivial-httpd trivial-httpd-fork trivial-httpd-nptl \
     trivial-httpd-st static-httpd static-httpd-fork static-httpd-nptl \
@@ -17,7 +17,7 @@ servers: trivial-httpd trivial-httpd-fork trivial-httpd-nptl \
 
 clean:
 	rm -f *.o *~ *.cpi trivial-httpd.c
-	rm -f barrier conditions done loops sleep sleep_cond tcat \
+	rm -f barrier conditions done loops patch sleep sleep_cond tcat \
 	 trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
  	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
 	 trivial-httpd-pth static-httpd-pth
@@ -29,6 +29,8 @@ conditions: conditions.o
 done: done.o
 
 loops: loops.o
+
+patch: patch.o
 
 sleep: sleep.o
 
