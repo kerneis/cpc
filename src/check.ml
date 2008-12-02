@@ -789,10 +789,16 @@ and checkStmt (s: stmt) =
           ignore(checkExp false e'')
       | CpcFun (f, l) ->
           if not f.svar.vcps then
-            E.s (warn "Internal function %s without cps tag"
+            E.s (bug "Internal function %s without cps tag"
               f.svar.vname)
           else
-            checkGlobal (GFun (f, l))
+            let (vnl,ret,stmts,gotos) =
+              (!varNamesList,!currentReturnType,!statements,!gotoTargets) in
+            checkGlobal (GFun (f, l));
+            varNamesList := vnl;
+            currentReturnType := ret;
+            statements := stmts;
+            gotoTargets := gotos
           )
     () (* argument of withContext *)
 

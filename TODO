@@ -22,3 +22,7 @@
   => probably yes, just like if, switch, etc.
 [src/frontc/cabs2cil.ml]
 * check transformation of CPC_FUN (scoping, globals, etc.)
+[src/check.ml]
+* do the right thing with CpcFun (there is much more to save and restore
+  than the few global references I deal with --- hashtables, startEnv(),
+  etc.)
