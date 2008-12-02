@@ -3,7 +3,7 @@ CPC='../obj/x86_LINUX/cilly.asm.exe'
 CLIBS=-I ../runtime
 CFLAGS=-O3 -Wall -g $(CLIBS)
 
-LDLIBS=-lcpc /usr/local/lib/cpc_runtime.o
+LDLIBS=../runtime/libcpc.a ../runtime/cpc_runtime.o
 
 .SUFFIXES: .cpc .cpi
 
