@@ -295,7 +295,7 @@ class markCps = fun file -> object(self)
         E.warn "%a should be a variable" dn_lval l; c.last_var <- None; false
     (* Weird call *)
     | Call _ ->
-        E.warn
+        if c.cps_fun then E.warn
           "I hope this has nothing to do with a cps call: %a"
           dn_instr i;
         c.last_var <- None;
