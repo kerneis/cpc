@@ -738,7 +738,7 @@ class cpsConverter = fun file ->
       (* add former arguments to slocals *)
       fd.slocals <- args @ fd.slocals;
       fd.sformals <- [];
-      setFunctionTypeMakeFormals fd (TFun(ret_typ, Some new_arg, va, attr));
+      setFunctionTypeMakeFormals fd (TFun(voidType, Some new_arg, va, attr));
       current_continuation <- begin match fd.sformals with
         | [x] -> x
         | _ -> assert false end;
