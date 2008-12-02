@@ -13,6 +13,8 @@ let is_label = function Label _ -> true | _ -> false
 exception FoundFun of fundec
 exception FoundVar of varinfo
 
+let external_patch = ref false
+
 (*************** Utility functions *******************************************)
 
 let fst4 (x,_,_,_) = x
@@ -486,18 +488,36 @@ class cpsConverter = fun file ->
     try find_function "cpc_invoke_continuation" file
     with E.Error -> find_function "cpc_really_invoke_continuation" file in
   let cpc_push = find_function "cpc_continuation_push" file in
-  let cpc_patch = find_function "cpc_continuation_patch" file in
   let patch cont value f =
-    (* typ temp = value;
-     * cpc_patch(cont, sizeof(typ), &temp); *)
     let typ = typeOf value in
-    let temp = (Var (makeTempVar f ~name:"patch" typ), NoOffset) in
-    [ Set(temp, value, locUnknown);
-      Call(None,Lval(Var cpc_patch, NoOffset), [
-      Lval(Var cont, NoOffset);
-      mkCast (sizeOf typ) size_t;
-      mkCast (mkAddrOf temp) voidPtrType],
-      locUnknown)] in
+    let temp = makeTempVar f ~name:"patch" typ in
+    (* typ temp = value *)
+    (Set((Var temp, NoOffset), value, locUnknown)) ::
+    if !external_patch then
+      let cpc_patch = find_function "cpc_continuation_patch" file in
+       (* cpc_patch(cont, sizeof(typ), &temp); *)
+      [ Call(None,Lval(Var cpc_patch, NoOffset), [
+        Lval(Var cont, NoOffset);
+        mkCast (sizeOf typ) size_t;
+        mkCast (mkAddrOf (Var temp, NoOffset)) voidPtrType],
+        locUnknown)]
+    else
+      let memcpy = find_function "memcpy" file in
+      let cpc_arg = makeTempVar f ~name:"cpc_arg" voidPtrType in [
+      (* cpc_arg = cont->c + cont->length - sizeof(cpc_function* ) - sizeof(typ) *)
+        Set((Var cpc_arg, NoOffset),
+        Formatcil.cExp
+          "cont->c + cont->length - %e:size - %e:anothersize"
+          [("cont", Fv cont); ("size", Fe (sizeOf cpc_fun_ptr));
+           ("anothersize", Fe (sizeOf typ))],
+        locUnknown);
+      (* memcpy(cpc_arg, &temp, sizeof(typ)) *)
+        Call(None, Lval(Var memcpy, NoOffset), [
+        Lval(Var cpc_arg, NoOffset);
+        mkCast (mkAddrOf (Var temp, NoOffset)) voidPtrType;
+        mkCast (sizeOf typ) size_t],
+        locUnknown)]
+    in
   let cpc_schedule = find_function "cpc_schedule" file in
   let schedule cc =
     (* cpc_schedule(apply_later); *)
@@ -1203,7 +1223,9 @@ let feature : featureDescr =
     fd_description = "cpc translation to C";
     fd_extraopt =
       [("--stage",Arg.Int set_stage,"<n> how far you want to go");
-       ("--pause",Arg.Set pause,"step by step execution")];
+       ("--pause",Arg.Set pause,"step by step execution");
+       ("--external-patch",Arg.Set external_patch,"call
+       cpc_continuation_patch from the runtime library")];
     fd_doit = (fun f -> init f ; doit f);
     fd_post_check = true;
   }
