@@ -32,7 +32,6 @@ clean:
 
 .cpc.cpi:
 	$(CC) -E -P $(CFLAGS) -include cpc_runtime.h \
-	  -D__extension__= -D'__attribute__(x)=' - \
 	    <$< >$@
 
 .cpi.c:

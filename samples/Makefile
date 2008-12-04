@@ -71,7 +71,6 @@ static-httpd-pth.o: trivial-httpd-pth.c
 
 .cpc.cpi:
 	$(CPP) -P $(CFLAGS) -include cpc_runtime.h \
-	  -D__extension__= -D'__attribute__(x)=' - \
 	    <$< >$@
 
 .cpi.c:

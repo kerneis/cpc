@@ -28,12 +28,11 @@ source="$1"
 defobject="${defobject:-"${source%.cpc}.o"}"
 object=${object:-"$defobject"}
 if [ -z "$nolink" ]; then
-    runtime="/usr/local/lib/cpc_runtime.o /usr/local/lib/libcpc.a"
+    runtime="@CILHOME@/runtime/cpc_runtime.o @CILHOME@/runtime/libcpc.a"
 fi
 
 gcc -E -P -I @CILHOME@/runtime -include cpc_runtime.h -Wall \
-  -D__extension__= -D'__attribute__(x)=' $taildef - \
-  <"$source" >"$source.i"
+  $taildef - <"$source" >"$source.i"
 #$CPC $tail "$source.i" "$source.i.c"
 $CPC "$source.i" --out "$source.i.c"
 gcc -I @CILHOME@/runtime -Wall $nolink $debug $optimise $taildef -o "$object" \
