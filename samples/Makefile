@@ -71,7 +71,7 @@ static-httpd-pth.o: trivial-httpd-pth.c
 
 .cpc.cpi:
 	$(CPP) -P $(CFLAGS) -include cpc_runtime.h \
-	    <$< >$@
+	  - <$< >$@
 
 .cpi.c:
 	$(CPC) --check $< --out $@

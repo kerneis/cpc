@@ -32,7 +32,7 @@ clean:
 
 .cpc.cpi:
 	$(CC) -E -P $(CFLAGS) -include cpc_runtime.h \
-	    <$< >$@
+	  - <$< >$@
 
 .cpi.c:
 	$(CPC) --check $< --out $@
