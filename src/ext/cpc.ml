@@ -669,7 +669,7 @@ class cpsConverter = fun file ->
   | _ -> DoChildren
 
   method vglob = function
-  | (GVarDecl ({vtype=TFun(_,args,_,_) ; vcps = true} as v, _) as g) ->
+  | (GVarDecl ({vtype=TFun(_,args,va,attr) ; vcps = true} as v, _) as g) ->
       (*E.log "GVarDecl %s\n" v.vname;*)
       (* do not deal with a declaration twice *)
       if List.mem_assq v struct_map then ChangeTo [] else begin
@@ -722,9 +722,12 @@ class cpsConverter = fun file ->
       struct_map <- (v, arglist_struct) :: struct_map;
       newarglist_map <-
         (v, Lval (Var new_arglist_fun.svar, NoOffset)) :: newarglist_map;
-      if v.vstorage = Extern then
+      if v.vstorage = Extern then begin
         (* mark it as completed (will be done later for non-extern function *)
         v.vcps <- false;
+        v.vtype <- TFun(voidType,
+          Some ["cpc_current_continuation", cpc_cont_ptr, []], va, attr)
+        end;
       ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
       end
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
