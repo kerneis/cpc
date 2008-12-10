@@ -679,7 +679,7 @@ class cpsConverter = fun file ->
         name, typ, None, attr, locUnknown ) args in
       let arglist_struct =
         mkCompInfo true (v.vname^"_arglist")
-          (fun _ -> fields) [] in
+          (fun _ -> fields) [Attr("packed",[])] in
       let comptag = GCompTag (arglist_struct, locUnknown) in
       let new_arglist_fun = emptyFunction (v.vname^"_new_arglist") in
       let cont_name = Printf.sprintf "cpc__continuation_%d" (newVID()) in
