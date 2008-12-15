@@ -22,6 +22,10 @@ let fst4 (x,_,_,_) = x
 (* override Cil.sizeOf *)
 let sizeOf t = SizeOf(t)
 
+let addr_of v =
+  v.vaddrof <- true;
+  mkAddrOf (Var v, NoOffset)
+
 let cut_last l = let l' = List.rev l in
   List.rev (List.tl l'), List.hd l'
 
@@ -502,7 +506,7 @@ class cpsConverter = fun file ->
       [ Call(None,Lval(Var cpc_patch, NoOffset), [
         Lval(Var cont, NoOffset);
         mkCast (sizeOf typ) size_t;
-        mkCast (mkAddrOf (Var temp, NoOffset)) voidPtrType],
+        mkCast (addr_of temp) voidPtrType],
         locUnknown)]
     else
       let memcpy = find_function "memcpy" file in
@@ -517,7 +521,7 @@ class cpsConverter = fun file ->
       (* memcpy(cpc_arg, &temp, sizeof(typ)) *)
         Call(None, Lval(Var memcpy, NoOffset), [
         Lval(Var cpc_arg, NoOffset);
-        mkCast (mkAddrOf (Var temp, NoOffset)) voidPtrType;
+        mkCast (addr_of temp) voidPtrType;
         mkCast (sizeOf typ) size_t],
         locUnknown)]
     in
@@ -594,7 +598,7 @@ class cpsConverter = fun file ->
           Some(Var cc , NoOffset),
           Lval(Var cpc_push, NoOffset),
           [Lval(Var cc, NoOffset);
-          mkCast (mkAddrOf (Var f, NoOffset)) cpc_fun_ptr],
+          mkCast (addr_of f) cpc_fun_ptr],
           locUnknown
         )] @ post
     | _ -> assert false
@@ -702,7 +706,7 @@ class cpsConverter = fun file ->
           Call(
             Some (Var temp_arglist, NoOffset),
             Lval (Var cpc_alloc, NoOffset),
-            [AddrOf (Var last_arg, NoOffset);
+            [addr_of last_arg;
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
             locUnknown
             ) ::
