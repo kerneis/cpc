@@ -103,7 +103,7 @@ handle_connection(int fd)
 {
     int rc, n, ffd, len;
     char *buf, *fn;
-    int i, val, tmp;
+    int i, val;
 
     val = 1;
     rc = setsockopt(fd, SOL_TCP, TCP_NODELAY, (char *)&val, sizeof(val));
@@ -114,8 +114,7 @@ handle_connection(int fd)
     rc = 0;
 
  again:
-    tmp = cpc_read_timeout(fd, buf + rc, 4096 - rc, 60, 0);
-    rc += tmp ;
+    rc += cpc_read_timeout(fd, buf + rc, 4096 - rc, 60, 0);
     if(rc < 0) { perror("read"); goto fail; }
 
     if(rc < 4)
@@ -151,8 +150,7 @@ handle_connection(int fd)
         }
 
     if(rc < 4096) {
-        tmp = cpc_read_timeout(fd, buf + rc, 4096 - rc, 60, 0);
-        rc += tmp ;
+        rc += cpc_read_timeout(fd, buf + rc, 4096 - rc, 60, 0);
         goto search;
     }
  
