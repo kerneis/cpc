@@ -776,6 +776,56 @@ class cpsConverter = fun file ->
   | _ -> DoChildren
 end
 
+(********************* Avoid ampersand on local variables ********************)
+
+class avoidAmpersand f =
+  let has_ampersand v = v.vaddrof && not v.vglob in
+  let insert_malloc l stmts =
+    let malloc = Lval(Var (findOrCreateFunc f "malloc" (TFun(voidPtrType, Some
+    ["size", find_type "size_t" f, []], false, []))), NoOffset) in
+    let free = Lval(Var (findOrCreateFunc f "free" (TFun(voidType, Some ["ptr",
+    voidPtrType, []], false, []))), NoOffset) in
+    let body, ret = cut_last stmts in
+    let m = mkStmt (Instr (List.map (fun v ->
+      let mem_v = mkMem (Lval (Var v, NoOffset)) NoOffset in
+      Call(Some (Var v, NoOffset), malloc, [sizeOf (typeOfLval mem_v)],locUnknown)) l)) in
+    let f = [mkStmt (Instr (List.map (fun v ->
+      Call(None,free,[Lval(Var v, NoOffset)],locUnknown)) l))] in
+    m :: body @ f @ [ret]
+  in
+  object(self)
+  inherit nopCilVisitor
+
+  method vlval = function
+  | (Var v, _) as l when has_ampersand v ->
+      ChangeDoChildrenPost (l, fun l -> match l with
+      | Var v, offset -> mkMem (Lval (Var v, NoOffset)) offset
+      | _ -> assert false)
+  | _ -> DoChildren
+
+  method vfunc fd =
+    ChangeDoChildrenPost(fd, fun fd ->
+    let locals = List.filter has_ampersand fd.slocals in
+    let formals = List.filter has_ampersand fd.sformals in
+    let new_formals = List.map (fun v -> {(copyVarinfo v ("__"^v.vname)) with
+    vaddrof = false}) formals in
+    let full_formals = List.map (fun v -> List.assoc v (List.combine
+    (formals@fd.sformals) (new_formals@fd.sformals))) fd.sformals in
+    let init_formals = mkStmt (Instr (List.map2 (fun v v' ->
+    Set(mkMem (Lval (Var v, NoOffset)) NoOffset,
+    Lval(Var v', NoOffset), locUnknown)) formals new_formals)) in
+    let l = locals @ formals in
+    if l <> [] then begin
+      Oneret.oneret fd;
+      setFormals fd full_formals;
+      List.iter (fun v -> v.vtype <- TPtr(v.vtype,[])) l;
+      fd.slocals <- fd.slocals @ formals;
+      fd.sbody <- {fd.sbody with bstmts =
+        insert_malloc l (init_formals :: fd.sbody.bstmts)
+      };
+     end;fd)
+end
+
 (********************* Cleaning **********************************************)
 
 class cleaner = object(self)
@@ -1138,18 +1188,19 @@ let rec functionalize start f =
 
 (*****************************************************************************)
 
-let init file = begin
-  lineDirectiveStyle := None;
-end
-
 let pause = ref false
 let stage = ref 10
 let set_stage x = stage := x
 
+let init file = begin
+  lineDirectiveStyle := None;
+  if !stage < 1 then raise Exit;
+  E.log "Avoid ampersand\n";
+  visitCilFileSameGlobals (new avoidAmpersand file) file;
+end
 
 let rec doit (f: file) =
   try
-    if !stage < 0 then raise Exit;
     (*E.log "********************* doit ******************\n";*)
     visitCilFileSameGlobals (new cleaner) f;
     let r = if !pause then read_line () else "" in
@@ -1157,18 +1208,20 @@ let rec doit (f: file) =
     if r = "d" then (dumpFile defaultCilPrinter stdout "" f; doit f)
     else if r = "r" then (pause := false; doit f)
     else begin
+    if !stage < 2 then raise Exit;
+    E.log "Mark CPS\n";
     visitCilFileSameGlobals (new markCps f) f;
-    if !stage < 1 then raise Exit;
+    if !stage < 3 then raise Exit;
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
     visitCilFileSameGlobals (new uniqueVarinfo) f;
-    if !stage < 2 then raise Exit;
+    if !stage < 4 then raise Exit;
     E.log "Cps conversion\n";
     visitCilFile (new cpsConverter f) f;
-    if !stage < 3 then raise Exit;
+    if !stage < 5 then raise Exit;
     E.log "Cleaning things a bit\n";
     visitCilFileSameGlobals (new cleaner) f;
-    if !stage < 4 then raise Exit;
+    if !stage < 6 then raise Exit;
     E.log "Alpha-conversion\n";
     uniqueVarNames f; (* just in case *)
     E.log "Finished!\n";

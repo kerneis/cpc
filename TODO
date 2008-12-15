@@ -15,7 +15,9 @@
 * Check local functions support.
   => look quite good, but who knows?
 [src/ext/cpc.ml]
-* Inline cpc_patch
+* do not use Oneret in avoidAmpersand
+  => insert free before every return instead
+  => what about arrays?
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
   expressions, should we ignore them too?
