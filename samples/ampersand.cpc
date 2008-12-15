@@ -1,0 +1,17 @@
+#include <stdio.h>
+
+cps int test (double tmp);
+
+cps int
+test(double tmp)
+{
+    return (&tmp);
+}
+
+int
+main()
+{
+    cpc_spawn {printf("%d\n",test(42));};
+    cpc_main_loop();
+    return 0;
+}
