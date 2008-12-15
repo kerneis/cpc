@@ -18,6 +18,8 @@
 * do not use Oneret in avoidAmpersand
   => insert free before every return instead
   => what about arrays?
+  => what about doing the same for free variables in cpc_spawn?
+     (cf. runtime/cpc_io.cpc for an example)
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
   expressions, should we ignore them too?
