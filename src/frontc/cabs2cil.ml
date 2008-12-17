@@ -5769,8 +5769,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockFallsThrough b
               | TryFinally (b, h, _) -> blockFallsThrough h
               | TryExcept (b, _, h, _) -> true (* Conservative *)
-              | CpcDone _ -> false
-              | CpcYield _ | CpcSpawn _
+              | CpcCut (Done, _) -> false
+              | CpcCut _ | CpcSpawn _
               (*| CpcFork _*) | CpcWait _ | CpcFun _
               | CpcSleep _ | CpcIoWait _ -> true
             and blockFallsThrough b = 
@@ -5820,7 +5820,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockCanBreak b
               | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
               | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
-              | CpcYield _ | CpcDone _ | CpcSpawn _
+              | CpcCut _ | CpcSpawn _
               (*| CpcFork _*) | CpcWait _ | CpcFun _
               | CpcSleep _ | CpcIoWait _ -> false
             and blockCanBreak b = 
@@ -6331,11 +6331,19 @@ and doStatement (s : A.statement) : chunk =
      | CPC_YIELD loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        s2c (mkStmt (CpcYield loc'))
+        s2c (mkStmt (CpcCut (Yield, loc')))
      | CPC_DONE loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        s2c (mkStmt (CpcDone loc'))
+        s2c (mkStmt (CpcCut (Done, loc')))
+     | CPC_ATTACH loc ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        s2c (mkStmt (CpcCut (Attach, loc')))
+     | CPC_DETACH loc ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        s2c (mkStmt (CpcCut (Detach, loc')))
      | CPC_SPAWN (s, loc) ->
         let loc' = convLoc loc in
         let mkSpawn f args = mkStmt (CpcSpawn (f, args, loc')) in

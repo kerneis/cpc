@@ -722,6 +722,14 @@ and print_statement stat =
       setLoc(loc);
       print "cpc_done ;" ;
       new_line ()
+  | CPC_ATTACH (loc) ->
+      setLoc(loc);
+      print "cpc_attach ;" ;
+      new_line ()
+  | CPC_DETACH (loc) ->
+      setLoc(loc);
+      print "cpc_detach ;" ;
+      new_line ()
   | CPC_SPAWN (stat, loc) ->
       setLoc loc;
       print "cpc_spawn";

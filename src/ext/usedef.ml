@@ -204,8 +204,7 @@ let computeUseDefStmtKind ?(acc_used=VS.empty)
         ve e;
         List.iter ve el
     | CpcFun (_, _)
-    | CpcDone _
-    | CpcYield _ -> ()
+    | CpcCut _ -> ()
   in
   !varUsed, !varDefs
 
@@ -257,7 +256,7 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
   | CpcFun (fd, _) ->
       E.warn "usedef: shall we really dive into CpcFun?\n";
       handle_block fd.sbody
-  | CpcDone _ | CpcYield _ -> !varUsed, !varDefs
+  | CpcCut _ -> !varUsed, !varDefs
 
 let computeUseLocalTypes ?(acc_used=VS.empty)
                          (fd : fundec)

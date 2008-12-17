@@ -127,3 +127,7 @@ void cpc_signal(cpc_condvar*);
 void cpc_signal_all(cpc_condvar*);
 #pragma cilnoremove("cpc_prim_io_wait")
 void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*);
+
+#pragma cilnoremove("cpc_prim_attach", "cpc_prim_detach")
+void cpc_prim_attach(cpc_continuation*);
+void cpc_prim_detach(cpc_continuation*);

@@ -295,7 +295,7 @@ let transformOffsetOf (speclist, dtype) member =
 
 /* CPC */
 /* %token<Cabs.cabsloc> CPC_FORK */
-%token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_SPAWN
+%token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_SPAWN CPC_ATTACH CPC_DETACH
 %token<Cabs.cabsloc> CPC_WAIT CPC_SLEEP CPC_IO_WAIT
 %token<Cabs.cabsloc> CPC_FUN
 
@@ -924,6 +924,8 @@ statement:
 
 |   CPC_YIELD SEMICOLON   { CPC_YIELD ((*handleLoc*) $1) }
 |   CPC_DONE SEMICOLON   { CPC_DONE ((*handleLoc*) $1) }
+|   CPC_ATTACH SEMICOLON   { CPC_ATTACH ((*handleLoc*) $1) }
+|   CPC_DETACH SEMICOLON   { CPC_DETACH ((*handleLoc*) $1) }
 |   CPC_SPAWN statement   { CPC_SPAWN ($2, (*handleLoc*) $1) }
 /*|   CPC_FORK statement   { CPC_FORK ($2, (*handleLoc*) $1)} */
 |   CPC_WAIT LPAREN expression RPAREN SEMICOLON

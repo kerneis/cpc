@@ -111,8 +111,9 @@ let rec find_var = function
 
 (* find one of the following patterns:
   <cps call>; goto l; label l: <start>;
-or
   <cps call>; cpc_yield; goto l; label l: <start>;
+  <cps call>; cpc_attach; goto l; label l: <start>;
+  <cps call>; cpc_detach; goto l; label l: <start>;
 and extract the last var of <cps call>.
 *)
 class lastVar = fun start -> object(self)
@@ -123,7 +124,9 @@ class lastVar = fun start -> object(self)
       match s.preds with
       | [{skind=Instr l} as p] when p.cps ->
           raise (find_var l)
-      | [{skind=CpcYield _} as p] when p.cps -> begin
+      | [{skind=CpcCut (Yield, _)} as p]
+      | [{skind=CpcCut (Attach, _)} as p]
+      | [{skind=CpcCut (Detach, _)} as p] when p.cps -> begin
         match p.preds with
         | [{skind=Instr l} as p'] when p'.cps ->
             raise (find_var l)
@@ -375,26 +378,37 @@ class markCps = fun file -> object(self)
           c.last_var <- None;
         end;
         SkipChildren
-    | CpcDone _ when c.cps_fun ->
-        if s.cps then SkipChildren else begin
+    | CpcCut (Done, _) when c.cps_fun ->
+        if s.cps then
+         (* !!!!!!!!! HERE BE DRAGONS !!!!!!!!!!!! *)
+         (* we do NOT update c.last_stmt and c.next_stmt here.
+          * As a result, if we are already in cps context (ie. if there are
+          * cps calls before cpc_done), the control flow will be considered broken
+          * when the next statement (Return) will be visited. This will raise
+          * AddGoto which will ensure, through functionalizeGoto, that cpc_done
+          * is alone, in it's own function. This is indeed the expected
+          * behavior, and updating the context would break it, so please DON'T! *)
+         (* Note: this should be done more cleanly using SplitCpc *)
+         SkipChildren
+        else begin
         (* XXX DO NOT USE copyClearStmt HERE --- it's needlessly expensive and
          * we can keep the labels here *)
         let copy = mkStmt s.skind in
         let return = mkStmt (Return (None, locUnknown)) in
-        copy.cps <- true;
+        copy.cps <- true; (* leave a mark for next time *)
+        s.skind <- Block (mkBlock [copy; return]);
         c.cps_con <- false;
         c.last_stmt <- dummyStmt;
         c.next_stmt <- dummyStmt;
-        s.skind <- Block (mkBlock [copy; return]);
         SkipChildren
         end
 
     (* cpc constructs should be split, except if it has already been done *)
-    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcYield _ when s.cps ->
+    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ when s.cps ->
         c.cps_con <- true;
         self#set_next s;
         SkipChildren
-    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcYield _ when c.cps_fun ->
+    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ when c.cps_fun ->
         s.cps <- true; (* leave a mark for next time *)
         raise (SplitCpc (s,c.last_stmt))
 
@@ -447,7 +461,7 @@ class markCps = fun file -> object(self)
         s.cps <- c.cps_con;
         self#set_next s;
         SkipChildren
-    | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcYield _ ->
+    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ ->
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
     | CpcFun _ -> (* saving and restoring context is done in vfunc *)
         ChangeDoChildrenPost
@@ -556,6 +570,18 @@ class cpsConverter = fun file ->
       x; y; check_null condvar;
       Lval(Var cc, NoOffset)],
       locUnknown)] in
+  let cpc_attach = find_function "cpc_prim_attach" file in
+  let attach cc =
+    (* cpc_prim_attach(cc) *)
+    [Call(None,Lval(Var cpc_attach, NoOffset), [
+      Lval(Var cc, NoOffset)],
+      locUnknown)] in
+  let cpc_detach = find_function "cpc_prim_detach" file in
+  let detach cc =
+    (* cpc_prim_detach(cc) *)
+    [Call(None,Lval(Var cpc_detach, NoOffset), [
+      Lval(Var cc, NoOffset)],
+      locUnknown)] in
   (* XXX DEBUGING *)
   let debug =
     if !E.debugFlag then
@@ -620,13 +646,17 @@ class cpsConverter = fun file ->
     (* The stack should be a list of cps calls, or a cpc_construct
        followed by a cps call (except for cpc_done). *)
     match stack with
-    | [{skind=Instr [i]} ; {skind=CpcYield _}] ->
+    | [{skind=Instr [i]} ; {skind=CpcCut (Yield, _)}] ->
         self#convert_instr i @ schedule current_continuation
+    | [{skind=Instr [i]} ; {skind=CpcCut (Attach, _)}] ->
+        self#convert_instr i @ attach current_continuation
+    | [{skind=Instr [i]} ; {skind=CpcCut (Detach, _)}] ->
+        self#convert_instr i @ detach current_continuation
     | [{skind=Instr [i]} ; {skind=CpcWait (condvar, _)}] ->
         self#convert_instr i @ wait condvar current_continuation
     | [{skind=Instr [i]} ; {skind=CpcSleep (x, y, condvar, _)}] ->
         self#convert_instr i @ sleep x y condvar current_continuation
-    | [{skind=CpcDone _}] ->
+    | [{skind=CpcCut (Done, _)}] ->
         (* XXX DEBUGING *)
         debug ("cpc_done: discarding continuation") @
         continuation_free current_continuation
@@ -650,7 +680,7 @@ class cpsConverter = fun file ->
   ))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
-  | CpcYield _ | CpcDone _
+  | CpcCut _
   | CpcWait _ | CpcSleep _
   | CpcIoWait _ | Instr _ when s.cps ->
       stack <- (copyClearStmt s file stack)::stack;
@@ -663,7 +693,7 @@ class cpsConverter = fun file ->
           mkStmt (Return (None, loc))])) in
       stack <- [];
       ChangeTo res
-  | CpcYield _ | CpcDone _
+  | CpcCut _
   | CpcWait _ | CpcSleep _
   | CpcIoWait _ -> assert false
   | CpcSpawn (f, args, _) ->
@@ -1101,7 +1131,7 @@ class functionalizeGoto start file =
               | _, [], _
               | _, _, CpcFun _
               | {skind=Return _} :: _ , _, _
-              | {skind=CpcDone _} :: _ , _, _ ->
+              | {skind=CpcCut (Done, _)} :: _ , _, _ ->
                   self#unstack_block b; b
               | last_in_stack :: _, _, _ ->
                   (* XXX this works only because we do not modify *any*
@@ -1265,7 +1295,9 @@ let rec doit (f: file) =
           doit f
       | _ -> functionalize start f; doit f
       end
-  | SplitCpc ({skind=CpcYield _} as s,last_stmt)
+  | SplitCpc ({skind=CpcCut (Yield, _)} as s,last_stmt)
+  | SplitCpc ({skind=CpcCut (Attach, _)} as s,last_stmt)
+  | SplitCpc ({skind=CpcCut (Detach, _)} as s,last_stmt)
   | SplitCpc ({skind=CpcWait _} as s,last_stmt)
   | SplitCpc ({skind=CpcSleep _} as s,last_stmt)
   | SplitCpc ({skind=CpcIoWait _} as s,last_stmt) ->

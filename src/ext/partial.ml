@@ -703,7 +703,7 @@ struct
                                 stmt_fun
                                 (visit_block stmt_fun y block1)
                                 block2
-                          | CpcDone _ | CpcYield _ | CpcWait _
+                          | CpcCut _ | CpcWait _
                           | CpcSleep _ | CpcIoWait _ -> y
                           | CpcSpawn _ | CpcFun _ ->
                               Errormsg.warn "partial: blindly assuming \

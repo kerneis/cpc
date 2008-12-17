@@ -150,7 +150,7 @@ let rec oneret (f: Cil.fundec) : unit =
         s :: scanStmts mainbody rests
     | ({skind=(Goto _ | Instr _ | Continue _ | Break _ 
                | TryExcept _ | TryFinally _
-               | CpcYield _ | CpcDone _
+               | CpcCut _
                | CpcWait _ | CpcSpawn _
                | CpcSleep _ | CpcIoWait _)} as s)
       :: rests -> s :: scanStmts mainbody rests

@@ -331,7 +331,7 @@ let rec analyze_stmt (s : stmt ) : unit =
         analyze_block h
     | Break l -> ()
     | Continue l -> ()
-    | CpcDone _ | CpcYield _ | CpcSpawn _
+    | CpcCut _ | CpcSpawn _
     | CpcIoWait _ | CpcWait _ | CpcSleep _ -> ()
     | CpcFun (fd, _) ->
         Errormsg.warn "ptranal: blindly diving into CpcFun (hoping \

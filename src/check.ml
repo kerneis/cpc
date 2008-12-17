@@ -774,7 +774,7 @@ and checkStmt (s: stmt) =
           checkBlock h
 
       | Instr il -> List.iter checkInstr il
-      | CpcYield _ | CpcDone _ -> ()
+      | CpcCut _ -> ()
       | CpcSpawn (e, el, l) (*| CpcFork (s, _)*) ->
           checkInstr(Call(None,e,el,l))
       | CpcWait (e, _) -> ignore(checkExp false e)

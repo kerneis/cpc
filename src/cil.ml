@@ -116,6 +116,8 @@ let debugConstFold = false
 (** The Abstract Syntax of CIL *)
 
 
+type cpc_cut = Yield | Done | Attach | Detach
+
 (** The top-level representation of a CIL source file. Its main contents is 
     the list of global declarations and definitions. *)
 type file = 
@@ -774,8 +776,7 @@ and stmtkind =
     
   (** CPC statements *)
 
-  | CpcYield of location
-  | CpcDone of location
+  | CpcCut of cpc_cut * location
   | CpcSpawn of exp * exp list * location
   (*| CpcFork of stmt * location*)
   | CpcWait of exp * location
@@ -1109,8 +1110,7 @@ let rec get_stmtLoc (statement : stmtkind) =
                  else get_stmtLoc ((List.hd b.bstmts).skind)
     | TryFinally (_, _, l) -> l
     | TryExcept (_, _, _, l) -> l
-    | CpcYield l -> l
-    | CpcDone l -> l
+    | CpcCut (_, l) -> l
     | CpcSpawn (_, _, l) -> l
     (*| CpcFork (_, l) -> l*)
     | CpcWait (_,l) -> l
@@ -3876,13 +3876,21 @@ class defaultCilPrinterClass : cilPrinter = object (self)
           ++ text ") " ++ unalign
           ++ self#pBlock () h
 
-    | CpcYield l ->
+    | CpcCut (Yield, l) ->
         self#pLineDirective l
           ++ text "cpc_yield;"
 
-    | CpcDone l ->
+    | CpcCut (Done, l) ->
         self#pLineDirective l
           ++ text "cpc_done;"
+
+    | CpcCut (Attach, l) ->
+        self#pLineDirective l
+          ++ text "cpc_attach;"
+
+    | CpcCut (Detach, l) ->
+        self#pLineDirective l
+          ++ text "cpc_detach;"
 
     | CpcSpawn (f, args, l) ->
         self#pLineDirective l
@@ -5364,7 +5372,7 @@ and childrenStmt (toPrepend: instr list ref) (vis:cilVisitor) (s:stmt): stmt =
         if b' != b || il'' != il || e' != e || h' != h then 
           TryExcept(b', (il'', e'), h', l) 
         else s.skind
-    | CpcYield _ | CpcDone _ -> s.skind
+    | CpcCut _ -> s.skind
     | CpcSpawn (e, el, l) ->
         let e' = fExp e in
         let el' = mapNoCopy fExp el in
@@ -5902,7 +5910,7 @@ let rec peepHole1 (* Process one statement and possibly replace it *)
           peepHole1 doone h.bstmts;
           s.skind <- TryExcept(b, (doInstrList il, e), h, l);
       | Return _ | Goto _ | Break _ | Continue _ -> ()
-      | CpcYield _ | CpcDone _ | CpcWait _
+      | CpcCut _ | CpcWait _
       | CpcSleep _ | CpcIoWait _ | CpcSpawn _ -> ()
       (*| CpcFork (s, _) -> peepHole1 doone [s]*)
       | CpcFun _ -> ())
@@ -5940,7 +5948,7 @@ let rec peepHole2  (* Process two statements and possibly replace them both *)
           s.skind <- TryExcept (b, (doInstrList il, e), h, l)
 
       | Return _ | Goto _ | Break _ | Continue _ -> ()
-      | CpcYield _ | CpcDone _ | CpcWait _
+      | CpcCut _ | CpcWait _
       | CpcSleep _ | CpcIoWait _ | CpcSpawn _ -> ()
       (*| CpcFork (s, _) -> peepHole2 dotwo [s]*)
       | CpcFun _ -> ())
@@ -6578,7 +6586,7 @@ and succpred_stmt s fallthrough =
                 end
   | TryExcept _ | TryFinally _ -> 
       failwith "computeCFGInfo: structured exception handling not implemented"
-  | CpcYield _ | CpcDone _ | CpcFun _
+  | CpcCut _ | CpcFun _
   | CpcSpawn _ (*| CpcFork _*) | CpcWait _ | CpcSleep _ | CpcIoWait _ ->
       failwith "computeCFGInfo: CPC constructs handling not implemented"
 
@@ -6740,7 +6748,7 @@ let rec xform_switch_stmt s ?remove_loops
 
   | TryExcept _ | TryFinally _ -> 
       failwith "xform_switch_statement: structured exception handling not implemented"
-  | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcFun _
+  | CpcCut _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcFun _
   | CpcSpawn _ -> ()
 
 end and xform_switch_block b ?remove_loops break_dest cont_dest label_index =

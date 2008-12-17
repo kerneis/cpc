@@ -71,6 +71,8 @@ val cilVersionRevision: int
 (** {b The Abstract Syntax of CIL} *)
 
 
+type cpc_cut = Yield | Done | Attach | Detach
+
 (** The top-level representation of a CIL source file (and the result of the 
  * parsing and elaboration). Its main contents is the list of global 
  * declarations and definitions. You can iterate over the globals in a 
@@ -988,8 +990,7 @@ and stmtkind =
   
   (** CPC statements *)
 
-  | CpcYield of location
-  | CpcDone of location
+  | CpcCut of cpc_cut * location
   | CpcSpawn of exp * exp list * location
   (*| CpcFork of stmt * location*)
   | CpcWait of exp * location

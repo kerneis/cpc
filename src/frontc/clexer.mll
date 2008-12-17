@@ -225,6 +225,8 @@ let init_lexicon _ =
       ("cpc_io_wait", fun loc -> CPC_IO_WAIT loc);
       ("cpc_yield", fun loc -> CPC_YIELD loc);
       ("cpc_done", fun loc -> CPC_DONE loc);
+      ("cpc_attach", fun loc -> CPC_ATTACH loc);
+      ("cpc_detach", fun loc -> CPC_DETACH loc);
       ("cpc_spawn", fun loc -> CPC_SPAWN loc);
     ]
 

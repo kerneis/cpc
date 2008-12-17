@@ -124,7 +124,7 @@ and fasStmt (todo) (s : stmt) =
       | If (_, tb, fb, _) -> (fasBlock todo tb; fasBlock todo fb)
       | Switch (_, b, _, _) -> fasBlock todo b
       | Loop (b, _, _, _) -> fasBlock todo b
-      | CpcYield _ | CpcDone _ | CpcWait _ | CpcSleep _ 
+      | CpcCut _ | CpcWait _ | CpcSleep _
       | CpcIoWait _ | CpcSpawn _
       | (Return _ | Break _ | Continue _ | Goto _ | Instr _) -> ()
       | TryExcept _ | TryFinally _ -> E.s (E.unimp "try/except/finally")
@@ -153,8 +153,10 @@ let d_cfgnodelabel () (s : stmt) =
       | Return _ -> "return"
       | TryExcept _ -> "try-except"
       | TryFinally _ -> "try-finally"
-      | CpcYield _ -> "cpc-yield"
-      | CpcDone _ -> "cpc-done"
+      | CpcCut (Yield, _) -> "cpc-yield"
+      | CpcCut (Done, _) -> "cpc-done"
+      | CpcCut (Attach, _) -> "cpc-attach"
+      | CpcCut (Detach, _) -> "cpc-detach"
       | CpcSpawn _ -> "cpc-spawn"
       | CpcWait _ -> "cpc-wait"
       | CpcSleep _ -> "cpc-sleep"
@@ -322,9 +324,9 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option) 
          any direct successor to stmt following the loop *)
   | TryExcept _ | TryFinally _ -> 
       E.s (E.unimp "try/except/finally")
-  | CpcYield _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcSpawn _ ->
+  | CpcCut (Done, _) -> ()
+  | CpcCut _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcSpawn _ ->
       addOptionSucc next
-  | CpcDone _ -> ()
   | CpcFun (fd, _) ->
       (* Do not recurse into CpcFun --- this is done later *)
       addOptionSucc next;
