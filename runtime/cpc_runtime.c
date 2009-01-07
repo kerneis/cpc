@@ -543,12 +543,14 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
 void
 cpc_prim_attach(cpc_continuation *cont)
 {
+    cpc_really_invoke_continuation(cont);
     return;
 }
 
 void
 cpc_prim_detach(cpc_continuation *cont)
 {
+    cpc_really_invoke_continuation(cont);
     return;
 }
 
