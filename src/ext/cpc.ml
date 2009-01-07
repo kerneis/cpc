@@ -810,18 +810,48 @@ end
 
 class avoidAmpersand f =
   let has_ampersand v = v.vaddrof && not v.vglob in
-  let insert_malloc l stmts =
+  let insert_malloc l stmts fd =
+    (* stolen from oneret.ml *)
+    (* Get the return type *)
+    let retTyp =
+      match fd.svar.vtype with
+      | TFun(rt, _, _, _) -> rt
+      | _ -> E.s (E.bug "Function %s does not have a function type\n" fd.svar.vname) in
+    let retVar : varinfo option ref = ref None in
+    let getRetVar (x: unit) : varinfo =
+      match !retVar with
+        Some rv -> rv
+      | None -> begin
+          let rv = makeTempVar fd ~name:"__retres" retTyp in (* don't collide *)
+          retVar := Some rv;
+          rv
+      end
+    in
     let malloc = Lval(Var (findOrCreateFunc f "malloc" (TFun(voidPtrType, Some
     ["size", find_type "size_t" f, []], false, []))), NoOffset) in
     let free = Lval(Var (findOrCreateFunc f "free" (TFun(voidType, Some ["ptr",
     voidPtrType, []], false, []))), NoOffset) in
-    let body, ret = cut_last stmts in
-    let m = mkStmt (Instr (List.map (fun v ->
+    let mallocs = mkStmt (Instr (List.map (fun v ->
       let mem_v = mkMem (Lval (Var v, NoOffset)) NoOffset in
       Call(Some (Var v, NoOffset), malloc, [sizeOf (typeOfLval mem_v)],locUnknown)) l)) in
-    let f = [mkStmt (Instr (List.map (fun v ->
-      Call(None,free,[Lval(Var v, NoOffset)],locUnknown)) l))] in
-    m :: body @ f @ [ret]
+    let insert_free = visitCilStmt
+      (object(self)
+       inherit nopCilVisitor
+       method vstmt s = match s.skind with
+       | Return (retval, loc) ->
+          let rv, assign = match retval with
+          | None -> None, []
+          | Some rval -> let r = getRetVar() in
+              Some (Lval (Var r, NoOffset)), [Set((Var r, NoOffset), rval, loc)] in
+          s.skind <- Block (mkBlock [
+          mkStmt (Instr (assign @ List.map (fun v ->
+          Call(None,free,[Lval(Var v, NoOffset)],locUnknown)) l));
+          mkStmt (Return (rv,loc))]);
+          SkipChildren
+       | _ -> DoChildren
+       end
+      ) in
+    mallocs :: (List.map insert_free stmts)
   in
   object(self)
   inherit nopCilVisitor
@@ -846,12 +876,11 @@ class avoidAmpersand f =
     Lval(Var v', NoOffset), locUnknown)) formals new_formals)) in
     let l = locals @ formals in
     if l <> [] then begin
-      Oneret.oneret fd;
       setFormals fd full_formals;
       List.iter (fun v -> v.vtype <- TPtr(v.vtype,[])) l;
       fd.slocals <- fd.slocals @ formals;
       fd.sbody <- {fd.sbody with bstmts =
-        insert_malloc l (init_formals :: fd.sbody.bstmts)
+        insert_malloc l (init_formals :: fd.sbody.bstmts) fd
       };
      end;fd)
 end
