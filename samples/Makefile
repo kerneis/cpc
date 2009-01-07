@@ -7,20 +7,13 @@ LDLIBS=../runtime/libcpc.a ../runtime/cpc_runtime.o
 
 .SUFFIXES: .cpc .cpi
 
-.PHONY: all
+.PHONY: all clean
 
 all: barrier conditions done loops patch sleep sleep_cond tcat trivial-httpd
 
 servers: trivial-httpd trivial-httpd-fork trivial-httpd-nptl \
     trivial-httpd-st static-httpd static-httpd-fork static-httpd-nptl \
     static-httpd-st trivial-httpd-pth static-httpd-pth
-
-clean:
-	rm -f *.o *~ *.cpi trivial-httpd.c
-	rm -f barrier conditions done loops patch sleep sleep_cond tcat \
-	 trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
- 	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
-	 trivial-httpd-pth static-httpd-pth
 
 barrier: barrier.o
 
@@ -66,8 +59,12 @@ static-httpd-pth: LDLIBS+=`pth-config --libs --ldflags`
 static-httpd-pth.o: trivial-httpd-pth.c
 	$(CC) $(CFLAGS) -c -DSTATIC $< -o $@
 
-.PHONY: clean
-	-rm -f *.cpi
+clean:
+	rm -f *.o *~ *.cpi trivial-httpd.c
+	rm -f barrier conditions done loops patch sleep sleep_cond tcat \
+	 trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
+	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
+	 trivial-httpd-pth static-httpd-pth
 
 .cpc.cpi:
 	$(CPP) -P $(CFLAGS) -include cpc_runtime.h \
