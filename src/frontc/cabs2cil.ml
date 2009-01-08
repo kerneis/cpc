@@ -6361,6 +6361,9 @@ and doStatement (s : A.statement) : chunk =
           mkSpawn (Lval (Var f.svar,NoOffset)) []
           ])))
         end
+      | CPC_DETACHED (s, loc) ->
+          doStatement (A.SEQUENCE (CPC_DETACH loc, A.SEQUENCE (
+            s, CPC_ATTACH loc, loc), loc))
      (*| CPC_FORK (s, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';

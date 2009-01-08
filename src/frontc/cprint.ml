@@ -730,6 +730,12 @@ and print_statement stat =
       setLoc(loc);
       print "cpc_detach ;" ;
       new_line ()
+  | CPC_DETACHED (stat, loc) ->
+      setLoc loc;
+      print "cpc_detached";
+      new_line () ;
+      indent () ;
+      print_substatement stat;
   | CPC_SPAWN (stat, loc) ->
       setLoc loc;
       print "cpc_spawn";
