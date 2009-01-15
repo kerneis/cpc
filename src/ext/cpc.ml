@@ -585,7 +585,9 @@ class cpsConverter = fun file ->
   (* XXX DEBUGING *)
   let debug =
     if !E.debugFlag then
-      let print = find_function "printf" file in
+      let print =
+        findOrCreateFunc file "printf"
+        (TFun(intType, Some ["format", charConstPtrType, []], true, [])) in
       fun s -> [Call(None,Lval(Var print,
       NoOffset),[mkString (Printf.sprintf "** %s\n" s)],locUnknown)]
     else fun _ -> [] in
