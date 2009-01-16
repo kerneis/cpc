@@ -3,9 +3,11 @@ Copyright (c) 2004, 2005 by Juliusz Chroboczek.
 Experimental; do not redistribute.
 */
 
+#define EPOLL_MAX_EVENTS 1024
+
 #include <sys/time.h>
 #include <time.h>
-#include <sys/select.h>
+#include <sys/epoll.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -48,8 +50,8 @@ cpc_continuation *cpc_ready_1;
 static cpc_continuation_queue ready = {NULL, NULL};
 static cpc_timed_continuation_queue sleeping = {NULL, NULL};
 static cpc_continuation_queue *fd_queues = NULL;
+static int epfd;
 static int num_fds = 0, size_fds = 0;
-static fd_set readfds, writefds, exceptfds;
 
 static wp_t *pool;
 static cpc_continuation_queue attaching = {NULL, NULL};
@@ -57,7 +59,7 @@ static pthread_mutex_t attach_m = PTHREAD_MUTEX_INITIALIZER;
 
 static struct timeval cpc_now;
 
-static void recompute_fdsets(int fd);
+static void recompute_dequeue(int fd);
 
 struct cpc_continuation *
 cpc_continuation_get(int size)
@@ -168,7 +170,7 @@ dequeue(cpc_continuation_queue *queue)
         queue->tail = NULL;
     cont->next = NULL;
     return cont;
-}    
+}
 
 static void
 dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
@@ -217,7 +219,7 @@ cond_dequeue(cpc_continuation_queue *queue)
         queue->tail = NULL;
     cont->cond_next = NULL;
     return cont;
-}    
+}
 
 static void
 cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
@@ -403,7 +405,7 @@ dequeue_other(cpc_continuation *cont)
         timed_dequeue_1(&sleeping, cont);
     else if(cont->state >= 0 && (cont->state & ((1 << 29) - 1)) <= size_fds) {
         dequeue_1(&fd_queues[cont->state & ((1 << 29) - 1)], cont);
-        recompute_fdsets(cont->state & ((1 << 29) - 1));
+        recompute_dequeue(cont->state & ((1 << 29) - 1));
     } else
         assert(cont->state == STATE_UNKNOWN);
     cont->state = STATE_UNKNOWN;
@@ -422,7 +424,7 @@ cpc_signal(cpc_condvar *cond)
     enqueue(&ready, cont);
 }
 
-void 
+void
 cpc_signal_all(cpc_condvar *cond)
 {
     cpc_continuation *cont;
@@ -466,10 +468,6 @@ fd_queues_expand(int n)
     if(size_fds > 0) {
         memcpy(new, fd_queues,
                size_fds * sizeof(struct cpc_continuation_queue));
-    } else {
-        FD_ZERO(&readfds);
-        FD_ZERO(&writefds);
-        FD_ZERO(&exceptfds);
     }
 
     memset(new + size_fds, 0,
@@ -480,10 +478,17 @@ fd_queues_expand(int n)
 }
 
 static void
-recompute_fdsets(int fd)
+recompute_enqueue(int fd, cpc_continuation *c)
 {
-    int r = 0, w = 0;
+    int r = 0, w = 0, op = EPOLL_CTL_MOD, rc = 0;
     cpc_continuation *cont;
+    struct epoll_event event;
+    event.events = 0;
+    event.data.fd = fd;
+
+    if(fd_queues[fd].head == NULL)
+        op = EPOLL_CTL_ADD;
+    enqueue(&fd_queues[fd], c);
 
     cont = fd_queues[fd].head;
     while(cont) {
@@ -496,32 +501,63 @@ recompute_fdsets(int fd)
         cont = cont->next;
     }
     if(r)
-        FD_SET(fd, &readfds);
-    else
-        FD_CLR(fd, &readfds);
+        event.events |= (EPOLLIN | EPOLLPRI | EPOLLRDHUP);
     if(w)
-        FD_SET(fd, &writefds);
-    else
-        FD_CLR(fd, &writefds);
-    if(r || w)
-        FD_SET(fd, &exceptfds);
-    else
-        FD_CLR(fd, &exceptfds);
+        event.events |= EPOLLOUT;
 
-    if(r || w) {
+    assert(r || w);
+    if(num_fds <= fd + 1)
+        num_fds = fd + 1;
+
+    rc = epoll_ctl(epfd, op, fd, &event);
+    if(rc < 0)
+        perror("epoll_ctl");
+}
+
+static void
+recompute_dequeue(int fd)
+{
+    int r = 0, w = 0, op = EPOLL_CTL_MOD, rc = 0;
+    cpc_continuation *cont;
+    struct epoll_event event;
+    event.events = 0;
+    event.data.fd = fd;
+
+    if(fd_queues[fd].head == NULL) {
+        op = EPOLL_CTL_DEL;
+        /* if unnecessary, while should be enough, but who knows... */
+        if(fd == num_fds - 1) {
+            while(fd_queues[num_fds - 1].head == NULL) {
+                num_fds--;
+                if(num_fds == 0)
+                    break;
+            }
+        }
+    } else {
+        cont = fd_queues[fd].head;
+        while(cont) {
+            if(((cont->state >> 29) & CPC_IO_IN))
+                r = 1;
+            if(((cont->state >> 29) & CPC_IO_OUT))
+                w = 1;
+            if(r && w)
+                break;
+            cont = cont->next;
+        }
+        if(r)
+            event.events |= (EPOLLIN | EPOLLPRI | EPOLLRDHUP);
+        if(w)
+            event.events |= EPOLLOUT;
+
+        assert(r || w);
         if(num_fds <= fd + 1)
             num_fds = fd + 1;
-    } else if(fd == num_fds - 1) {
-        while(!FD_ISSET(num_fds - 1, &readfds) &&
-              !FD_ISSET(num_fds - 1, &writefds) &&
-              !FD_ISSET(num_fds - 1, &exceptfds)) {
-            num_fds--;
-            if(num_fds == 0)
-                break;
-        }
     }
+    rc = epoll_ctl(epfd, op, fd, &event);
+    if(rc < 0)
+        perror("epoll_ctl");
 }
-        
+
 void
 cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
                  cpc_continuation *cont)
@@ -540,8 +576,7 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
         fd_queues_expand(fd + 10);
 
     cont->state = fd | ((direction & 3) << 29);
-    enqueue(&fd_queues[fd], cont);
-    recompute_fdsets(fd);
+    recompute_enqueue(fd, cont);
 
     return;
 }
@@ -579,7 +614,7 @@ requeue_io_ready(int fd, int direction)
         }
         c = c->next;
     }
-    recompute_fdsets(fd);
+    recompute_dequeue(fd);
 }
 
 static inline void
@@ -593,14 +628,21 @@ exhaust_ready_1()
     }
 }
 
-void 
+void
 cpc_main_loop(void)
 {
     struct cpc_continuation *c;
     struct cpc_continuation_queue q;
     struct timeval when;
     int rc, i, done;
-    fd_set r_readfds, r_writefds, r_exceptfds;
+
+    struct epoll_event events[EPOLL_MAX_EVENTS];
+
+    epfd = epoll_create(10);
+    if (epfd < 0) {
+        perror("epoll_create");
+        return;
+    }
 
     cpc_ready_1 = NULL;
 
@@ -651,24 +693,19 @@ cpc_main_loop(void)
            !cpc_pessimise_runtime)
             continue;
 
-        memcpy(&r_readfds, &readfds, sizeof(fd_set));
-        memcpy(&r_writefds, &writefds, sizeof(fd_set));
-        memcpy(&r_exceptfds, &exceptfds, sizeof(fd_set));
         gettimeofday(&cpc_now, NULL);
         if(ready.head || sleeping.head) {
-            if(ready.head) {
-                when.tv_sec = 0;
-                when.tv_usec = 0;
-            } else {
+            if(ready.head)
+                rc = epoll_wait(epfd, events, EPOLL_MAX_EVENTS, 0);
+            else {
                 timeval_minus(&when, &sleeping.head->time, &cpc_now);
+                rc = epoll_wait(epfd, events, EPOLL_MAX_EVENTS,
+                                when.tv_sec * 1000 + when.tv_usec / 1000);
             }
-            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
-                        &when);
         } else {
             if(num_fds == 0)
                 break;
-            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
-                        NULL);
+            rc = epoll_wait(epfd, events, EPOLL_MAX_EVENTS, -1);
         }
         if(rc == 0 || (rc < 0 && errno == EINTR)) {
             continue;
@@ -678,25 +715,23 @@ cpc_main_loop(void)
             continue;
         }
 
+
         /* 1 for reads, 2 for writes.  0x100 means allow starvation. */
 #ifndef PREFER
 #define PREFER 3
 #endif
 
         done = 0;
-        for(i = 0; i < num_fds; i++) {
+        for(i = 0; i < rc; i++) {
             int dir = 0;
-            if(rc <= 0)
-                break;
-            if((PREFER & 1) && FD_ISSET(i, &r_readfds))
+            if((PREFER & 1) && (events[i].events & (EPOLLIN | EPOLLPRI | EPOLLRDHUP)))
                 dir |= CPC_IO_IN;
-            if((PREFER & 2) && FD_ISSET(i, &r_writefds))
+            if((PREFER & 2) && (events[i].events & EPOLLOUT))
                 dir |= CPC_IO_OUT;
-            if(FD_ISSET(i, &r_exceptfds))
+            if(events[i].events & (EPOLLERR | EPOLLHUP))
                 dir |= (CPC_IO_IN | CPC_IO_OUT);
             if(dir) {
-                requeue_io_ready(i, dir);
-                rc--;
+                requeue_io_ready(events[i].data.fd, dir);
                 done = 1;
             }
         }
@@ -704,23 +739,15 @@ cpc_main_loop(void)
 #if (PREFER & 3) != 3
         if((PREFER & 0x100) && done)
             continue;
-        for(i = 0; i < num_fds; i++) {
+        for(i = 0; i < rc; i++) {
             int dir = 0;
-            if(rc <= 0)
-                break;
-            if(FD_ISSET(i, &r_readfds))
+            if(events[i].events & (EPOLLIN | EPOLLPRI | EPOLLRDHUP))
                 dir |= CPC_IO_IN;
-            if(FD_ISSET(i, &r_writefds))
+            if(events[i].events & EPOLLOUT)
                 dir |= CPC_IO_OUT;
-            if(dir) {
-                requeue_io_ready(i, dir);
-                rc--;
-            }
+            if(dir)
+                requeue_io_ready(events[i].data.fd, dir);
         }
 #endif
     }
-    wp_wait(pool);
-    if(attaching.head)
-        goto loop;
-    wp_free(pool, WP_WAIT);
 }
