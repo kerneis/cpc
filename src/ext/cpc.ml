@@ -507,7 +507,9 @@ class cpsConverter = fun file ->
   let cpc_dealloc =  find_function "cpc_dealloc" file in
   let cpc_invoke =
     try find_function "cpc_invoke_continuation" file
-    with E.Error -> find_function "cpc_really_invoke_continuation" file in
+    with E.Error ->
+      E.hadErrors := false;
+      find_function "cpc_really_invoke_continuation" file in
   let cpc_push = find_function "cpc_continuation_push" file in
   let patch cont value f =
     let typ = typeOf value in
