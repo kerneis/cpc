@@ -1,0 +1,29 @@
+#include <stdio.h>
+
+cps void
+g(char c)
+{
+    int i;
+
+    cps void f(void) { printf("%c: %d\n", c, i); }
+
+    for(i = 0; i < 10; i++) {
+        cpc_detached {
+            f();
+            if(i % 2 == 0)
+                f();
+        }
+        f();
+    }
+}
+
+
+int
+main()
+{
+    cpc_spawn { g('a'); printf("A a fini, B devrait bientot.\n"); }
+    cpc_spawn { g('b'); }
+    cpc_main_loop();
+    return 0;
+}
+

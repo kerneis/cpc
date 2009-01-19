@@ -3,13 +3,14 @@ CPC='../obj/x86_LINUX/cilly.asm.exe'
 CLIBS=-I ../runtime
 CFLAGS=-O3 -Wall -g $(CLIBS)
 
-LDLIBS=../runtime/libcpc.a ../runtime/cpc_runtime.o
+LDLIBS=../runtime/libcpc.a ../runtime/cpc_runtime.o -pthread
 
 .SUFFIXES: .cpc .cpi
 
 .PHONY: all clean
 
-all: barrier conditions done loops patch sleep sleep_cond tcat trivial-httpd
+all: barrier conditions detached done loops patch sleep sleep_cond \
+    tcat trivial-httpd
 
 servers: trivial-httpd trivial-httpd-fork trivial-httpd-nptl \
     trivial-httpd-st static-httpd static-httpd-fork static-httpd-nptl \
@@ -18,6 +19,8 @@ servers: trivial-httpd trivial-httpd-fork trivial-httpd-nptl \
 barrier: barrier.o
 
 conditions: conditions.o
+
+detached: detached.o
 
 done: done.o
 
@@ -61,7 +64,7 @@ static-httpd-pth.o: trivial-httpd-pth.c
 
 clean:
 	rm -f *.o *~ *.cpi trivial-httpd.c
-	rm -f barrier conditions done loops patch sleep sleep_cond tcat \
+	rm -f barrier conditions detached done loops patch sleep sleep_cond tcat \
 	 trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
 	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
 	 trivial-httpd-pth static-httpd-pth
