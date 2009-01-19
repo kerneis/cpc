@@ -15,6 +15,8 @@ Experimental; do not redistribute.
 
 #include "cpc_runtime.h"
 
+#include "wp.c"
+
 const int cpc_pessimise_runtime = 0;
 
 typedef struct cpc_continuation_queue {
@@ -48,6 +50,10 @@ static cpc_timed_continuation_queue sleeping = {NULL, NULL};
 static cpc_continuation_queue *fd_queues = NULL;
 static int num_fds = 0, size_fds = 0;
 static fd_set readfds, writefds, exceptfds;
+
+static wp_t *pool;
+static cpc_continuation_queue attaching = {NULL, NULL};
+static pthread_mutex_t attach_m = PTHREAD_MUTEX_INITIALIZER;
 
 static struct timeval cpc_now;
 
@@ -543,14 +549,16 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
 void
 cpc_prim_attach(cpc_continuation *cont)
 {
-    cpc_really_invoke_continuation(cont);
+    pthread_mutex_lock(&attach_m);
+    enqueue(&attaching, cont);
+    pthread_mutex_unlock(&attach_m);
     return;
 }
 
 void
 cpc_prim_detach(cpc_continuation *cont)
 {
-    cpc_really_invoke_continuation(cont);
+    (void) wp_run(pool, (void *) cont);
     return;
 }
 
@@ -596,10 +604,20 @@ cpc_main_loop(void)
 
     cpc_ready_1 = NULL;
 
+    if ((pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL)) == NULL)
+        perror("wp_new");
+
     /* Make sure cpc_now has a reasonable initial value. */
     gettimeofday(&cpc_now, NULL);
 
-    while(ready.head || sleeping.head || num_fds > 0) {
+    loop:
+    while(ready.head || sleeping.head || attaching.head || num_fds > 0) {
+        if(attaching.head) {
+            pthread_mutex_lock(&attach_m);
+            while(attaching.head)
+                enqueue(&ready, dequeue(&attaching));
+            pthread_mutex_unlock(&attach_m);
+        }
         q = ready;
         ready.head = ready.tail = NULL;
         while(1) {
@@ -701,4 +719,8 @@ cpc_main_loop(void)
         }
 #endif
     }
+    wp_wait(pool);
+    if(attaching.head)
+        goto loop;
+    wp_free(pool, WP_WAIT);
 }

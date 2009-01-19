@@ -5,6 +5,8 @@ Experimental; do not redistribute.
 #include <stdio.h>
 #include <string.h>
 
+#define CPC_TAIL_RECURSIVE_COMPILER
+
 #pragma cilnoremove("type cpc_continuation", "type cpc_condvar")
 struct cpc_continuation;
 typedef void cpc_function(void*);
