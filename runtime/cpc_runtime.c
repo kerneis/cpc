@@ -750,4 +750,9 @@ cpc_main_loop(void)
         }
 #endif
     }
+    wp_wait(pool);
+    if(attaching.head)
+        goto loop;
+    wp_free(pool, WP_WAIT);
+    close(epfd);
 }
