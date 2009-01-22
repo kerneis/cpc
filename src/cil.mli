@@ -71,8 +71,6 @@ val cilVersionRevision: int
 (** {b The Abstract Syntax of CIL} *)
 
 
-type cpc_cut = Yield | Done | Attach | Detach
-
 (** The top-level representation of a CIL source file (and the result of the 
  * parsing and elaboration). Its main contents is the list of global 
  * declarations and definitions. You can iterate over the globals in a 
@@ -997,6 +995,8 @@ and stmtkind =
   | CpcSleep of exp * exp * exp * location
   | CpcIoWait of exp * exp * exp * location
   | CpcFun of fundec * location
+
+and cpc_cut = Yield | Done | Attach of exp | Detach
 
 (** {b Instructions}. 
  An instruction {!Cil.instr} is a statement that has no local

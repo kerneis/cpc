@@ -1160,7 +1160,7 @@ begin
     | CpcCut (Yield, _) -> 127
     | CpcCut (Done, _) -> 131
     | CpcSpawn (_, _, _) -> 137
-    | CpcCut (Attach, _) -> 149
+    | CpcCut (Attach _, _) -> 149
     | CpcCut (Detach, _) -> 151
     | CpcWait _ -> 157
     | CpcSleep _ -> 163

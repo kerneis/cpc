@@ -165,9 +165,9 @@ void cpc_signal_all(cpc_condvar*);
 void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*);
 
 #pragma cilnoremove("cpc_prim_attach", "cpc_prim_detach")
-void cpc_prim_attach(cpc_continuation*);
+void cpc_prim_attach(cpc_scheduler*, cpc_continuation*);
 void cpc_prim_detach(cpc_continuation*);
 
 cpc_scheduler *cpc_scheduler_new(void);
 void cpc_scheduler_free(cpc_scheduler*);
-void cpc_start_scheduler(cpc_scheduler*);
+void cpc_scheduler_start(cpc_scheduler*);

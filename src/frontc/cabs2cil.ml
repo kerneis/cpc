@@ -6336,10 +6336,15 @@ and doStatement (s : A.statement) : chunk =
         let loc' = convLoc loc in
         currentLoc := loc';
         s2c (mkStmt (CpcCut (Done, loc')))
-     | CPC_ATTACH loc ->
+     | CPC_ATTACH (A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        s2c (mkStmt (CpcCut (Attach, loc')))
+        s2c (mkStmt (CpcCut (Attach null, loc')))
+     | CPC_ATTACH (e, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let (_, e', _) = doExp false e (AExp None) in
+        s2c (mkStmt (CpcCut (Attach e', loc')))
      | CPC_DETACH loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
@@ -6363,7 +6368,7 @@ and doStatement (s : A.statement) : chunk =
         end
       | CPC_DETACHED (s, loc) ->
           doStatement (A.SEQUENCE (CPC_DETACH loc, A.SEQUENCE (
-            s, CPC_ATTACH loc, loc), loc))
+            s, CPC_ATTACH (NOTHING, loc), loc), loc))
      (*| CPC_FORK (s, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';

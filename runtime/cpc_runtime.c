@@ -619,11 +619,8 @@ perform_attach(cpc_continuation *cont)
 }
 
 void
-cpc_prim_attach(cpc_continuation *cont)
+cpc_prim_attach(cpc_scheduler *sched, cpc_continuation *cont)
 {
-    /* TODO: make sched an argument of the function */
-    cpc_scheduler *sched = &cpc_main_scheduler;
-
     if(cont == NULL)
         return;
 
@@ -810,7 +807,7 @@ cpc_scheduler_loop(cpc_scheduler *sched)
 }
 
 void
-cpc_start_scheduler(cpc_scheduler *sched)
+cpc_scheduler_start(cpc_scheduler *sched)
 {
     pthread_t thread;
     pthread_attr_t attr;

@@ -125,7 +125,7 @@ class lastVar = fun start -> object(self)
       | [{skind=Instr l} as p] when p.cps ->
           raise (find_var l)
       | [{skind=CpcCut (Yield, _)} as p]
-      | [{skind=CpcCut (Attach, _)} as p]
+      | [{skind=CpcCut (Attach _, _)} as p]
       | [{skind=CpcCut (Detach, _)} as p] when p.cps -> begin
         match p.preds with
         | [{skind=Instr l} as p'] when p'.cps ->
@@ -573,10 +573,10 @@ class cpsConverter = fun file ->
       Lval(Var cc, NoOffset)],
       locUnknown)] in
   let cpc_attach = find_function "cpc_prim_attach" file in
-  let attach cc =
+  let attach scheduler cc =
     (* cpc_prim_attach(cc) *)
     [Call(None,Lval(Var cpc_attach, NoOffset), [
-      Lval(Var cc, NoOffset)],
+      scheduler; Lval(Var cc, NoOffset)],
       locUnknown)] in
   let cpc_detach = find_function "cpc_prim_detach" file in
   let detach cc =
@@ -652,8 +652,8 @@ class cpsConverter = fun file ->
     match stack with
     | [{skind=Instr [i]} ; {skind=CpcCut (Yield, _)}] ->
         self#convert_instr i @ schedule current_continuation
-    | [{skind=Instr [i]} ; {skind=CpcCut (Attach, _)}] ->
-        self#convert_instr i @ attach current_continuation
+    | [{skind=Instr [i]} ; {skind=CpcCut (Attach e, _)}] ->
+        self#convert_instr i @ attach e current_continuation
     | [{skind=Instr [i]} ; {skind=CpcCut (Detach, _)}] ->
         self#convert_instr i @ detach current_continuation
     | [{skind=Instr [i]} ; {skind=CpcWait (condvar, _)}] ->
@@ -1329,7 +1329,7 @@ let rec doit (f: file) =
       | _ -> functionalize start f; doit f
       end
   | SplitCpc ({skind=CpcCut (Yield, _)} as s,last_stmt)
-  | SplitCpc ({skind=CpcCut (Attach, _)} as s,last_stmt)
+  | SplitCpc ({skind=CpcCut (Attach _, _)} as s,last_stmt)
   | SplitCpc ({skind=CpcCut (Detach, _)} as s,last_stmt)
   | SplitCpc ({skind=CpcWait _} as s,last_stmt)
   | SplitCpc ({skind=CpcSleep _} as s,last_stmt)

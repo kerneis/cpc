@@ -722,9 +722,16 @@ and print_statement stat =
       setLoc(loc);
       print "cpc_done ;" ;
       new_line ()
-  | CPC_ATTACH (loc) ->
+  | CPC_ATTACH (exp, loc) ->
       setLoc(loc);
-      print "cpc_attach ;" ;
+      print "cpc_attach" ;
+      if exp = NOTHING
+      then print ";"
+      else begin
+        print "(";
+        print_expression exp;
+        print ");"
+      end;
       new_line ()
   | CPC_DETACH (loc) ->
       setLoc(loc);

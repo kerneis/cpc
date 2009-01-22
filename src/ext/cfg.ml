@@ -155,7 +155,7 @@ let d_cfgnodelabel () (s : stmt) =
       | TryFinally _ -> "try-finally"
       | CpcCut (Yield, _) -> "cpc-yield"
       | CpcCut (Done, _) -> "cpc-done"
-      | CpcCut (Attach, _) -> "cpc-attach"
+      | CpcCut (Attach _, _) -> "cpc-attach"
       | CpcCut (Detach, _) -> "cpc-detach"
       | CpcSpawn _ -> "cpc-spawn"
       | CpcWait _ -> "cpc-wait"

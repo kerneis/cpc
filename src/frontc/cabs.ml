@@ -230,7 +230,7 @@ and statement =
    (** CPC **)
  | CPC_YIELD of cabsloc
  | CPC_DONE of cabsloc
- | CPC_ATTACH of cabsloc
+ | CPC_ATTACH of expression * cabsloc
  | CPC_DETACH of cabsloc
  | CPC_SPAWN of statement * cabsloc
  | CPC_DETACHED of statement * cabsloc

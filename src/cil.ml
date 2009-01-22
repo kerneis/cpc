@@ -116,8 +116,6 @@ let debugConstFold = false
 (** The Abstract Syntax of CIL *)
 
 
-type cpc_cut = Yield | Done | Attach | Detach
-
 (** The top-level representation of a CIL source file. Its main contents is 
     the list of global declarations and definitions. *)
 type file = 
@@ -783,6 +781,8 @@ and stmtkind =
   | CpcSleep of exp * exp * exp * location
   | CpcIoWait of exp * exp * exp * location
   | CpcFun of fundec * location
+
+and cpc_cut = Yield | Done | Attach of exp | Detach
 
 (** Instructions. They may cause effects directly but may not have control
     flow.*)
@@ -3884,9 +3884,13 @@ class defaultCilPrinterClass : cilPrinter = object (self)
         self#pLineDirective l
           ++ text "cpc_done;"
 
-    | CpcCut (Attach, l) ->
+    | CpcCut (Attach e, l) ->
         self#pLineDirective l
-          ++ text "cpc_attach;"
+          ++ text "cpc_attach"
+          ++ (align
+                ++ text " ("
+                ++ self#pExp () e
+                ++ text ");")
 
     | CpcCut (Detach, l) ->
         self#pLineDirective l
