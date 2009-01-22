@@ -24,6 +24,7 @@ const int cpc_pessimise_runtime = 0;
 #define STATE_SLEEPING -2
 
 static wp_t *pool = NULL;
+static pthread_mutex_t pool_m = PTHREAD_MUTEX_INITIALIZER;
 
 cpc_scheduler cpc_main_scheduler = {
     NULL, // ready_1
@@ -813,6 +814,7 @@ cpc_scheduler_start(cpc_scheduler *sched)
     pthread_attr_t attr;
     int rc;
 
+    pthread_mutex_lock(&pool_m);
     if(!pool) {
         pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL);
         if(!pool) {
@@ -820,6 +822,7 @@ cpc_scheduler_start(cpc_scheduler *sched)
             exit(1);
         }
     }
+    pthread_mutex_unlock(&pool_m);
 
     /* Initialize and set thread detached attribute */
     pthread_attr_init(&attr);
@@ -845,6 +848,7 @@ cpc_main_loop(void)
         exit(1);
     }
 
+    pthread_mutex_lock(&pool_m);
     if(!pool) {
         pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL);
         if(!pool) {
@@ -852,6 +856,7 @@ cpc_main_loop(void)
             exit(1);
         }
     }
+    pthread_mutex_unlock(&pool_m);
 
     cpc_scheduler_loop(&cpc_main_scheduler);
 }
