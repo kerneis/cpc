@@ -4,18 +4,53 @@ Experimental; do not redistribute.
 */
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include "wp.h"
 
-#define CPC_TAIL_RECURSIVE_COMPILER
-
-#pragma cilnoremove("type cpc_continuation", "type cpc_condvar")
+#pragma cilnoremove("type cpc_continuation")
 struct cpc_continuation;
 typedef void cpc_function(void*);
 typedef struct cpc_condvar cpc_condvar;
+
+typedef struct cpc_continuation_queue {
+    struct cpc_continuation *head;
+    struct cpc_continuation *tail;
+} cpc_continuation_queue;
+
+typedef struct cpc_timed_continuation {
+    struct cpc_continuation *continuation;
+    struct timeval time;
+    struct cpc_timed_continuation *next;
+} cpc_timed_continuation;
+
+typedef struct cpc_timed_continuation_queue {
+    struct cpc_timed_continuation *head;
+    struct cpc_timed_continuation *tail;
+} cpc_timed_continuation_queue;
+
+struct cpc_condvar {
+    int refcount;
+    cpc_continuation_queue queue;
+};
+
+typedef struct cpc_scheduler {
+    struct cpc_continuation *ready_1;
+    cpc_continuation_queue ready;
+    cpc_timed_continuation_queue sleeping;
+    cpc_continuation_queue *fd_queues;
+    int epfd;
+    int num_fds;
+    int size_fds;
+    cpc_continuation_queue attaching;
+    pthread_mutex_t attach_m;
+    struct timeval now;
+} cpc_scheduler;
 
 typedef struct cpc_continuation {
     struct cpc_continuation *next;
     struct cpc_condvar *condvar;
     struct cpc_continuation *cond_next;
+    struct cpc_scheduler *sched;
     int state;
     unsigned short length;
     unsigned short size;
@@ -27,8 +62,6 @@ struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);
 struct cpc_continuation *cpc_continuation_copy(struct cpc_continuation *c);
 
-extern cpc_continuation *cpc_ready_1;
-        
 #pragma cilnoremove("cpc_alloc")
 static inline void* 
 cpc_alloc(struct cpc_continuation **cp, int s)
@@ -82,7 +115,10 @@ cpc_really_invoke_continuation(struct cpc_continuation *c)
 static inline void
 cpc_invoke_continuation(struct cpc_continuation *c)
 {
-    cpc_ready_1 = c;
+    if(c->sched)
+        c->sched->ready_1 = c;
+    else
+        cpc_really_invoke_continuation(c);
     return;
 }
 #endif
@@ -131,3 +167,7 @@ void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*);
 #pragma cilnoremove("cpc_prim_attach", "cpc_prim_detach")
 void cpc_prim_attach(cpc_continuation*);
 void cpc_prim_detach(cpc_continuation*);
+
+cpc_scheduler *cpc_scheduler_new(void);
+void cpc_scheduler_free(cpc_scheduler*);
+void cpc_start_scheduler(cpc_scheduler*);

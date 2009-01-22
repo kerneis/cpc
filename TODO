@@ -27,3 +27,13 @@
 * do the right thing with CpcFun (there is much more to save and restore
   than the few global references I deal with --- hashtables, startEnv(),
   etc.)
+[runtime/cpc_runtime.c]
+* Fix the race condition when creating the pool (if cpc_start_scheduler
+  or cpc_main_loop are called from threads).
+  => define a cpc_init() function?
+* Include a trampoline in detached mode
+  => use thread-local variables?
+* What about condition variables in detached mode?
+  => not supported at all...
+* Extend cpc_attach with an optional scheduler
+  => Implies compiler changes too.
