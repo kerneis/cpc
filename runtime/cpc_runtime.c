@@ -23,15 +23,13 @@ const int cpc_pessimise_runtime = 0;
 #define STATE_UNKNOWN -1
 #define STATE_SLEEPING -2
 
-static wp_t *pool = NULL;
-static pthread_mutex_t pool_m = PTHREAD_MUTEX_INITIALIZER;
-
 cpc_scheduler cpc_main_scheduler = {
     NULL, // ready_1
     {NULL, NULL}, // ready
     {NULL, NULL}, // sleeping
     NULL, // fd_queues
     0, 0, 0, // epfd, num_fds, size_fds
+    NULL, // pool
     {NULL, NULL}, // attaching
     PTHREAD_MUTEX_INITIALIZER, // attach_m
     {0,0} // now
@@ -378,6 +376,7 @@ cpc_scheduler_new(void)
     sched->fd_queues = NULL;
     sched->num_fds = 0;
     sched->size_fds = 0;
+    sched->pool = NULL;
     pthread_mutex_init(&sched->attach_m, NULL);
     gettimeofday(&sched->now, NULL);
 
@@ -634,7 +633,7 @@ cpc_prim_attach(cpc_scheduler *sched, cpc_continuation *cont)
         // detach the continuation if it is already attached,
         // to avoid blocking the whole scheduler.
         cont->sched = sched;
-        (void) wp_run_task(pool, (void *) cont,
+        (void) wp_run_task(sched->pool, (void *) cont,
                 (wp_process_cb) perform_attach, NULL);
     } else {
         cont->sched = sched;
@@ -646,6 +645,7 @@ void
 cpc_prim_detach(cpc_continuation *cont)
 {
     if(cont->sched) {
+        wp_t *pool = cont->sched->pool;
         cont->sched = NULL;
         (void) wp_run(pool, (void *) cont);
     } else {
@@ -797,12 +797,12 @@ cpc_scheduler_loop(cpc_scheduler *sched)
         }
 #endif
     }
-    if(pool) {
-        wp_wait(pool);
+    if(sched->pool) {
+        wp_wait(sched->pool);
         if(sched->attaching.head)
             goto loop;
         else
-            wp_free(pool, WP_IMMEDIATE);
+            wp_free(sched->pool, WP_IMMEDIATE);
     }
     cpc_scheduler_free(sched);
 }
@@ -814,15 +814,13 @@ cpc_scheduler_start(cpc_scheduler *sched)
     pthread_attr_t attr;
     int rc;
 
-    pthread_mutex_lock(&pool_m);
-    if(!pool) {
-        pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL);
-        if(!pool) {
+    if(!sched->pool) {
+        sched->pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL);
+        if(!sched->pool) {
             perror("wp_new");
             exit(1);
         }
     }
-    pthread_mutex_unlock(&pool_m);
 
     /* Initialize and set thread detached attribute */
     pthread_attr_init(&attr);
@@ -848,15 +846,13 @@ cpc_main_loop(void)
         exit(1);
     }
 
-    pthread_mutex_lock(&pool_m);
-    if(!pool) {
-        pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL);
-        if(!pool) {
+    if(!cpc_main_scheduler.pool) {
+        cpc_main_scheduler.pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL);
+        if(!cpc_main_scheduler.pool) {
             perror("wp_new");
             exit(1);
         }
     }
-    pthread_mutex_unlock(&pool_m);
 
     cpc_scheduler_loop(&cpc_main_scheduler);
 }

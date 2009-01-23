@@ -58,8 +58,6 @@
   => not supported at all...
 * Multiple schedulers are unusable because they die (and kill the thread
   pool) when it becomes empty. So, a few questions:
-  => what about a thread pool per scheduler (and why the hell did I drop
-  this design)?
   => when should a scheduler be killed? is main_loop mandatory? how to
   avoid busy wait when a scheduler has no attached continuation?
   => cpc_spawn should provide an (unambiguous) syntax to spawn to a

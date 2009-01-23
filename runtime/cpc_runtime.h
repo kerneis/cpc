@@ -41,6 +41,7 @@ typedef struct cpc_scheduler {
     int epfd;
     int num_fds;
     int size_fds;
+    wp_t *pool;
     cpc_continuation_queue attaching;
     pthread_mutex_t attach_m;
     struct timeval now;
