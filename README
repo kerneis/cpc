@@ -1,2 +1,21 @@
- 
- See the documentation in doc/html.
+Quick start
+===========
+
+sh configure
+make
+# make install is NOT recommended
+cd runtime
+make
+# make install is optional
+cd ../samples
+make
+# make install doesn't exist
+
+Read the .cpc files (and the Makefile) to see how this work.
+
+Don't forget to re-run configure if you move the root directory.
+
+More information on:
+http://www.pps.jussieu.fr/~jch/software/cpc
+
+ For information about CIL, please see the documentation in doc/html.
