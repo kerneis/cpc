@@ -28,7 +28,7 @@ source="$1"
 defobject="${defobject:-"${source%.cpc}.o"}"
 object=${object:-"$defobject"}
 if [ -z "$nolink" ]; then
-    runtime="@CILHOME@/runtime/cpc_runtime.o @CILHOME@/runtime/libcpc.a"
+    runtime="@CILHOME@/runtime/cpc_runtime.o @CILHOME@/runtime/libcpc.a -pthread"
 fi
 
 gcc -E -P -I @CILHOME@/runtime -include cpc_runtime.h -Wall \
