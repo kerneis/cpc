@@ -373,7 +373,7 @@ timed_dequeue(cpc_timed_continuation_heap *heap, struct timeval *time)
     tc = heap->heap[0];
     heap->size--;
     heap->heap[0] = heap->heap[heap->size];
-    heapify_min(heap->heap, heap->size, 1);
+    heapify_min(heap->heap, heap->size, 0);
     cont = tc->continuation;
     free(tc);
     return cont;
