@@ -270,32 +270,38 @@ heapify_min(cpc_timed_continuation **heap, unsigned int size, unsigned int i)
     unsigned int l, r, min;
     cpc_timed_continuation *swap;
 
+    swap = heap[i];
+
     while(1) {
         l = LEFT(i);
         r = RIGHT(i);
-        if(l < size && timeval_cmp(&heap[l]->time, &heap[i]->time) < 0)
-            min = l;
+        if(l < size)
+            if(r < size)
+                if(timeval_cmp(&heap[l]->time, &heap[r]->time) < 0)
+                    min = l;
+                else
+                    min = r;
+            else
+                min = l;
         else
-            min = i;
-        if(r < size && timeval_cmp(&heap[r]->time, &heap[min]->time) < 0)
-            min = r;
-        if(min != i) {
-            swap = heap[i];
+            break;
+        if(timeval_cmp(&heap[min]->time, &swap->time) < 0) {
             heap[i] = heap[min];
-            heap[min] = swap;
             i = min;
         } else
             break;
     }
+    heap[i] = swap;
 }
 
 /* Just like heapify_min but assume that heap[i]->time is infinite
- * (hence it must end as a leaf of the heap */
+ * (hence it must end as a leaf of the heap) and free it. */
 static inline void
-heapify_bottom(cpc_timed_continuation **heap, unsigned int size, unsigned int i)
+heapify_delete(cpc_timed_continuation **heap, unsigned int size, unsigned int i)
 {
     unsigned int l, r, min;
 
+    free(heap[i]);
     while(1) {
         l = LEFT(i);
         r = RIGHT(i);
@@ -336,7 +342,7 @@ static void
 timed_enqueue(cpc_timed_continuation_heap *heap, cpc_continuation *c,
               struct timeval *time)
 {
-    cpc_timed_continuation *tc, *swap;
+    cpc_timed_continuation *tc;
     int i;
 
     if(c == NULL)
@@ -350,15 +356,12 @@ timed_enqueue(cpc_timed_continuation_heap *heap, cpc_continuation *c,
     if(heap->length == heap->size)
         heap_expand(heap);
     i = heap->size;
-    heap->heap[i] = tc;
     heap->size++;
 
     for(;i > 0 && timeval_cmp(&heap->heap[UP(i)]->time, time) > 0;
-            i = UP(i)) {
-        swap = heap->heap[i];
+            i = UP(i))
         heap->heap[i] = heap->heap[UP(i)];
-        heap->heap[UP(i)] = swap;
-    }
+    heap->heap[i] = tc;
 
 }
 
@@ -388,7 +391,7 @@ timed_dequeue_1(cpc_timed_continuation_heap *heap,
 
     for(i = 0; i < heap->size && heap->heap[i]->continuation != cont; i++) ;
     assert(i < heap->size);
-    heapify_bottom(heap->heap, heap->size, i);
+    heapify_delete(heap->heap, heap->size, i);
     heap->size--;
 }
 
