@@ -17,6 +17,9 @@
 [src/ext/cpc.ml]
 * in avoidAmpersand
   => what about arrays?
+* in CPS conversion, if there is a typo in a cpc_spawn, building fails
+  with a Not_found error message
+  => print a more informative error message (or check it before)
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
   expressions, should we ignore them too?
