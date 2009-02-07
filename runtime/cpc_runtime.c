@@ -322,12 +322,13 @@ heap_expand(cpc_timed_continuation_heap *heap)
 
     /* if you want to remove the additive part, don't forget
        to deal with the case heap->size == 0 */
-    size = 2 * heap->size + 10;
+    size = 2 * heap->size + 1;
 
-    h = malloc(size * sizeof(cpc_timed_continuation*));
-    memcpy(h, heap->heap, heap->length * sizeof(cpc_timed_continuation*));
-    free(heap->heap);
-    heap->heap = h;
+    h = realloc(heap->heap, size * sizeof(cpc_timed_continuation*));
+    if(h)
+        heap->heap = h;
+    else
+        {perror("realloc"); exit(1);}
     heap->length = size;
 }
 
