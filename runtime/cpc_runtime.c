@@ -264,13 +264,12 @@ timeval_minus(struct timeval *d, struct timeval *s1, struct timeval *s2)
 #define LEFT(i) (2*(i)+1)
 #define RIGHT(i) (2*(i)+2)
 
+/* Insert heap[size] at the right position in a beheaded heap. */
 static inline void
-heapify_min(cpc_timed_continuation **heap, unsigned int size, unsigned int i)
+heapify_min(cpc_timed_continuation **heap, unsigned int size)
 {
+    int i = 0;
     unsigned int l, r, min;
-    cpc_timed_continuation *swap;
-
-    swap = heap[i];
 
     while(1) {
         l = LEFT(i);
@@ -285,17 +284,17 @@ heapify_min(cpc_timed_continuation **heap, unsigned int size, unsigned int i)
                 min = l;
         else
             break;
-        if(timeval_cmp(&heap[min]->time, &swap->time) < 0) {
+        if(timeval_cmp(&heap[min]->time, &heap[size]->time) < 0) {
             heap[i] = heap[min];
             i = min;
         } else
             break;
     }
-    heap[i] = swap;
+    heap[i] = heap[size];
 }
 
-/* Just like heapify_min but assume that heap[i]->time is infinite
- * (hence it must end as a leaf of the heap) and free it. */
+/* Assume that heap[i]->time is infinite (hence it must end as a leaf of
+ * the heap) and free it. */
 static inline void
 heapify_delete(cpc_timed_continuation **heap, unsigned int size, unsigned int i)
 {
@@ -376,8 +375,7 @@ timed_dequeue(cpc_timed_continuation_heap *heap, struct timeval *time)
 
     tc = heap->heap[0];
     heap->size--;
-    heap->heap[0] = heap->heap[heap->size];
-    heapify_min(heap->heap, heap->size, 0);
+    heapify_min(heap->heap, heap->size);
     cont = tc->continuation;
     free(tc);
     return cont;
