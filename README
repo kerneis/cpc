@@ -2,20 +2,26 @@ Quick start
 ===========
 
 sh configure
-make
+
+ocamlbuild cil.otarget \
+    && cp _build/src/main.native obj/x86_LINUX/cilly.asm.exe
+# Change x86_LINUX if needed.
+
+# You can use 'make' instead of ocamlbuild but it's slower and
+# less reliable.
 # make install is NOT recommended
-cd runtime
-make
+
+cd runtime && make
 # make install is optional
-cd ../samples
-make
+
+cd ../samples && make
 # make install doesn't exist
 
-Read the .cpc files (and the Makefile) to see how this work.
+Read the .cpc files (and the Makefile) to see how it works.
 
 Don't forget to re-run configure if you move the root directory.
 
-More information on:
+More details on:
 http://www.pps.jussieu.fr/~jch/software/cpc
 
  For information about CIL, please see the documentation in doc/html.
