@@ -20,13 +20,13 @@ typedef struct cpc_continuation_queue {
 typedef struct cpc_timed_continuation {
     struct cpc_continuation *continuation;
     struct timeval time;
+    struct cpc_timed_continuation *next;
 } cpc_timed_continuation;
 
-typedef struct cpc_timed_continuation_heap {
-    struct cpc_timed_continuation **heap;
-    unsigned int length;
-    unsigned int size;
-} cpc_timed_continuation_heap;
+typedef struct cpc_timed_continuation_queue {
+    struct cpc_timed_continuation *head;
+    struct cpc_timed_continuation *tail;
+} cpc_timed_continuation_queue;
 
 struct cpc_condvar {
     int refcount;
@@ -36,7 +36,7 @@ struct cpc_condvar {
 typedef struct cpc_scheduler {
     struct cpc_continuation *ready_1;
     cpc_continuation_queue ready;
-    cpc_timed_continuation_heap sleeping;
+    cpc_timed_continuation_queue sleeping;
     cpc_continuation_queue *fd_queues;
     int epfd;
     int num_fds;

@@ -26,7 +26,7 @@ const int cpc_pessimise_runtime = 0;
 cpc_scheduler cpc_main_scheduler = {
     NULL, // ready_1
     {NULL, NULL}, // ready
-    {NULL, 0, 0}, // sleeping
+    {NULL, NULL}, // sleeping
     NULL, // fd_queues
     0, 0, 0, // epfd, num_fds, size_fds
     NULL, // pool
@@ -260,89 +260,11 @@ timeval_minus(struct timeval *d, struct timeval *s1, struct timeval *s2)
         d->tv_sec = d->tv_usec = 0;
 }
 
-#define UP(i) ((i-1)/2)
-#define LEFT(i) (2*(i)+1)
-#define RIGHT(i) (2*(i)+2)
-
-/* Insert heap[size] at the right position in a beheaded heap. */
-static inline void
-heapify_min(cpc_timed_continuation **heap, unsigned int size)
-{
-    int i = 0;
-    unsigned int l, r, min;
-
-    while(1) {
-        l = LEFT(i);
-        r = RIGHT(i);
-        if(l < size)
-            if(r < size)
-                if(timeval_cmp(&heap[l]->time, &heap[r]->time) < 0)
-                    min = l;
-                else
-                    min = r;
-            else
-                min = l;
-        else
-            break;
-        if(timeval_cmp(&heap[min]->time, &heap[size]->time) < 0) {
-            heap[i] = heap[min];
-            i = min;
-        } else
-            break;
-    }
-    heap[i] = heap[size];
-}
-
-/* Assume that heap[i]->time is infinite (hence it must end as a leaf of
- * the heap) and free it. */
-static inline void
-heapify_delete(cpc_timed_continuation **heap, unsigned int size, unsigned int i)
-{
-    unsigned int l, r, min;
-
-    free(heap[i]);
-    while(1) {
-        l = LEFT(i);
-        r = RIGHT(i);
-        if(l < size)
-            if(r < size)
-                if(timeval_cmp(&heap[l]->time, &heap[r]->time) < 0)
-                    min = l;
-                else
-                    min = r;
-            else
-                min = l;
-        else
-            break;
-        heap[i] = heap[min];
-        i = min;
-    }
-}
-
-static inline void
-heap_expand(cpc_timed_continuation_heap *heap)
-{
-    int size;
-    cpc_timed_continuation **h;
-
-    /* if you want to remove the additive part, don't forget
-       to deal with the case heap->size == 0 */
-    size = 2 * heap->size + 1;
-
-    h = realloc(heap->heap, size * sizeof(cpc_timed_continuation*));
-    if(h)
-        heap->heap = h;
-    else
-        {perror("realloc"); exit(1);}
-    heap->length = size;
-}
-
 static void
-timed_enqueue(cpc_timed_continuation_heap *heap, cpc_continuation *c,
+timed_enqueue(cpc_timed_continuation_queue *queue, cpc_continuation *c,
               struct timeval *time)
 {
     cpc_timed_continuation *tc;
-    int i;
 
     if(c == NULL)
         c = cpc_continuation_expand(NULL, 0);
@@ -351,46 +273,66 @@ timed_enqueue(cpc_timed_continuation_heap *heap, cpc_continuation *c,
     tc->continuation = c;
     tc->time = *time;
 
-    assert(heap->length >= heap->size);
-    if(heap->length == heap->size)
-        heap_expand(heap);
-    i = heap->size;
-    heap->size++;
-
-    for(;i > 0 && timeval_cmp(&heap->heap[UP(i)]->time, time) > 0;
-            i = UP(i))
-        heap->heap[i] = heap->heap[UP(i)];
-    heap->heap[i] = tc;
-
+    if(queue->head == NULL ||
+       timeval_cmp(time, &queue->head->time) < 0) {
+        /* Insert at head */
+        tc->next = queue->head;
+        queue->head = tc;
+        if(tc->next == NULL)
+            queue->tail = tc;
+    } else if(timeval_cmp(time, &queue->tail->time) >= 0) {
+        /* Insert at tail */
+        tc->next = NULL;
+        queue->tail->next = tc;
+        queue->tail = tc;
+    } else {
+        cpc_timed_continuation *other;
+        other = queue->head;
+        while(timeval_cmp(time, &other->next->time) >= 0)
+            other = other->next;
+        tc->next = other->next;
+        other->next = tc->next;
+    }
 }
 
 static cpc_continuation*
-timed_dequeue(cpc_timed_continuation_heap *heap, struct timeval *time)
+timed_dequeue(cpc_timed_continuation_queue *queue, struct timeval *time)
 {
     cpc_timed_continuation *tc;
     cpc_continuation *cont;
 
-    if(heap->size == 0 || timeval_cmp(time, &heap->heap[0]->time) < 0)
+    if(queue->head == NULL || timeval_cmp(time, &queue->head->time) < 0)
         return NULL;
 
-    tc = heap->heap[0];
-    heap->size--;
-    heapify_min(heap->heap, heap->size);
+    tc = queue->head;
+    queue->head = tc->next;
+    if(queue->head == NULL)
+        queue->tail = NULL;
     cont = tc->continuation;
     free(tc);
     return cont;
 }
 
 void
-timed_dequeue_1(cpc_timed_continuation_heap *heap,
+timed_dequeue_1(cpc_timed_continuation_queue *queue,
                 cpc_continuation *cont)
 {
-    int i;
-
-    for(i = 0; i < heap->size && heap->heap[i]->continuation != cont; i++) ;
-    assert(i < heap->size);
-    heapify_delete(heap->heap, heap->size, i);
-    heap->size--;
+    cpc_timed_continuation *tc, *next;
+    tc = queue->head;
+    if(tc->continuation == cont) {
+        queue->head = queue->head->next;
+        if(queue->head == NULL)
+            queue->tail = NULL;
+        free(tc);
+        return;
+    }
+    while(tc->next->continuation != cont)
+        tc = tc->next;
+    next = tc->next;
+    tc->next = tc->next->next;
+    if(tc->next == NULL)
+        queue->tail = tc;
+    free(next);
 }
 
 cpc_condvar *
@@ -429,8 +371,7 @@ cpc_scheduler_new(void)
     sched = malloc(sizeof(cpc_scheduler));
     sched->ready_1 = NULL;
     sched->ready.head = sched->ready.tail = NULL;
-    sched->sleeping.heap = NULL;
-    sched->sleeping.size = sched->sleeping.length = 0;
+    sched->sleeping.head = sched->sleeping.tail = NULL;
     sched->attaching.head = sched->attaching.tail = NULL;
     sched->fd_queues = NULL;
     sched->num_fds = 0;
@@ -759,7 +700,7 @@ cpc_scheduler_loop(cpc_scheduler *sched)
     struct epoll_event events[EPOLL_MAX_EVENTS];
 
     loop:
-    while(sched->ready.head || sched->sleeping.size || sched->attaching.head || sched->num_fds > 0) {
+    while(sched->ready.head || sched->sleeping.head || sched->attaching.head || sched->num_fds > 0) {
         if(sched->attaching.head) {
             pthread_mutex_lock(&sched->attach_m);
             while(sched->attaching.head)
@@ -775,13 +716,13 @@ cpc_scheduler_loop(cpc_scheduler *sched)
             cpc_really_invoke_continuation(c);
             exhaust_ready_1(c->sched);
         }
-        if(sched->ready.head && !sched->sleeping.size && sched->num_fds == 0 &&
+        if(sched->ready.head && !sched->sleeping.head && sched->num_fds == 0 &&
            !cpc_pessimise_runtime)
             continue;
 
         gettimeofday(&sched->now, NULL);
 
-        if(sched->sleeping.size) {
+        if(sched->sleeping.head) {
             while(1) {
                 c = timed_dequeue(&sched->sleeping, &sched->now);
                 if(c == NULL) break;
@@ -795,16 +736,16 @@ cpc_scheduler_loop(cpc_scheduler *sched)
             }
         }
 
-        if(sched->ready.head && !sched->sleeping.size && sched->num_fds == 0 &&
+        if(sched->ready.head && !sched->sleeping.head && sched->num_fds == 0 &&
            !cpc_pessimise_runtime)
             continue;
 
         gettimeofday(&sched->now, NULL);
-        if(sched->ready.head || sched->sleeping.size) {
+        if(sched->ready.head || sched->sleeping.head) {
             if(sched->ready.head)
                 rc = epoll_wait(sched->epfd, events, EPOLL_MAX_EVENTS, 0);
             else {
-                timeval_minus(&when, &sched->sleeping.heap[0]->time, &sched->now);
+                timeval_minus(&when, &sched->sleeping.head->time, &sched->now);
                 rc = epoll_wait(sched->epfd, events, EPOLL_MAX_EVENTS,
                                 when.tv_sec * 1000 + when.tv_usec / 1000);
             }
