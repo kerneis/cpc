@@ -3102,6 +3102,8 @@ echo "$as_me: error:
   case "$perlport" in
     cygwin)
         ;;
+    msys)
+        ;;
     MSWin32) # ActivePerl
         ;;
     linux)
@@ -5594,6 +5596,16 @@ echo "${ECHO_T}configuring for Cygwin on win32/x86" >&6; }
     CILHOME=`cygpath -u "$CILHOME"`
     CC=`which $CC`
     CC=`cygpath -wa "$CC"  | sed -e "s/\\\\\/\\//g"`
+    ;;
+
+  # MinGW
+  *86*mingw32*)
+    { echo "$as_me:$LINENO: result: configuring for MinGW on win32/x86" >&5
+echo "${ECHO_T}configuring for MinGW on win32/x86" >&6; }
+
+    ARCHOS=x86_WIN32
+
+    CC=`which $CC`
     ;;
 
   # Solaris
