@@ -39,7 +39,7 @@ class replaceGotos start replace_with =
 
   method vstmt s = match s.skind with
   | Goto (g, loc) when !g == start ->
-      s.skind <- (match replace_with loc with
+      s.skind <- (match replace_with s with
       | [] -> Instr []
       | [{labels=[];skind=x}] -> x
       | l -> Block (mkBlock l));
@@ -51,7 +51,7 @@ end
 accordingly *)
 let copyClearStmt s file stack =
   let res = {(mkEmptyStmt()) with skind = s.skind; labels = s.labels; cps=s.cps} in
-  let new_goto loc = [mkStmt (Goto (ref res, loc))] in
+  let new_goto s = [mkStmt (Goto (ref res, get_stmtLoc s.skind))] in
   if (List.exists is_label s.labels)
   then (
     let vis = new replaceGotos s new_goto in
@@ -1115,17 +1115,22 @@ class functionalizeGoto start file =
           let args = match last_var with
           | None -> []
           | Some v -> setFormals fd [v]; [Lval(Var v, NoOffset)] in
-          let call_fun loc = [
-            mkStmt (Instr
+          (* s is the statement to be replaced by a call to fd *)
+          let call_fun s =
+            let loc = get_stmtLoc s.skind in
+            let (return_val,return_exp) = compute_returns s in
+            [mkStmt (Instr
               [Call(return_val,Lval(Var fd.svar, NoOffset),args,loc)]);
             mkStmt (Return (return_exp, loc))] in
           acc <- false;
           fd.sbody <- mkBlock (List.rev stack);
           stack <- [];
-          b.bstmts <- compactStmts (
-            [ mkStmt (Block (mkBlock(b.bstmts)));
-              mkStmt (CpcFun (fd, locUnknown))]
-            @ call_fun locUnknown);
+          (* Trick: split in two step to make b.bstmts available as a
+          self reference for call_fun  --- DO NOT MERGE! *)
+          b.bstmts <- [ mkStmt (Block (mkBlock(b.bstmts)));
+              mkStmt (CpcFun (fd, locUnknown))];
+          b.bstmts <- compactStmts
+            (b.bstmts @ call_fun (List.hd b.bstmts));
           assert(new_start != dummyStmt);
           assert(new_start == List.hd fd.sbody.bstmts);
           assert(List.for_all is_label new_start.labels); (*No Case or Default*)
