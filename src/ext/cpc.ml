@@ -1162,7 +1162,11 @@ class functionalizeGoto start file =
             (fun b ->
               last_stmt <- enclosing;
               if acc
-              then begin match (compactStmts stack), enclosing.succs,
+              (* Do NOT compactStmts the stack!
+                 [i1;i2];[i3;i4] becomes [i3;i4];[i1;i2] on the stack,
+                 and is compacted to [i3;i4;i1;i2] which messes with
+                 add_goto_after of course. *)
+              then begin match stack, enclosing.succs,
               enclosing.skind with
               (* Loops should have been trivialized first, and stack should
                * contain at least the <start> stmt *)
