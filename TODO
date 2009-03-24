@@ -17,6 +17,10 @@
 [src/ext/cpc.ml]
 * in avoidAmpersand
   => what about arrays?
+* BUG: array[i] = cps_fun(); should be converted to
+  x = cpc_fun(); array[i] = x;
+  => or is there a better way? WTF is happening with arrays, what ARE
+  they anyway? Big mystery...
 * in CPS conversion, if there is a typo in a cpc_spawn, building fails
   with a Not_found error message
   => print a more informative error message (or check it before)

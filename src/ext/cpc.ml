@@ -290,7 +290,7 @@ class markCps = fun file -> object(self)
         match List.rev args with
         | Lval (Var v', NoOffset)::_ -> v = v'
         | [] -> false
-        | e::_ -> E.warn "%a should be a variable" dn_exp e; false
+        | e::_ -> E.warn "%a should be a variable (but I'll do my best)" dn_exp e; false
     in match i with
     | Set _ | Asm _ -> c.last_var <- None; false
     (* Non cps call *)
@@ -304,7 +304,8 @@ class markCps = fun file -> object(self)
     | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
         check_var args && (c.last_var <- Some v; true)
     | Call (Some l, Lval (Var f, NoOffset), _, _) ->
-        E.warn "%a should be a variable" dn_lval l; c.last_var <- None; false
+        E.warn "%a should be a variable (and this is REALLY annoying)" dn_lval l;
+        c.last_var <- None; false
     (* Weird call *)
     | Call _ ->
         if c.cps_fun then E.warn
