@@ -1361,8 +1361,8 @@ let feature : featureDescr =
     fd_description = "cpc translation to C";
     fd_extraopt =
       [("--stage",Arg.Int set_stage,"<n> how far you want to go");
-       ("--pause",Arg.Set pause,"step by step execution");
-       ("--external-patch",Arg.Set external_patch,"call
+       ("--pause",Arg.Set pause," step by step execution");
+       ("--external-patch",Arg.Set external_patch," call \
        cpc_continuation_patch from the runtime library")];
     fd_doit = (fun f -> init f ; doit f);
     fd_post_check = true;
