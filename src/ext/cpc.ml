@@ -1071,7 +1071,7 @@ class hasReturn = object(self)
 
   method vstmt s = match s.skind with
   | Return (Some e, _) -> raise (FoundType (typeOf e))
-  | Return (None, _) -> raise (FoundType voidType)
+  (*| Return (None, _) -> raise (FoundType voidType)*)
   | _ -> DoChildren
 end
 
@@ -1088,11 +1088,6 @@ class functionalizeGoto start file =
       let label = match List.find is_label start.labels with
         | Label(l,_,_) -> l | _ -> assert false in
       let fd = emptyFunction (make_function_name label) in
-      let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
-      let ret_var =
-        if typeSig ret_type = typeSig voidType
-        then None
-        else Some (makeTempVar enclosing_fun ~name:"ret_var" ret_type) in
       let () = fd.svar.vcps <- true in
       object(self)
         inherit nopCilVisitor
@@ -1103,17 +1098,34 @@ class functionalizeGoto start file =
         final goto must be added there when we're done accumulating *)
         val mutable new_start = dummyStmt; (* copy of start in the stack
         -- probably useless, should be equal to last stmt in stack *)
+        val mutable ret_type = None; (* the return type, if any, of the
+        functionalized chunk *)
+
 
         method private unstack_block b =
-          let return_val, return_exp =
-            begin match ret_var with
-              | Some ret_var ->
-              let ret_val = Var ret_var,NoOffset in
-              setFunctionType fd (TFun (ret_type,Some [],false,[]));
-              (Some ret_val, Some (Lval ret_val))
-              | _ -> None, None
+          let h = Hashtbl.create 10 in
+          let make_ret_var f typ =
+            try Hashtbl.find h f.svar.vid
+            with Not_found ->
+              let v = makeTempVar f ~name:"ret_var" typ in
+              Hashtbl.add h f.svar.vid v;
+              v in
+          let compute_returns s =
+            begin match ret_type with
+              (* the chunk doesn't return *)
+              | None -> None, None
+              (* the chunk returns void *)
+              | Some r when typeSig r = typeSig voidType -> None, None
+              | Some ret_type ->
+                  let f = enclosing_function s file in
+                  let v = make_ret_var f ret_type in
+                  let ret_val = Var v, NoOffset in
+                  (Some ret_val, Some (Lval ret_val))
             end in
-          let args = match last_var with
+          let args =
+          (match ret_type with None -> ()
+          | Some typ -> setFunctionType fd (TFun (typ,Some [],false,[])));
+          match last_var with
           | None -> []
           | Some v -> setFormals fd [v]; [Lval(Var v, NoOffset)] in
           (* s is the statement to be replaced by a call to fd *)
@@ -1141,10 +1153,14 @@ class functionalizeGoto start file =
         method vstmt (s: stmt) : stmt visitAction =
           last_stmt <- s;
           if s == start then acc <- true;
-          (if acc then match has_return s with
-          | None -> ()
-          | Some r when typeSig ret_type = typeSig r -> ()
-          | _ -> E.s (E.error "conflicting return types\n"));
+          (if acc then match has_return s, ret_type with
+          | None, _ -> ()
+          | Some r, None when
+              typeSig (fst4 (splitFunctionTypeVI enclosing_fun.svar))
+              = typeSig r ->
+                ret_type <- Some r;
+          | Some r, Some r' when typeSig r = typeSig r' -> ()
+          | _, _ -> E.s (E.error "conflicting return types"));
           ChangeDoChildrenPost(s,
           (fun s ->
             if acc then
