@@ -79,7 +79,7 @@ let make_label =
   let i = ref 0 in
   fun () -> incr i; Printf.sprintf "__cpc_label_%s_%d" (timestamp ()) !i
 
-let add_goto src dst file =
+let add_goto src dst =
   assert (src != dummyStmt && dst != dummyStmt);
   (*E.log "add goto from %a\nto %a\n" d_stmt src d_stmt dst;*)
   let (src_loc,dst_loc) = (get_stmtLoc src.skind, get_stmtLoc dst.skind) in
@@ -96,7 +96,7 @@ let add_goto_after src enclosing file stack =
   (*E.log "add_goto_after: enclosing is %a\n" d_stmt enclosing;*)
   let dst = mkEmptyStmt() in
   let copy = copyClearStmt enclosing file stack in
-  add_goto src dst file;
+  add_goto src dst;
   enclosing.skind <- Block (mkBlock ([
     copy;
     dst]))
@@ -1337,7 +1337,7 @@ let rec doit (f: file) =
       eliminate_switch_loop s;
       doit f
   | AddGoto {last_stmt = src; next_stmt = dst} ->
-      add_goto src dst f;
+      add_goto src dst;
       doit f
   | SplitInstr ({skind = Instr l} as s, i, shall_add_goto) ->
       let rec split_instr acc = function
@@ -1351,7 +1351,7 @@ let rec doit (f: file) =
          * s2;*)
         s.skind <- Block (mkBlock ([s1; s2]));
         if shall_add_goto
-        then add_goto s1 s2 f
+        then add_goto s1 s2
         else
           (* avoid fusion of s1 and s2 *)
           s2.cps <- true;
@@ -1378,8 +1378,8 @@ let rec doit (f: file) =
       (*E.log "SplitCpc\n";*)
       s.skind <- Block (mkBlock ([s1; s2]));
       if last_stmt != dummyStmt && last_stmt.cps
-      then add_goto last_stmt s f;
-      add_goto s1 s2 f;
+      then add_goto last_stmt s;
+      add_goto s1 s2;
       doit f
   | SplitCpc (s,_) ->
       E.s (E.bug "SplitCpc raised with wrong argument %a" d_stmt s)
