@@ -18,10 +18,6 @@
   => look quite good, but who knows?
 
 [src/ext/cpc.ml]
-* BUG: array[i] = cps_fun(); should be converted to
-  x = cpc_fun(); array[i] = x;
-  => or is there a better way? WTF is happening with arrays, what ARE
-  they anyway? Big mystery...
 * BUG: move every "nasty" expression outside of cps function calls
   => this includes global and &'ed variables, as well as expressions
   containing them

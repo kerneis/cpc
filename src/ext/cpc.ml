@@ -316,8 +316,7 @@ class markCps = fun file -> object(self)
     | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
         check_var args && (c.last_var <- Some v; true)
     | Call (Some l, Lval (Var f, NoOffset), _, _) ->
-        E.warn "%a should be a variable (and this is REALLY annoying)" dn_lval l;
-        c.last_var <- None; false
+        E.s (E.bug "%a should be a variable (and this is REALLY annoying)" dn_lval l)
     (* Weird call *)
     | Call _ ->
         if c.cps_fun then E.warn
@@ -892,6 +891,24 @@ class avoidAmpersand f =
      end;fd)
 end
 
+(********************* Assignment of cps return values ***********************)
+
+class cpsReturnValues = object(self)
+  inherit (enclosingFunction dummyFunDec)
+
+  method vinst = function
+  | Call (Some (Var _, NoOffset), Lval (Var f, NoOffset), _, _)
+      when f.vcps -> DoChildren
+  | Call (Some l, Lval (Var f, NoOffset), args, loc) when f.vcps ->
+      let typ = fst4 (splitFunctionTypeVI f) in
+      let v = (assert (typeSig typ <> typeSig voidType); makeTempVar ef typ) in
+      ChangeTo [
+        Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc);
+        Set(l, Lval(Var v, NoOffset), loc)
+        ]
+  | _ -> DoChildren
+end
+
 (********************* Cleaning **********************************************)
 
 class cleaner = object(self)
@@ -1281,6 +1298,8 @@ let init file = begin
   if !stage < 1 then raise Exit;
   E.log "Avoid ampersand\n";
   visitCilFileSameGlobals (new avoidAmpersand file) file;
+  E.log "Handle assignment cps return values\n";
+  visitCilFileSameGlobals (new cpsReturnValues) file;
 end
 
 let rec doit (f: file) =
