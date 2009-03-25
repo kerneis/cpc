@@ -21,7 +21,6 @@
 * BUG: move every "nasty" expression outside of cps function calls
   => this includes global and &'ed variables, as well as expressions
   containing them
-* BUG: insert a goto after every cps call returning a variable
 * in CPS conversion, if there is a typo in a cpc_spawn, building fails
   with a Not_found error message
   => print a more informative error message (or check it before)

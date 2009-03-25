@@ -909,6 +909,35 @@ class cpsReturnValues = object(self)
   | _ -> DoChildren
 end
 
+(********************* Insert goto after cps assignment **********************)
+
+let rec insert_gotos il =
+  let rec split acc l = match l with
+  | Call(Some(Var _, NoOffset), Lval(Var f, NoOffset), _, _)::_ when f.vcps ->
+      (mkStmt (Instr (List.rev (List.hd l :: acc))), List.tl l, true)
+  | hd :: tl -> split (hd :: acc) tl
+  | [] -> (mkStmt (Instr (List.rev acc)), [], false) in
+  (* the boolean indicates whether we have to include a goto or not *)
+  match split [] il with
+  | s, rem, false -> assert(rem=[]); [s]
+  | s, rem, true ->
+    let dst, tl = match insert_gotos rem with
+    | [] -> mkStmt (Instr []), []
+    | hd :: tl ->  hd, tl in
+    add_goto s dst;
+    s :: dst :: tl
+
+class insertGotos = object(self)
+  inherit nopCilVisitor
+
+  method vstmt s = match s.skind with
+  | Instr il ->
+      s.skind <- Block (mkBlock (compactStmts (insert_gotos il)));
+      SkipChildren
+  | _ -> DoChildren
+
+end
+
 (********************* Cleaning **********************************************)
 
 class cleaner = object(self)
@@ -1300,6 +1329,8 @@ let init file = begin
   visitCilFileSameGlobals (new avoidAmpersand file) file;
   E.log "Handle assignment cps return values\n";
   visitCilFileSameGlobals (new cpsReturnValues) file;
+  E.log "Insert gotos after cps assignments\n";
+  visitCilFileSameGlobals (new insertGotos) file;
 end
 
 let rec doit (f: file) =
