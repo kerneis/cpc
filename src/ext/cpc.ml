@@ -101,6 +101,18 @@ let add_goto_after src enclosing file stack =
     copy;
     dst]))
 
+(* Make a (single) variable to hold the return value of a given function *)
+let make_ret_var =
+    let retvar_hashtbl = Hashtbl.create 30 in fun fd typ ->
+    try
+        let v = Hashtbl.find retvar_hashtbl fd.svar.vid in
+        assert(typeSig v.vtype = typeSig typ);
+        v
+    with Not_found ->
+        let v = makeTempVar fd ~name:"__retres" typ in
+        Hashtbl.add retvar_hashtbl fd.svar.vid v;
+        v
+
 (* return the cps var just before a statement *)
 let rec find_var = function
   | [Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), _, _)]
@@ -822,16 +834,6 @@ class avoidAmpersand f =
       match fd.svar.vtype with
       | TFun(rt, _, _, _) -> rt
       | _ -> E.s (E.bug "Function %s does not have a function type\n" fd.svar.vname) in
-    let retVar : varinfo option ref = ref None in
-    let getRetVar (x: unit) : varinfo =
-      match !retVar with
-        Some rv -> rv
-      | None -> begin
-          let rv = makeTempVar fd ~name:"__retres" retTyp in (* don't collide *)
-          retVar := Some rv;
-          rv
-      end
-    in
     let malloc = Lval(Var (findOrCreateFunc f "malloc" (TFun(voidPtrType, Some
     ["size", find_type "size_t" f, []], false, []))), NoOffset) in
     let free = Lval(Var (findOrCreateFunc f "free" (TFun(voidType, Some ["ptr",
@@ -846,7 +848,7 @@ class avoidAmpersand f =
        | Return (retval, loc) ->
           let rv, assign = match retval with
           | None -> None, []
-          | Some rval -> let r = getRetVar() in
+          | Some rval -> let r = make_ret_var fd retTyp in
               Some (Lval (Var r, NoOffset)), [Set((Var r, NoOffset), rval, loc)] in
           s.skind <- Block (mkBlock [
           mkStmt (Instr (assign @ List.map (fun v ->
@@ -1103,13 +1105,6 @@ class functionalizeGoto start file =
 
 
         method private unstack_block b =
-          let h = Hashtbl.create 10 in
-          let make_ret_var f typ =
-            try Hashtbl.find h f.svar.vid
-            with Not_found ->
-              let v = makeTempVar f ~name:"ret_var" typ in
-              Hashtbl.add h f.svar.vid v;
-              v in
           let compute_returns s =
             begin match ret_type with
               (* the chunk doesn't return *)
