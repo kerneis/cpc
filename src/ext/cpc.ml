@@ -899,9 +899,11 @@ class cpsReturnValues = object(self)
   method vinst = function
   | Call (Some (Var _, NoOffset), Lval (Var f, NoOffset), _, _)
       when f.vcps -> DoChildren
-  | Call (Some l, Lval (Var f, NoOffset), args, loc) when f.vcps ->
+  | Call (Some l, Lval (Var f, NoOffset), args, loc) as i when f.vcps ->
       let typ = fst4 (splitFunctionTypeVI f) in
-      let v = (assert (typeSig typ <> typeSig voidType); makeTempVar ef typ) in
+      let v = (if (typeSig typ = typeSig voidType) then
+        E.s (E.bug "Assignment of a function returning void: %a" d_instr i);
+        makeTempVar ef typ) in
       ChangeTo [
         Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc);
         Set(l, Lval(Var v, NoOffset), loc)
