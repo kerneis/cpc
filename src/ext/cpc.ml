@@ -15,6 +15,9 @@ exception FoundVar of varinfo
 
 let external_patch = ref false
 
+(* Avoid stack-overflow on recursive structures *)
+let (=) x y = (compare x y) = 0
+
 (*************** Utility functions *******************************************)
 
 let fst4 (x,_,_,_) = x
