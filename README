@@ -1,6 +1,10 @@
 Quick start
 ===========
 
+sh build.sh
+
+Old instructions
+================
 sh configure
 
 ocamlbuild cil.otarget \
