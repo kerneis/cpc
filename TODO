@@ -21,6 +21,9 @@
 * BUG: move every "nasty" expression outside of cps function calls
   => this includes global and &'ed variables, as well as expressions
   containing them
+* OPT: Simplify identity functions (there are a LOT of them in some cases)
+* OPT: Local variables used in a single sub-function should be made
+  local to that function before lambda-lifting.
 * in CPS conversion, if there is a typo in a cpc_spawn, building fails
   with a Not_found error message
   => print a more informative error message (or check it before)
