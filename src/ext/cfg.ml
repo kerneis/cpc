@@ -324,7 +324,7 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option) 
          any direct successor to stmt following the loop *)
   | TryExcept _ | TryFinally _ -> 
       E.s (E.unimp "try/except/finally")
-  | CpcCut (Done, _) -> ()
+  (* XXX We also compute the successor of cpc_done, which must be a return. *)
   | CpcCut _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcSpawn _ ->
       addOptionSucc next
   | CpcFun (fd, _) ->
