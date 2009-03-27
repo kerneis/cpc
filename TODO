@@ -21,12 +21,6 @@
 * BUG: move every "nasty" expression outside of cps function calls
   => this includes global and &'ed variables, as well as expressions
   containing them
-* MAJOR OPT: do NOT split after a cpc_prim_op (unless stricly
-  necessary).
-  => Use AddGoto to split before (just like Return)
-  => if splitting after is needed, it will be handled gracefully
-  => change the cps conversion phase to take the new structure of stack
-  into account: [cpc_prim_op] call call [x=]call return([x])
 * OPT: Simplify identity functions (there are a LOT of them in some cases)
 * OPT: Local variables used in a single sub-function should be made
   local to that function before lambda-lifting.

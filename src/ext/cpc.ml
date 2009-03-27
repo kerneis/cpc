@@ -91,7 +91,6 @@ let add_goto src dst =
   src.skind <- Block (mkBlock ([
     src';
     mkStmt (Goto (ref dst, src_loc));
-    (*mkStmt (CpcDone locUnknown)*)
     ]));
   dst.labels <- [Label (make_label(), dst_loc, false)]
 
@@ -124,11 +123,8 @@ let rec find_var = function
   | [] | [_] -> Not_found
   | hd::tl -> find_var tl
 
-(* find one of the following patterns:
+(* find the following pattern:
   <cps call>; goto l; label l: <start>;
-  <cps call>; cpc_yield; goto l; label l: <start>;
-  <cps call>; cpc_attach; goto l; label l: <start>;
-  <cps call>; cpc_detach; goto l; label l: <start>;
 and extract the last var of <cps call>.
 *)
 class lastVar = fun start -> object(self)
@@ -139,21 +135,13 @@ class lastVar = fun start -> object(self)
       match s.preds with
       | [{skind=Instr l} as p] when p.cps ->
           raise (find_var l)
-      | [{skind=CpcCut (Yield, _)} as p]
-      | [{skind=CpcCut (Attach _, _)} as p]
-      | [{skind=CpcCut (Detach, _)} as p] when p.cps -> begin
-        match p.preds with
-        | [{skind=Instr l} as p'] when p'.cps ->
-            raise (find_var l)
-        | _ -> raise Not_found
-      end
       | _ -> raise Not_found
   end
   | _ -> DoChildren
 
 end
 
-let last_var start file =
+let find_last_var start file =
   try
     visitCilFileSameGlobals (new lastVar start) file;
     None
@@ -274,8 +262,6 @@ exception AddGoto of mark_context
 (* Functionalize a statement with a label *)
 exception FunctionalizeGoto of stmt * mark_context
 
-exception SplitCpc of stmt * stmt
-
 class markCps = fun file -> object(self)
   inherit nopCilVisitor
 
@@ -381,7 +367,7 @@ class markCps = fun file -> object(self)
           s
         )
 
-    (* Return and cpc_done *)
+    (* Return *)
 
     (* In a regular function *)
     | Return _ when not c.cps_fun -> SkipChildren
@@ -414,39 +400,31 @@ class markCps = fun file -> object(self)
     | Return (Some _, _) ->
         raise (AddGoto c)
 
-    | CpcCut (Done, _) when c.cps_fun ->
-        if s.cps then
-         (* !!!!!!!!! HERE BE DRAGONS !!!!!!!!!!!! *)
-         (* we do NOT update c.last_stmt and c.next_stmt here.
-          * As a result, if we are already in cps context (ie. if there are
-          * cps calls before cpc_done), the control flow will be considered broken
-          * when the next statement (Return) will be visited. This will raise
-          * AddGoto which will ensure, through functionalizeGoto, that cpc_done
-          * is alone, in it's own function. This is indeed the expected
-          * behavior, and updating the context would break it, so please DON'T! *)
-         (* Note: this should be done more cleanly using SplitCpc *)
-         SkipChildren
-        else begin
-        (* XXX DO NOT USE copyClearStmt HERE --- it's needlessly expensive and
-         * we can keep the labels here *)
-        let copy = mkStmt s.skind in
-        let return = mkStmt (Return (None, locUnknown)) in
-        copy.cps <- true; (* leave a mark for next time *)
-        s.skind <- Block (mkBlock [copy; return]);
-        c.cps_con <- false;
-        c.last_stmt <- dummyStmt;
-        c.next_stmt <- dummyStmt;
-        SkipChildren
-        end
+    (* Cpc constructs *)
 
-    (* cpc constructs should be split, except if it has already been done *)
-    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ when s.cps ->
+    (* In a regular function *)
+    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ when not c.cps_fun ->
+        E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
+    (* In a cps function: *)
+    (* 1. with no cps instruction before *)
+    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ when not c.cps_con ->
+        s.cps <- true;
         c.cps_con <- true;
         self#set_next s;
         SkipChildren
-    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ when c.cps_fun ->
-        s.cps <- true; (* leave a mark for next time *)
-        raise (SplitCpc (s,c.last_stmt))
+    (* 2. with cps instructions before: this can't be done directly, we
+          have to split it. *)
+    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ ->
+        raise (AddGoto c)
+
+    (* cpc_spawn and internal functions are special cases: they can appear anywhere *)
+    | CpcSpawn _ ->
+        s.cps <- c.cps_con;
+        self#set_next s;
+        SkipChildren
+    | CpcFun _ -> (* saving and restoring context is done in vfunc *)
+        ChangeDoChildrenPost
+          (s, fun s -> s.cps <- c.cps_con; self#set_next ~set_last:false s; s)
 
     (* Control flow in cps context *)
     | Goto (g, _) when c.cps_con ->
@@ -493,16 +471,6 @@ class markCps = fun file -> object(self)
           else s)
 
     (* CPC Constructs *)
-    | CpcSpawn _ ->
-        s.cps <- c.cps_con;
-        self#set_next s;
-        SkipChildren
-    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ ->
-        E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
-    | CpcFun _ -> (* saving and restoring context is done in vfunc *)
-        ChangeDoChildrenPost
-          (s, fun s -> s.cps <- c.cps_con; self#set_next ~set_last:false s; s)
-
     (* Blocks *)
     | Block _ ->
         self#set_next ~set_last:false s;
@@ -579,7 +547,7 @@ class cpsConverter = fun file ->
     in
   let cpc_schedule = find_function "cpc_schedule" file in
   let schedule cc =
-    (* cpc_schedule(apply_later); *)
+    (* cpc_schedule(cc); *)
     [Call(None,Lval(Var cpc_schedule, NoOffset),
       [Lval(Var cc, NoOffset)],locUnknown)] in
   let cpc_continuation_free = find_function "cpc_continuation_free" file in
@@ -666,13 +634,20 @@ class cpsConverter = fun file ->
           [Lval(Var cc, NoOffset);
           mkCast (addr_of f) cpc_fun_ptr],
           locUnknown
-        )] @ post
-    | _ -> assert false
+        )] @ debug "continuation_push" @ post
+    | _ -> E.s (E.bug "Unexpected instruction in cps conversion: %a\n"
+        d_instr i)
 
   method private do_convert return =
-    let extract = List.map (function
-      | {skind=Instr l} -> l
-      | s -> (E.bug "do_convert/extract: %a\n" d_stmt s;[])) in
+    (* convert cps calls to cpc_push *)
+    let convert l = List.flatten
+        (List.rev_map
+            (function
+            | {skind=Instr l} ->List.flatten (List.rev_map self#convert_instr l)
+            | s -> E.s (E.bug "Unexpected statement in cps conversion: %a\n"
+                d_stmt s))
+            l
+        ) in
     let is_last_var v = match stack with
     | {skind=Instr l} :: _ ->
         assert (l!=[]);
@@ -682,38 +657,42 @@ class cpsConverter = fun file ->
         end
     | [] -> false
     | _ -> assert false in
+    let patch_instr = match return with
+      | None -> []
+      | Some (Lval(Var v, NoOffset)) when is_last_var v -> []
+      | Some ret_exp ->
+      (* patch must occur only on an empty stack, or something went
+         wrong earlier in cps marking *)
+      if (stack <> []) then
+          E.s (E.bug "Stack must be empty in order to patch.\n");
+      (* XXX DEBUGING *)
+      (debug ("patching before exiting "^ef.svar.vname) @
+      patch current_continuation ret_exp ef) in
     mkStmt (Instr (
-    (* The stack should be a list of cps calls, or a cpc_construct
-       followed by a cps call (except for cpc_done). *)
-    match stack with
-    | [{skind=Instr [i]} ; {skind=CpcCut (Yield, _)}] ->
-        self#convert_instr i @ schedule current_continuation
-    | [{skind=Instr [i]} ; {skind=CpcCut (Attach e, _)}] ->
-        self#convert_instr i @ attach e current_continuation
-    | [{skind=Instr [i]} ; {skind=CpcCut (Detach, _)}] ->
-        self#convert_instr i @ detach current_continuation
-    | [{skind=Instr [i]} ; {skind=CpcWait (condvar, _)}] ->
-        self#convert_instr i @ wait condvar current_continuation
-    | [{skind=Instr [i]} ; {skind=CpcSleep (x, y, condvar, _)}] ->
-        self#convert_instr i @ sleep x y condvar current_continuation
-    | [{skind=CpcCut (Done, _)}] ->
+    (* The stack should be a list of cps calls and might end with a
+       cpc_construct. *)
+    match List.rev stack with
+    | {skind=CpcCut (Yield, _)} :: l ->
+        convert l @ debug "cpc_yield" @ schedule current_continuation
+    | {skind=CpcCut (Attach e, _)} :: l ->
+        convert l @ attach e current_continuation
+    | {skind=CpcCut (Detach, _)} :: l ->
+        convert l @ detach current_continuation
+    | {skind=CpcWait (condvar, _)} :: l ->
+        convert l @ wait condvar current_continuation
+    | {skind=CpcSleep (x, y, condvar, _)} :: l ->
+        convert l @ sleep x y condvar current_continuation
+    | {skind=CpcCut (Done, _)} :: l ->
+        if (l <> []) then
+          E.s (E.bug "cpc_done must be followed by a return.\n");
         (* XXX DEBUGING *)
-        debug ("cpc_done: discarding continuation") @
+        debug "cpc_done: discarding continuation" @
         continuation_free current_continuation
-    | [{skind=Instr [i]} ; {skind=CpcIoWait (x, y, condvar, _)}] ->
-        self#convert_instr i @ io_wait x y condvar current_continuation
-    | _ ->
-        (* convert cps calls to cpc_push *)
-        (List.flatten (List.map (fun l ->
-        (List.flatten (List.rev_map self#convert_instr l))) (extract stack))) @
-        (* patch if we don't return void and if the last cps call did not patch
-         * for us --- Do this BEFORE cpc_invoke!*)
-        (match return with None -> []
-        | Some (Lval(Var v, NoOffset)) when is_last_var v -> []
-        | Some ret_exp ->
-        (* XXX DEBUGING *)
-        debug ("patching before exiting "^ef.svar.vname) @
-        patch current_continuation ret_exp ef) @
+    | {skind=CpcIoWait (x, y, condvar, _)} :: l ->
+        convert l @ io_wait x y condvar current_continuation
+    | l ->
+        convert l @
+        patch_instr @
         (* cpc_invoke(current_continuation); *)
         [Call(None, Lval(Var cpc_invoke, NoOffset),
         [Lval(Var current_continuation, NoOffset)], locUnknown)]
@@ -935,7 +914,7 @@ class cpsReturnValues = object(self)
   | _ -> DoChildren
 end
 
-(********************* Insert goto after cps assignment **********************)
+(******** Insert goto after cps assignment and returns before cpc_done *******)
 
 let rec insert_gotos il =
   let rec split acc l = match l with
@@ -959,6 +938,12 @@ class insertGotos = object(self)
   method vstmt s = match s.skind with
   | Instr il ->
       s.skind <- Block (mkBlock (compactStmts (insert_gotos il)));
+      SkipChildren
+  | CpcCut (Done, loc) ->
+      (* copyClearStmt is needlessly expensive here, just copy *)
+      let copy = mkStmt s.skind in
+      let return = mkStmt (Return (None, loc)) in
+      s.skind <- Block (mkBlock [copy; return]);
       SkipChildren
   | _ -> DoChildren
 
@@ -1158,7 +1143,7 @@ let has_return s =
 
 class functionalizeGoto start file =
       let enclosing_fun = enclosing_function start file in
-      let last_var = last_var start file in
+      let last_var = find_last_var start file in
       let label = match List.find is_label start.labels with
         | Label(l,_,_) -> l | _ -> assert false in
       let fd = emptyFunction (make_function_name label) in
@@ -1355,7 +1340,7 @@ let init file = begin
   visitCilFileSameGlobals (new avoidAmpersand file) file;
   E.log "Handle assignment cps return values\n";
   visitCilFileSameGlobals (new cpsReturnValues) file;
-  E.log "Insert gotos after cps assignments\n";
+  E.log "Insert gotos after cps assignments and returns after cpc_done\n";
   visitCilFileSameGlobals (new insertGotos) file;
 end
 
@@ -1425,21 +1410,6 @@ let rec doit (f: file) =
           doit f
       | _ -> functionalize start f; doit f
       end
-  | SplitCpc ({skind=CpcCut (Yield, _)} as s,last_stmt)
-  | SplitCpc ({skind=CpcCut (Attach _, _)} as s,last_stmt)
-  | SplitCpc ({skind=CpcCut (Detach, _)} as s,last_stmt)
-  | SplitCpc ({skind=CpcWait _} as s,last_stmt)
-  | SplitCpc ({skind=CpcSleep _} as s,last_stmt)
-  | SplitCpc ({skind=CpcIoWait _} as s,last_stmt) ->
-      let (s1,s2) = (copyClearStmt s f [], mkStmt (Instr [])) in
-      (*E.log "SplitCpc\n";*)
-      s.skind <- Block (mkBlock ([s1; s2]));
-      if last_stmt != dummyStmt && last_stmt.cps
-      then add_goto last_stmt s;
-      add_goto s1 s2;
-      doit f
-  | SplitCpc (s,_) ->
-      E.s (E.bug "SplitCpc raised with wrong argument %a" d_stmt s)
   | Exit -> E.log "Exit\n";()
 
 let feature : featureDescr =
