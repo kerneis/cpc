@@ -383,16 +383,37 @@ class markCps = fun file -> object(self)
 
     (* Return and cpc_done *)
 
-    | Return _ ->
-        if c.cps_fun
-        then begin
-          s.cps <- true;
-          c.cps_con <- false;
-          c.last_stmt <- dummyStmt;
-          c.next_stmt <- dummyStmt;
-          c.last_var <- None;
-        end;
+    (* In a regular function *)
+    | Return _ when not c.cps_fun -> SkipChildren
+    (* In a cps function: *)
+    (* 1. with no cps instruction before *)
+    | Return _ when not c.cps_con ->
+        s.cps <- true;
+        c.last_stmt <- dummyStmt;
+        c.next_stmt <- dummyStmt;
+        c.last_var <- None;
         SkipChildren
+    (* 2. with cps instructions before but returning nothing *)
+    | Return (None, _) ->
+        s.cps <- true;
+        c.last_stmt <- dummyStmt;
+        c.next_stmt <- dummyStmt;
+        c.last_var <- None;
+        c.cps_con <- false;
+        SkipChildren
+    (* 3. with cps instructions before and returning the last var *)
+    | Return (Some (Lval (Var v,NoOffset)), _) when Some v = c.last_var ->
+        s.cps <- true;
+        c.last_stmt <- dummyStmt;
+        c.next_stmt <- dummyStmt;
+        c.last_var <- None;
+        c.cps_con <- false;
+        SkipChildren
+    (* 4. with cps instructions before and returning something else:
+          this can't be done directly, we have to split it *)
+    | Return (Some _, _) ->
+        raise (AddGoto c)
+
     | CpcCut (Done, _) when c.cps_fun ->
         if s.cps then
          (* !!!!!!!!! HERE BE DRAGONS !!!!!!!!!!!! *)
