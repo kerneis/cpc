@@ -1,0 +1,17 @@
+// should print: 0 17 16 33
+int glob = 8;
+cps void set_glob() { glob = 16; }
+cps int identity(int x) { return x; }
+cps void h(int x, int y, int z) { printf("%d %d %d ", x, y, z);return;}
+cps int foo(int r){
+    int x = 100;
+    set_glob();
+    x = identity(glob);
+    h(r, x+1, x);
+    return 33;
+}
+int main(){
+    cpc_spawn {printf("%d\n",foo(0));}
+    cpc_main_loop();
+    return 0;
+}

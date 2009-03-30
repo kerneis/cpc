@@ -1,6 +1,8 @@
 open Cil
 module E = Errormsg
 
+module S = Usedef.VS
+
 (* Split an instruction list given an instruction
  * the boolean tells whether a goto should be added *)
 exception SplitInstr of stmt * instr * bool
@@ -827,8 +829,9 @@ end
 
 (********************* Avoid ampersand on local variables ********************)
 
+let has_ampersand v = v.vaddrof && not v.vglob
+
 class avoidAmpersand f =
-  let has_ampersand v = v.vaddrof && not v.vglob in
   let insert_malloc l stmts fd =
     (* stolen from oneret.ml *)
     (* Get the return type *)
@@ -914,6 +917,51 @@ class cpsReturnValues = object(self)
   | _ -> DoChildren
 end
 
+(********************* Remove nasty expressions in cps calls *****************)
+
+let is_nasty v = v.vglob || has_ampersand v
+
+let collect_nasty args =
+  let s = ref S.empty in
+  let visitor = object(self)
+    inherit nopCilVisitor
+
+    method vvrbl v =
+      if is_nasty v then s := S.add v !s;
+      DoChildren
+
+     end in
+   ignore(List.map (visitCilExpr visitor) args);
+   S.elements !s
+
+let protect_nasty ef nasty args =
+  let assocl = List.map (fun v -> (v, makeTempVar ef v.vtype)) nasty in
+  let args' = List.map (visitCilExpr
+    (object(self)
+      inherit nopCilVisitor
+
+      method vvrbl v =
+        try ChangeTo (List.assoc v assocl)
+        with Not_found -> SkipChildren
+    end)) args in
+   let bind_list = List.map (fun (v,v') ->
+     Set((Var v',NoOffset),Lval(Var v, NoOffset),locUnknown)) assocl in
+   bind_list, args'
+
+class removeNastyExpressions = object(self)
+  inherit (enclosingFunction dummyFunDec)
+
+  method vinst = function
+  | Call(ret, Lval(Var f, NoOffset), args, loc) when f.vcps ->
+      begin match collect_nasty args with
+      | [] -> SkipChildren
+      | l ->
+        let (bind_list, args') = protect_nasty ef l args in
+        ChangeTo(bind_list @[Call(ret, Lval(Var f, NoOffset),args',loc)])
+      end
+  | _ -> SkipChildren
+end
+
 (******** Insert goto after cps assignment and returns before cpc_done *******)
 
 let rec insert_gotos il =
@@ -995,14 +1043,6 @@ class cleaner = object(self)
 end
 
 (********************* Lambda-lifting ****************************************)
-
-module S = Usedef.VS (*Set.Make(
-  struct
-    type t = varinfo
-    let compare x y = compare x.vid y.vid
-  end)*)
-
-module L = Liveness
 
 let make_fresh_varinfo fd =
   let args = fd.sformals in
@@ -1370,6 +1410,8 @@ let set_stage x = stage := x
 let init file = begin
   lineDirectiveStyle := None;
   if !stage < 1 then raise Exit;
+  E.log "Remove nasty expressions\n";
+  visitCilFileSameGlobals (new removeNastyExpressions) file;
   E.log "Avoid ampersand\n";
   visitCilFileSameGlobals (new avoidAmpersand file) file;
   E.log "Handle assignment cps return values\n";
