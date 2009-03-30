@@ -949,6 +949,40 @@ class insertGotos = object(self)
 
 end
 
+(********************* Remove identity function ******************************)
+
+class removeIdentity = fun file ->
+  let replaceVar fd fd' = visitCilFileSameGlobals (
+    object(self)
+      inherit nopCilVisitor
+
+      method vvrbl v =
+        if v = fd then ChangeTo fd' else SkipChildren
+    end)
+    file in
+  object(self)
+  inherit nopCilVisitor
+
+  method vfunc fd =
+    if not fd.svar.vcps then SkipChildren
+    else match fd.sbody.bstmts with
+    | {skind=Instr [Call(None,Lval(Var fd',NoOffset),args,_)]} ::
+      {skind=Return(None,_)} :: _ when fd'.vcps &&
+      args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
+        replaceVar fd.svar fd';
+        fd.svar.vcps <- false;
+        fd.sbody.bstmts <- [];
+        SkipChildren
+    | {skind=Instr [Call(Some(l),Lval(Var fd',NoOffset),args,_)]} ::
+      {skind=Return(Some(Lval l'),_)} :: _ when fd'.vcps && l=l' &&
+      args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
+        replaceVar fd.svar fd';
+        fd.svar.vcps <- false;
+        fd.sbody.bstmts <- [];
+        SkipChildren
+    | _ -> SkipChildren
+end
+
 (********************* Cleaning **********************************************)
 
 class cleaner = object(self)
@@ -1360,6 +1394,7 @@ let rec doit (f: file) =
     E.log "Lambda-lifting\n";
     visitCilFile (new lambdaLifter) f;
     visitCilFileSameGlobals (new uniqueVarinfo) f;
+    visitCilFile (new removeIdentity f) f;
     if !stage < 4 then raise Exit;
     E.log "Cps conversion\n";
     visitCilFile (new cpsConverter f) f;
