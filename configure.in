@@ -120,9 +120,9 @@ ocamlDownloadInstructions="
 # required major/minor. 
 # required major/minor
 reqMaj=3
-reqMin=08
+reqMin=10
 knownMaj=3
-knownMin=10
+knownMin=11
 AC_MSG_CHECKING(ocaml version is at least $reqMaj.$reqMin)
 if binaryExists ocamlc; then
   # what version?
