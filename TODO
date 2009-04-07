@@ -25,6 +25,18 @@
   => print a more informative error message (or check it before)
 * in avoidAmpersand
   => what about arrays?
+* OPT: There is an inefficiency with return values:
+  x = f(); return x; is converted to
+  x = f(); w(x); return; with w(x){return x;}
+  This is by design in CPC but I think we can't avoid it anyway since
+  CIL (sometimes) produces the following in the first place:
+  tmp = f(); x = tmp;
+  (Yes, even when there is NO cast implied.)
+  In that case, w becomes: w(tmp){x = tmp; return x;}
+  Both cases could probably be optimized just before cps conversion,
+  basically by removing w (this would save a function call, and a patch,
+  f patching directly the next continuation, instead of going through 
+  w).
 
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
