@@ -1231,8 +1231,13 @@ class functionalizeGoto start file =
         final goto must be added there when we're done accumulating *)
         val mutable new_start = dummyStmt; (* copy of start in the stack
         -- probably useless, should be equal to last stmt in stack *)
-        val mutable ret_type = None; (* the return type, if any, of the
-        functionalized chunk *)
+        (* the return type, if any, of the functionalized chunk
+           XXX To keep a syntactically correct code in intermediate
+           steps, we consider that EVERY chunk returns, hence the
+           following ret_type: *)
+        val mutable ret_type =
+            Some (fst4 (splitFunctionTypeVI enclosing_fun.svar));
+
 
 
         method private unstack_block b =
