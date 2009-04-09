@@ -1412,57 +1412,27 @@ let pause = ref false
 let stage = ref 10
 let set_stage x = stage := x
 
-let init file = begin
-  lineDirectiveStyle := None;
-  if !stage < 1 then raise Exit;
-  E.log "Remove nasty expressions\n";
-  visitCilFileSameGlobals (new removeNastyExpressions) file;
-  E.log "Avoid ampersand\n";
-  visitCilFileSameGlobals (new avoidAmpersand file) file;
-  E.log "Handle assignment cps return values\n";
-  visitCilFileSameGlobals (new cpsReturnValues) file;
-  E.log "Insert gotos after cps assignments and returns after cpc_done\n";
-  visitCilFileSameGlobals (new insertGotos) file;
-end
-
-let rec doit (f: file) =
+let rec cps_marking f =
   try
-    (*E.log "********************* doit ******************\n";*)
+    E.log ".";
     visitCilFileSameGlobals (new cleaner) f;
     let r = if !pause then read_line () else "" in
-    if r = "q" then E.log "quit!\n" else
-    if r = "d" then (dumpFile defaultCilPrinter stdout "" f; doit f)
-    else if r = "r" then (pause := false; doit f)
-    else begin
-    if !stage < 2 then raise Exit;
-    E.log "Mark CPS\n";
+    if r = "q" then raise Exit else
+    if r = "d" then (dumpFile defaultCilPrinter stdout "" f; cps_marking f)
+    else if r = "r" then (pause := false; cps_marking f)
+    else
     visitCilFileSameGlobals (new markCps f) f;
-    if !stage < 3 then raise Exit;
-    E.log "Lambda-lifting\n";
-    visitCilFile (new lambdaLifter) f;
-    visitCilFileSameGlobals (new uniqueVarinfo) f;
-    visitCilFile (new removeIdentity f) f;
-    if !stage < 4 then raise Exit;
-    E.log "Cps conversion\n";
-    visitCilFile (new cpsConverter f) f;
-    if !stage < 5 then raise Exit;
-    E.log "Cleaning things a bit\n";
-    visitCilFileSameGlobals (new cleaner) f;
-    if !stage < 6 then raise Exit;
-    E.log "Alpha-conversion\n";
-    uniqueVarNames f; (* just in case *)
-    E.log "Finished!\n";
-    end
+    E.log "\n"
   with
   | TrivializeStmt s when s = dummyStmt ->
       E.s (E.error "break or continue with no enclosing loop")
   | TrivializeStmt s ->
       (*E.log "TrivializeStmt %a\n" d_stmt s;*)
       eliminate_switch_loop s;
-      doit f
+      cps_marking f
   | AddGoto {last_stmt = src; next_stmt = dst} ->
       add_goto src dst;
-      doit f
+      cps_marking f
   | SplitInstr ({skind = Instr l} as s, i, shall_add_goto) ->
       let rec split_instr acc = function
         | [] -> raise Not_found
@@ -1480,7 +1450,7 @@ let rec doit (f: file) =
           (* avoid fusion of s1 and s2 *)
           s2.cps <- true;
         end;
-      doit f
+      cps_marking f
   | SplitInstr (s, _, _) ->
       E.s (E.bug "SplitInstr raised with wrong argument %a" d_stmt s)
   | FunctionalizeGoto (start,c) ->
@@ -1489,10 +1459,45 @@ let rec doit (f: file) =
       | Switch _ | Loop _ ->
           (*E.log "enclosing is a switch or a loop: trivializing first\n";*)
           eliminate_switch_loop c.enclosing_stmt;
-          doit f
-      | _ -> functionalize start f; doit f
+          cps_marking f
+      | _ -> functionalize start f; cps_marking f
       end
-  | Exit -> E.log "Exit\n";()
+
+let stages = [
+  ("Cleaning things a bit\n", fun file ->
+  visitCilFileSameGlobals (new cleaner) file);
+  ("Remove nasty expressions\n", fun file ->
+  visitCilFileSameGlobals (new removeNastyExpressions) file);
+  ("Avoid ampersand\n", fun file ->
+  visitCilFileSameGlobals (new avoidAmpersand file) file);
+  ("Handle assignment cps return values\n", fun file ->
+  visitCilFileSameGlobals (new cpsReturnValues) file);
+  ("Insert gotos after cps assignments and returns after cpc_done\n",
+  fun file -> visitCilFileSameGlobals (new insertGotos) file);
+  ("Cps marking\n", fun file ->
+  cps_marking file);
+  ("Lambda-lifting\n", fun file ->
+  visitCilFile (new lambdaLifter) file;
+  visitCilFileSameGlobals (new uniqueVarinfo) file;
+  visitCilFile (new removeIdentity file) file);
+  ("Cps conversion\n", fun file ->
+  visitCilFile (new cpsConverter file) file);
+  ("Cleaning things a bit\n", fun file ->
+  visitCilFileSameGlobals (new cleaner) file);
+  ("Alpha-conversion\n", fun file ->
+  uniqueVarNames file)
+]
+
+let rec doit (f: file) =
+  (*lineDirectiveStyle := None;*)
+  try
+    List.fold_left (fun n (descr,step) ->
+        if !stage < n then raise Exit;
+        E.log "%s" descr;
+        step f;
+        n+1) 0 stages;
+    E.log "Finished\n"
+  with Exit -> E.log "Exit\n"
 
 let feature : featureDescr =
   { fd_name = "cpc";
@@ -1503,7 +1508,7 @@ let feature : featureDescr =
        ("--pause",Arg.Set pause," step by step execution");
        ("--external-patch",Arg.Set external_patch," call \
        cpc_continuation_patch from the runtime library")];
-    fd_doit = (fun f -> init f ; doit f);
+    fd_doit = doit;
     fd_post_check = true;
   }
 
