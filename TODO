@@ -37,6 +37,9 @@
   basically by removing w (this would save a function call, and a patch,
   f patching directly the next continuation, instead of going through 
   w).
+* OPT: Return probably does not have to be split if there is no
+  assignment before it
+  => is it worth the trouble?
 
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain
