@@ -3,10 +3,9 @@ Copyright (c) 2004, 2005 by Juliusz Chroboczek.
 Experimental; do not redistribute.
 */
 
-#define EPOLL_MAX_EVENTS 1024
-
 #include <sys/time.h>
-#include <sys/epoll.h>
+#include <time.h>
+#include <sys/select.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -16,26 +15,43 @@ Experimental; do not redistribute.
 
 #include "cpc_runtime.h"
 
-#include "wp.c"
-
 const int cpc_pessimise_runtime = 0;
+
+typedef struct cpc_continuation_queue {
+    struct cpc_continuation *head;
+    struct cpc_continuation *tail;
+} cpc_continuation_queue;
+
+typedef struct cpc_timed_continuation {
+    cpc_continuation *continuation;
+    struct timeval time;
+    struct cpc_timed_continuation *next;
+} cpc_timed_continuation;
+
+typedef struct cpc_timed_continuation_queue {
+    struct cpc_timed_continuation *head;
+    struct cpc_timed_continuation *tail;
+} cpc_timed_continuation_queue;
+
+struct cpc_condvar {
+    int refcount;
+    cpc_continuation_queue queue;
+};
 
 #define STATE_UNKNOWN -1
 #define STATE_SLEEPING -2
 
-cpc_scheduler cpc_main_scheduler = {
-    NULL, // ready_1
-    {NULL, NULL}, // ready
-    {NULL, NULL}, // sleeping
-    NULL, // fd_queues
-    0, 0, 0, // epfd, num_fds, size_fds
-    NULL, // pool
-    {NULL, NULL}, // attaching
-    PTHREAD_MUTEX_INITIALIZER, // attach_m
-    {0,0} // now
-};
+cpc_continuation *cpc_ready_1;
 
-static void recompute_dequeue(int fd, cpc_scheduler *sched);
+static cpc_continuation_queue ready = {NULL, NULL};
+static cpc_timed_continuation_queue sleeping = {NULL, NULL};
+static cpc_continuation_queue *fd_queues = NULL;
+static int num_fds = 0, size_fds = 0;
+static fd_set readfds, writefds, exceptfds;
+
+static struct timeval cpc_now;
+
+static void recompute_fdsets(int fd);
 
 struct cpc_continuation *
 cpc_continuation_get(int size)
@@ -43,7 +59,6 @@ cpc_continuation_get(int size)
     struct cpc_continuation *c;
     c = malloc(sizeof(struct cpc_continuation) + (size - 1));
     c->size = size;
-    c->sched = &cpc_main_scheduler;
     return c;
 }
 
@@ -80,7 +95,6 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->length = c->length;
     d->condvar = c->condvar;
     d->cond_next = c->cond_next;
-    d->sched = c->sched;
     d->state = c->state;
     free(c);
 
@@ -100,8 +114,6 @@ cpc_continuation_copy(struct cpc_continuation *c)
         d->c[i] = c->c[i];
     d->length = c->length;
     d->condvar = c->condvar;
-    /* XXX Why is c->cond_next not copied? */
-    d->sched = c->sched;
     d->state = c->state;
 
     return d;
@@ -150,7 +162,7 @@ dequeue(cpc_continuation_queue *queue)
         queue->tail = NULL;
     cont->next = NULL;
     return cont;
-}
+}    
 
 static void
 dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
@@ -199,7 +211,7 @@ cond_dequeue(cpc_continuation_queue *queue)
         queue->tail = NULL;
     cont->cond_next = NULL;
     return cont;
-}
+}    
 
 static void
 cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
@@ -364,50 +376,10 @@ cpc_condvar_release(cpc_condvar *cond)
     }
 }
 
-cpc_scheduler *
-cpc_scheduler_new(void)
-{
-    cpc_scheduler *sched;
-    sched = malloc(sizeof(cpc_scheduler));
-    sched->ready_1 = NULL;
-    sched->ready.head = sched->ready.tail = NULL;
-    sched->sleeping.head = sched->sleeping.tail = NULL;
-    sched->attaching.head = sched->attaching.tail = NULL;
-    sched->fd_queues = NULL;
-    sched->num_fds = 0;
-    sched->size_fds = 0;
-    sched->pool = NULL;
-    pthread_mutex_init(&sched->attach_m, NULL);
-    gettimeofday(&sched->now, NULL);
-
-    sched->epfd = epoll_create(10);
-    if(sched->epfd < 0) {
-        perror("epoll_create");
-        exit(1);
-    }
-
-    return sched;
-}
-
-void
-cpc_scheduler_free(cpc_scheduler *sched)
-{
-    /* TODO: Queues clean-up and sanity checks */
-    close(sched->epfd);
-    pthread_mutex_destroy(&sched->attach_m);
-    if(sched != &cpc_main_scheduler)
-        free(sched);
-    return;
-}
-
 void
 cpc_schedule(struct cpc_continuation *cont)
 {
-    if(cont->sched)
-        enqueue(&cont->sched->ready, cont);
-    else
-        cpc_prim_detach(cont);
-
+    enqueue(&ready, cont);
 }
 
 void
@@ -422,10 +394,10 @@ static void
 dequeue_other(cpc_continuation *cont)
 {
     if(cont->state == STATE_SLEEPING)
-        timed_dequeue_1(&cont->sched->sleeping, cont);
-    else if(cont->state >= 0 && (cont->state & ((1 << 29) - 1)) <= cont->sched->size_fds) {
-        dequeue_1(&cont->sched->fd_queues[cont->state & ((1 << 29) - 1)], cont);
-        recompute_dequeue(cont->state & ((1 << 29) - 1), cont->sched);
+        timed_dequeue_1(&sleeping, cont);
+    else if(cont->state >= 0 && (cont->state & ((1 << 29) - 1)) <= size_fds) {
+        dequeue_1(&fd_queues[cont->state & ((1 << 29) - 1)], cont);
+        recompute_fdsets(cont->state & ((1 << 29) - 1));
     } else
         assert(cont->state == STATE_UNKNOWN);
     cont->state = STATE_UNKNOWN;
@@ -441,10 +413,10 @@ cpc_signal(cpc_condvar *cond)
     assert(cont->condvar == cond);
     cont->condvar = NULL;
     dequeue_other(cont);
-    enqueue(&cont->sched->ready, cont);
+    enqueue(&ready, cont);
 }
 
-void
+void 
 cpc_signal_all(cpc_condvar *cond)
 {
     cpc_continuation *cont;
@@ -456,7 +428,7 @@ cpc_signal_all(cpc_condvar *cond)
         assert(cont->condvar == cond);
         cont->condvar = NULL;
         dequeue_other(cont);
-        enqueue(&cont->sched->ready, cont);
+        enqueue(&ready, cont);
     }
 }
 
@@ -468,58 +440,44 @@ cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
     if(cont == NULL)
         cont = cpc_continuation_expand(NULL, 0);
 
-    if(cont->sched == NULL) {
-        sleep(sec);
-        usleep(usec);
-        cpc_invoke_continuation(cont);
-        return;
-    }
-
     assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
     if(cond) {
         cont->condvar = cond;
         cond_enqueue(&cond->queue, cont);
     }
     cont->state = STATE_SLEEPING;
-    timeval_plus(&when, &cont->sched->now, sec, usec);
-    timed_enqueue(&cont->sched->sleeping, cont, &when);
+    timeval_plus(&when, &cpc_now, sec, usec);
+    timed_enqueue(&sleeping, cont, &when);
 }
 
 static void
-fd_queues_expand(int n, cpc_scheduler *sched)
+fd_queues_expand(int n)
 {
     cpc_continuation_queue *new;
-    cpc_continuation_queue *fd_queues = sched->fd_queues;
 
-    int size_fds = sched->size_fds;
-
-    assert(n >= size_fds);
+    assert(n >= size_fds && n <= FD_SETSIZE);
     new = malloc(n * sizeof(struct cpc_continuation_queue));
     if(size_fds > 0) {
         memcpy(new, fd_queues,
                size_fds * sizeof(struct cpc_continuation_queue));
+    } else {
+        FD_ZERO(&readfds);
+        FD_ZERO(&writefds);
+        FD_ZERO(&exceptfds);
     }
 
     memset(new + size_fds, 0,
            (n - size_fds) * sizeof(struct cpc_continuation_queue));
     free(fd_queues);
-    sched->fd_queues = new;
-    sched->size_fds = n;
+    fd_queues = new;
+    size_fds = n;
 }
 
 static void
-recompute_enqueue(int fd, cpc_continuation *c)
+recompute_fdsets(int fd)
 {
-    int r = 0, w = 0, op = EPOLL_CTL_MOD, rc = 0;
+    int r = 0, w = 0;
     cpc_continuation *cont;
-    cpc_continuation_queue *fd_queues = c->sched->fd_queues;
-    struct epoll_event event;
-    event.events = 0;
-    event.data.fd = fd;
-
-    if(fd_queues[fd].head == NULL)
-        op = EPOLL_CTL_ADD;
-    enqueue(&fd_queues[fd], c);
 
     cont = fd_queues[fd].head;
     while(cont) {
@@ -532,66 +490,37 @@ recompute_enqueue(int fd, cpc_continuation *c)
         cont = cont->next;
     }
     if(r)
-        event.events |= (EPOLLIN | EPOLLPRI | EPOLLRDHUP);
+        FD_SET(fd, &readfds);
+    else
+        FD_CLR(fd, &readfds);
     if(w)
-        event.events |= EPOLLOUT;
+        FD_SET(fd, &writefds);
+    else
+        FD_CLR(fd, &writefds);
+    if(r || w)
+        FD_SET(fd, &exceptfds);
+    else
+        FD_CLR(fd, &exceptfds);
 
-    assert(r || w);
-    if(c->sched->num_fds <= fd + 1)
-        c->sched->num_fds = fd + 1;
-
-    rc = epoll_ctl(c->sched->epfd, op, fd, &event);
-    if(rc < 0)
-        perror("epoll_ctl");
-}
-
-static void
-recompute_dequeue(int fd, cpc_scheduler *sched)
-{
-    int r = 0, w = 0, op = EPOLL_CTL_MOD, rc = 0;
-    cpc_continuation *cont;
-    cpc_continuation_queue *fd_queues = sched->fd_queues;
-    struct epoll_event event;
-    event.events = 0;
-    event.data.fd = fd;
-
-    if(fd_queues[fd].head == NULL) {
-        op = EPOLL_CTL_DEL;
-        assert(fd_queues[sched->num_fds - 1].head != NULL || fd == sched->num_fds - 1);
-        while(fd_queues[sched->num_fds - 1].head == NULL) {
-            sched->num_fds--;
-            if(sched->num_fds == 0)
+    if(r || w) {
+        if(num_fds <= fd + 1)
+            num_fds = fd + 1;
+    } else if(fd == num_fds - 1) {
+        while(!FD_ISSET(num_fds - 1, &readfds) &&
+              !FD_ISSET(num_fds - 1, &writefds) &&
+              !FD_ISSET(num_fds - 1, &exceptfds)) {
+            num_fds--;
+            if(num_fds == 0)
                 break;
         }
-    } else {
-        cont = fd_queues[fd].head;
-        while(cont) {
-            if(((cont->state >> 29) & CPC_IO_IN))
-                r = 1;
-            if(((cont->state >> 29) & CPC_IO_OUT))
-                w = 1;
-            if(r && w)
-                break;
-            cont = cont->next;
-        }
-        if(r)
-            event.events |= (EPOLLIN | EPOLLPRI | EPOLLRDHUP);
-        if(w)
-            event.events |= EPOLLOUT;
-
-        assert(r || w);
-        assert(sched->num_fds >= fd + 1);
     }
-    rc = epoll_ctl(sched->epfd, op, fd, &event);
-    if(rc < 0)
-        perror("epoll_ctl");
 }
-
+        
 void
 cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
                  cpc_continuation *cont)
 {
-    if(cont == NULL || cont->sched == NULL)
+    if(cont == NULL)
         return;
 
     assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
@@ -601,130 +530,94 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
         cont->condvar = cond;
         cond_enqueue(&cond->queue, cont);
     }
-    if(cont->sched->size_fds <= fd)
-        fd_queues_expand(fd + 10, cont->sched);
+    if(size_fds <= fd)
+        fd_queues_expand(fd + 10);
 
     cont->state = fd | ((direction & 3) << 29);
-    recompute_enqueue(fd, cont);
+    enqueue(&fd_queues[fd], cont);
+    recompute_fdsets(fd);
 
     return;
 }
 
 void
-perform_attach(cpc_continuation *cont)
+cpc_prim_attach(cpc_continuation *cont)
 {
-    pthread_mutex_lock(&cont->sched->attach_m);
-    enqueue(&cont->sched->attaching, cont);
-    pthread_mutex_unlock(&cont->sched->attach_m);
-}
-
-void
-cpc_prim_attach(cpc_scheduler *sched, cpc_continuation *cont)
-{
-    if(cont == NULL)
-        return;
-
-    if(cont->sched == sched) {
-        cpc_schedule(cont);
-        return;
-    }
-
-    if(cont->sched) {
-        // detach the continuation if it is already attached,
-        // to avoid blocking the whole scheduler.
-        cont->sched = sched;
-        (void) wp_run_task(sched->pool, (void *) cont,
-                (wp_process_cb) perform_attach, NULL);
-    } else {
-        cont->sched = sched;
-        perform_attach(cont);
-    }
+    cpc_really_invoke_continuation(cont);
+    return;
 }
 
 void
 cpc_prim_detach(cpc_continuation *cont)
 {
-    if(cont->sched) {
-        wp_t *pool = cont->sched->pool;
-        cont->sched = NULL;
-        (void) wp_run(pool, (void *) cont);
-    } else {
-        // the continuation is already detached
-        cpc_invoke_continuation(cont);
-    }
+    cpc_really_invoke_continuation(cont);
+    return;
 }
 
 static void
-requeue_io_ready(int fd, int direction, cpc_scheduler *sched)
+requeue_io_ready(int fd, int direction)
 {
     cpc_continuation *c;
-    c = sched->fd_queues[fd].head;
+    c = fd_queues[fd].head;
     while(c) {
         if((c->state >> 29) & direction) {
-            dequeue_1(&sched->fd_queues[fd], c); /* XXX */
+            dequeue_1(&fd_queues[fd], c); /* XXX */
             c->state = STATE_UNKNOWN;
             if(c->condvar) {
                 cond_dequeue_1(&c->condvar->queue, c);
             }
             c->condvar = NULL;
-            enqueue(&c->sched->ready, c);
+            enqueue(&ready, c);
         }
         c = c->next;
     }
-    recompute_dequeue(fd, sched);
+    recompute_fdsets(fd);
 }
 
 static inline void
-exhaust_ready_1(cpc_scheduler *sched)
+exhaust_ready_1()
 {
     cpc_continuation *c;
-
-    if(!sched)
-        return;
-
-    while(sched->ready_1) {
-        c = sched->ready_1;
-        sched->ready_1 = NULL;
+    while(cpc_ready_1) {
+        c = cpc_ready_1;
+        cpc_ready_1 = NULL;
         cpc_really_invoke_continuation(c);
     }
 }
 
-void
-cpc_scheduler_loop(cpc_scheduler *sched)
+void 
+cpc_main_loop(void)
 {
     struct cpc_continuation *c;
     struct cpc_continuation_queue q;
     struct timeval when;
     int rc, i, done;
+    fd_set r_readfds, r_writefds, r_exceptfds;
 
-    struct epoll_event events[EPOLL_MAX_EVENTS];
+    cpc_ready_1 = NULL;
 
-    loop:
-    while(sched->ready.head || sched->sleeping.head || sched->attaching.head || sched->num_fds > 0) {
-        if(sched->attaching.head) {
-            pthread_mutex_lock(&sched->attach_m);
-            while(sched->attaching.head)
-                enqueue(&sched->ready, dequeue(&sched->attaching));
-            pthread_mutex_unlock(&sched->attach_m);
-        }
-        q = sched->ready;
-        sched->ready.head = sched->ready.tail = NULL;
+    /* Make sure cpc_now has a reasonable initial value. */
+    gettimeofday(&cpc_now, NULL);
+
+    while(ready.head || sleeping.head || num_fds > 0) {
+        q = ready;
+        ready.head = ready.tail = NULL;
         while(1) {
             c = dequeue(&q);
             if(c == NULL) break;
             assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
             cpc_really_invoke_continuation(c);
-            exhaust_ready_1(c->sched);
+            exhaust_ready_1();
         }
-        if(sched->ready.head && !sched->sleeping.head && sched->num_fds == 0 &&
+        if(ready.head && !sleeping.head && num_fds == 0 &&
            !cpc_pessimise_runtime)
             continue;
 
-        gettimeofday(&sched->now, NULL);
+        gettimeofday(&cpc_now, NULL);
 
-        if(sched->sleeping.head) {
+        if(sleeping.head) {
             while(1) {
-                c = timed_dequeue(&sched->sleeping, &sched->now);
+                c = timed_dequeue(&sleeping, &cpc_now);
                 if(c == NULL) break;
                 assert(c->state == STATE_SLEEPING);
                 if(c->condvar)
@@ -732,36 +625,40 @@ cpc_scheduler_loop(cpc_scheduler *sched)
                 c->condvar = NULL;
                 c->state = STATE_UNKNOWN;
                 cpc_really_invoke_continuation(c);
-                exhaust_ready_1(c->sched);
+                exhaust_ready_1();
             }
         }
 
-        if(sched->ready.head && !sched->sleeping.head && sched->num_fds == 0 &&
+        if(ready.head && !sleeping.head && num_fds == 0 &&
            !cpc_pessimise_runtime)
             continue;
 
-        gettimeofday(&sched->now, NULL);
-        if(sched->ready.head || sched->sleeping.head) {
-            if(sched->ready.head)
-                rc = epoll_wait(sched->epfd, events, EPOLL_MAX_EVENTS, 0);
-            else {
-                timeval_minus(&when, &sched->sleeping.head->time, &sched->now);
-                rc = epoll_wait(sched->epfd, events, EPOLL_MAX_EVENTS,
-                                when.tv_sec * 1000 + when.tv_usec / 1000);
+        memcpy(&r_readfds, &readfds, sizeof(fd_set));
+        memcpy(&r_writefds, &writefds, sizeof(fd_set));
+        memcpy(&r_exceptfds, &exceptfds, sizeof(fd_set));
+        gettimeofday(&cpc_now, NULL);
+        if(ready.head || sleeping.head) {
+            if(ready.head) {
+                when.tv_sec = 0;
+                when.tv_usec = 0;
+            } else {
+                timeval_minus(&when, &sleeping.head->time, &cpc_now);
             }
+            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
+                        &when);
         } else {
-            if(sched->num_fds == 0)
+            if(num_fds == 0)
                 break;
-            rc = epoll_wait(sched->epfd, events, EPOLL_MAX_EVENTS, -1);
+            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
+                        NULL);
         }
         if(rc == 0 || (rc < 0 && errno == EINTR)) {
             continue;
         } else if(rc < 0) {
-            perror("epoll_wait");
+            perror("select");
             sleep(1);
             continue;
         }
-
 
         /* 1 for reads, 2 for writes.  0x100 means allow starvation. */
 #ifndef PREFER
@@ -769,16 +666,19 @@ cpc_scheduler_loop(cpc_scheduler *sched)
 #endif
 
         done = 0;
-        for(i = 0; i < rc; i++) {
+        for(i = 0; i < num_fds; i++) {
             int dir = 0;
-            if((PREFER & 1) && (events[i].events & (EPOLLIN | EPOLLPRI | EPOLLRDHUP)))
+            if(rc <= 0)
+                break;
+            if((PREFER & 1) && FD_ISSET(i, &r_readfds))
                 dir |= CPC_IO_IN;
-            if((PREFER & 2) && (events[i].events & EPOLLOUT))
+            if((PREFER & 2) && FD_ISSET(i, &r_writefds))
                 dir |= CPC_IO_OUT;
-            if(events[i].events & (EPOLLERR | EPOLLHUP))
+            if(FD_ISSET(i, &r_exceptfds))
                 dir |= (CPC_IO_IN | CPC_IO_OUT);
             if(dir) {
-                requeue_io_ready(events[i].data.fd, dir, sched);
+                requeue_io_ready(i, dir);
+                rc--;
                 done = 1;
             }
         }
@@ -786,73 +686,19 @@ cpc_scheduler_loop(cpc_scheduler *sched)
 #if (PREFER & 3) != 3
         if((PREFER & 0x100) && done)
             continue;
-        for(i = 0; i < rc; i++) {
+        for(i = 0; i < num_fds; i++) {
             int dir = 0;
-            if(events[i].events & (EPOLLIN | EPOLLPRI | EPOLLRDHUP))
+            if(rc <= 0)
+                break;
+            if(FD_ISSET(i, &r_readfds))
                 dir |= CPC_IO_IN;
-            if(events[i].events & EPOLLOUT)
+            if(FD_ISSET(i, &r_writefds))
                 dir |= CPC_IO_OUT;
-            if(dir)
-                requeue_io_ready(events[i].data.fd, dir, sched);
+            if(dir) {
+                requeue_io_ready(i, dir);
+                rc--;
+            }
         }
 #endif
     }
-    if(sched->pool) {
-        wp_wait(sched->pool);
-        if(sched->attaching.head)
-            goto loop;
-        else
-            wp_free(sched->pool, WP_IMMEDIATE);
-    }
-    cpc_scheduler_free(sched);
-}
-
-void
-cpc_scheduler_start(cpc_scheduler *sched)
-{
-    pthread_t thread;
-    pthread_attr_t attr;
-    int rc;
-
-    if(!sched->pool) {
-        sched->pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL);
-        if(!sched->pool) {
-            perror("wp_new");
-            exit(1);
-        }
-    }
-
-    /* Initialize and set thread detached attribute */
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_attr_setstacksize(&attr, 64 * 1024);
-
-    rc = pthread_create(&thread, &attr, (void*)cpc_scheduler_loop, (void *)sched);
-
-    if(rc) {
-        perror("pthread_create");
-        exit(1);
-    }
-}
-
-void
-cpc_main_loop(void)
-{
-    gettimeofday(&cpc_main_scheduler.now, NULL);
-
-    cpc_main_scheduler.epfd = epoll_create(10);
-    if(cpc_main_scheduler.epfd < 0) {
-        perror("epoll_create");
-        exit(1);
-    }
-
-    if(!cpc_main_scheduler.pool) {
-        cpc_main_scheduler.pool = wp_new(0, (wp_process_cb) cpc_really_invoke_continuation, NULL);
-        if(!cpc_main_scheduler.pool) {
-            perror("wp_new");
-            exit(1);
-        }
-    }
-
-    cpc_scheduler_loop(&cpc_main_scheduler);
 }

@@ -582,7 +582,7 @@ class cpsConverter = fun file ->
   let attach scheduler cc =
     (* cpc_prim_attach(cc) *)
     [Call(None,Lval(Var cpc_attach, NoOffset), [
-      scheduler; Lval(Var cc, NoOffset)],
+      Lval(Var cc, NoOffset)],
       locUnknown)] in
   let cpc_detach = find_function "cpc_prim_detach" file in
   let detach cc =
