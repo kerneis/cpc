@@ -1019,14 +1019,14 @@ class removeIdentity = fun file ->
       args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaceVar fd.svar fd';
         fd.svar.vcps <- false;
-        fd.sbody.bstmts <- [];
+        (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | {skind=Instr [Call(Some(l),Lval(Var fd',NoOffset),args,_)]} ::
       {skind=Return(Some(Lval l'),_)} :: _ when fd'.vcps && l=l' &&
       args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaceVar fd.svar fd';
         fd.svar.vcps <- false;
-        fd.sbody.bstmts <- [];
+        (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | _ -> SkipChildren
 end
