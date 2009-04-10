@@ -1538,7 +1538,9 @@ let stages = [
   ("Cleaning things a bit\n", fun file ->
   visitCilFileSameGlobals (new cleaner) file);
   ("Alpha-conversion\n", fun file ->
-  uniqueVarNames file)
+  uniqueVarNames file);
+  ("Removing unused variables\n", fun file ->
+  Rmtmps.keepUnused := false; Rmtmps.removeUnusedTemps file);
 ]
 
 let rec doit (f: file) =

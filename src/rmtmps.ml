@@ -46,7 +46,7 @@ module E = Errormsg
 module U = Util
 
 (* Set on the command-line: *)
-let keepUnused = ref false
+let keepUnused = ref true
 let rmUnusedInlines = ref false
 
 
