@@ -1018,14 +1018,12 @@ class removeIdentity = fun file ->
       {skind=Return(None,_)} :: _ when fd'.vcps &&
       args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaceVar fd.svar fd';
-        fd.svar.vcps <- false;
         (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | {skind=Instr [Call(Some(l),Lval(Var fd',NoOffset),args,_)]} ::
       {skind=Return(Some(Lval l'),_)} :: _ when fd'.vcps && l=l' &&
       args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaceVar fd.svar fd';
-        fd.svar.vcps <- false;
         (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | _ -> SkipChildren
