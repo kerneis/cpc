@@ -1040,6 +1040,59 @@ class cleaner = object(self)
       b)
 end
 
+(************** Percolate local variables ************************************)
+
+(* If a local variable is used in a single local function, it should be
+  local to that funtion, in order not to be lambda-lifted.
+  This is a particular case of a more general optimization (that we do
+  not perform). *)
+
+let percolateLocals file =
+  let l = ref [] in
+  let decl = ref [] in
+  (* in the association list ref l, the values are either:
+     - Some fd if the key is present in a single function
+     - None if it present in several functions or if it is a formal. *)
+  let record_var var fd =
+    try
+      match List.assq var !l with
+      | Some fd' when not(fd == fd') ->
+          l := (var, None) :: List.remove_assq var !l
+      | _ -> ()
+    with Not_found -> l := (var, Some fd) :: !l in
+  let visitor = object(self)
+      inherit (enclosingFunction dummyFunDec)
+
+      method vvrbl v =
+        if not (v.vglob || isFunctionType v.vtype) then
+            record_var v ef;
+        SkipChildren
+
+    (* We need to make sure that we won't record any formal var, and to
+    keep track of the function were locals are declared. *)
+     method vvdec v =
+        (if List.memq v ef.sformals then
+          try
+            match List.assq v !l with
+            | Some _ -> l := (v, None) :: List.remove_assq v !l
+            | None -> ()
+          with Not_found -> l := (v, None) :: !l);
+        (if List.memq v ef.slocals then
+          try
+            assert(List.assq v !decl == ef)
+          with Not_found -> decl := (v, ef) :: !decl);
+        SkipChildren
+
+    end in
+    visitCilFileSameGlobals visitor file;
+    List.iter (fun (var, fd) -> match fd with
+    | None -> ()
+    | Some fd ->
+      (*E.log "%s optimized\n" var.vname;*)
+      let fdecl = try List.assq var !decl with Not_found -> assert false in
+      fdecl.slocals <- List.filter (fun v -> not(v == var)) fdecl.slocals;
+      fd.slocals <- var :: fd.slocals) !l
+
 (********************* Lambda-lifting ****************************************)
 
 let make_fresh_varinfo fd =
@@ -1474,6 +1527,8 @@ let stages = [
   fun file -> visitCilFileSameGlobals (new insertGotos) file);
   ("Cps marking\n", fun file ->
   cps_marking file);
+  ("Percolating local variables\n", fun file ->
+  percolateLocals file);
   ("Lambda-lifting\n", fun file ->
   visitCilFile (new lambdaLifter) file;
   visitCilFileSameGlobals (new uniqueVarinfo) file;
