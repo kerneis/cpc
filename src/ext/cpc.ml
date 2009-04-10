@@ -1407,7 +1407,7 @@ let rec functionalize start f =
 (*****************************************************************************)
 
 let pause = ref false
-let stage = ref 10
+let stage = ref max_int
 let set_stage x = stage := x
 
 let rec cps_marking f =
@@ -1489,11 +1489,11 @@ let stages = [
 let rec doit (f: file) =
   (*lineDirectiveStyle := None;*)
   try
-    List.fold_left (fun n (descr,step) ->
+    ignore(List.fold_left (fun n (descr,step) ->
         if !stage < n then raise Exit;
-        E.log "%s" descr;
+        E.log "Stage %d: %s" n descr;
         step f;
-        n+1) 0 stages;
+        n+1) 0 stages);
     E.log "Finished\n"
   with Exit -> E.log "Exit\n"
 
