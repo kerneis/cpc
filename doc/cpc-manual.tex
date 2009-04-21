@@ -1,0 +1,370 @@
+\documentclass[a4paper]{report}
+
+\title{The CPC manual}
+\author{Juliusz Chroboczek, Gabriel Kerneis\\
+{\tt <jch@pps.jussieu.fr>, <kerneis@pps.jussieu.fr>}}
+\date{10 April 2009}
+
+\begin{document}
+\maketitle
+
+\chapter{The CPC language} \label{chapter:language}
+
+CPC is a programming language designed for any situation where
+even-driven programming is suitable --- most notably, for writing
+concurrent programs.  The semantics of CPC is defined as a
+source-to-source translation from CPC into plain C using a
+technique known as {\em translation into Continuation Passing Style\/}
+(CPS) \cite{strachey:continuations, plotkin:call-by-lambda}.
+
+The main abstraction provided by CPC is a {\em continuation}, roughly
+corresponding to what other concurrent programming systems term a {\em
+thread\/} or {\em lightweight process\/}\footnote{From the
+programmer's point of view, the main difference is that a thread has
+a long-term identity (a thread or process identifier) which makes it
+possible to have constructs such as {\em join\/} or {\em kill}.
+Continuations, on the other hand, are transient: after execution of
+some code, the former continuation no longer exists, and a new
+continuation has been created.}.
+
+\paragraph{Structure of a CPC program}
+
+Just like a plain C program, a CPC program is a set of functions.
+Functions in a CPC program are partitioned into ``cps'' functions and
+``native'' functions; a global constraint is that a cps function can
+only ever be called by another cps function, never by a native
+function.  The precise set of contexts where a cps function can be
+called is defined in Sec.~\ref{sec:contexts}.
+
+Intuitively, cps code is ``interruptible'': it is possible to
+interrupt the flow of a block of cps code in order to pass control to
+another piece of code or to wait for an event to happen.  Native code,
+on the other hand, is ``atomic''; if a sequence of native code is
+executed, it must be completed before anything else is allowed to run.
+
+Technically, native function calls are executed by using the machine's
+native stack.  Cps function calls, on the other hand, are executed by
+using a lightweight stack-like structure known as a continuation.
+This arrangement makes CPC context switches extremely fast; the
+tradeoff is that a cps function call is an order of magnitude slower
+than a native call.  Thus, computationally expensive code should be
+implemented in native code whenever possible.
+
+Execution of a CPC program starts at a native function called {\tt
+  main}.  This function usually starts by registering a number of
+continuations with the CPC runtime (using {\tt cpc\_spawn},
+Section~\ref{sec:cooperating}), and then passes control to the CPC
+runtime (by calling {\tt cpc\_main\_loop}, Section~\ref{sec:bootstrapping}).
+
+\paragraph{Implementatin of CPC}
+
+CPC is implemented as a source-to-source translation from the CPC
+language, a conservative extension of C, into event-driven C code.
+The resulting C code is linked against the {\em CPC scheduler}, a
+modest event loop that handles scheduling of CPC continuations.
+
+The CPC scheduler manipulates three data structures: a queue of
+runnable continuations, a priority queue of sleeping continuations,
+and a set of queues of continuations blocked on condition variables or
+waiting for I/O.
+
+\section{The CPC language}
+
+CPC is a conservative extension of the 1999 edition of the C
+programming language; thus, the syntax of CPC is defined as a set of
+productions to be added to the grammar defined in the ISO C99 standard
+\cite{iso:c99}.
+
+In addition to the reserved words in C99, CPC reserves the words
+{\tt cps}, {\tt cpc\_yield}, {\tt cpc\_done}, {\tt cpc\_spawn}, 
+{\tt cpc\_wait}, {\tt cpc\_sleep},
+{\tt cpc\_io\_wait}, {\tt cpc\_attach}, {\tt cpc\_detach} and
+{\tt cpc\_detached}.
+
+\subsection{CPS contexts} \label{sec:contexts}
+
+Any instruction, declaration, or function definition in CPC can be in
+{\em cps context\/} or in {\em native context}.  Cps context is
+defined as follows:
+\begin{itemize}
+\item the body of a cps function is in cps context
+  (Sec.~\ref{sec:cpc-functions};
+\item the body of a {\tt cpc\_spawn} statement is in cps context
+  (Sec.~\ref{sec:cooperating}).
+\end{itemize}
+Any construct that is not in cps context is said to be in native
+context.
+
+\subsection{CPS functions} \label{sec:cpc-functions}
+
+\[ \mbox{function-specifier} ::= \mathtt{cps} \]
+
+Functions can be declared as being CPS-converted by adding {\tt cps}
+to the list of functions specifiers.  The effect of such a declaration
+is to put the body of the function in cps context, thus making it
+possible to use most of the CPC features.
+
+\[ \mbox{block-item} ::= \mbox{function-definition} \]
+
+Functions can be defined within other functions, as in Algol-family
+languages; the inner function can access the variables bound by the
+outer one.  Only cps functions can be inner functions, and they must
+be within other cps functions.
+
+Free variables of inner functions are copies of the variables of the
+enclosing function; thus, a change to the value of the free variable
+is not visible in the enclosing function.
+
+\subsection{Bootstrapping} \label{sec:bootstrapping}
+
+\begin{verbatim}
+    void cpc_main_loop(void);
+\end{verbatim}
+
+\paragraph{\tt cpc\_main\_loop} Since \verb|main| is a native
+function, some means is necessary to pass control to cps code.  The
+function \verb|cpc_main_loop| invokes the CPC scheduler; it returns
+when all continuations have been exhausted (i.e.\ where there is
+nothing more to do).
+
+\subsection{CPC statements}
+
+\[ \mbox{statement} ::= \mbox{cpc-statement} \]
+
+CPC has a number of statements not present in the C language.
+
+\subsection{Cooperating: yielding, spawning and detaching} \label{sec:cooperating}
+
+\begin{eqnarray*}
+\mbox{cpc-statement} & ::= & 
+     \mathtt{cpc\_yield} \mathtt{;} \\
+ &|& \mathtt{cpc\_done} \mathtt{;} \\
+ &|& \mathtt{cpc\_spawn}\ \mbox{statement} \\
+ &|& \mathtt{cpc\_attach} \mathtt{;} \\
+ &|& \mathtt{cpc\_detach} \mathtt{;} \\
+ &|& \mathtt{cpc\_detached}\ \mbox{statement} \\
+\end{eqnarray*}
+
+\paragraph{\tt cpc\_yield} The {\tt cpc\_yield} statement causes the
+current continuation to be suspended, and placed at the end of the
+queue of runnable continuations.  Control is passed back to the CPC
+main loop.  This statement is only allowed in cps context.
+
+\paragraph{\tt cpc\_done} The {\tt cpc\_done} statement causes the
+current continuation to be discarded, and control to be passed back to
+the main CPC loop.  This statement is only allowed in cps context.
+
+\paragraph{\tt cpc\_spawn} The {\tt cpc\_spawn} statement causes a new
+continuation that executes the argument to {\tt cpc\_spawn} to be
+created and placed at the end of the queue of runnable continuations.
+Execution then proceeds after the {\tt cpc\_spawn} statement (control
+is {\em not\/} passed back to the main CPC loop).  This statement is
+valid in arbitrary context.
+
+\paragraph{{\tt cpc\_detach}, {\tt cpc\_attach}} The {\tt cpc\_detach}
+and {\tt cpc\_attach} statements respectively detach and attach the
+current continuation from and to the cooperative scheduler, running it
+as a native, preemptive, thread. The {\tt cpc\_detached} statement
+surrounds its argument with {\tt cpc\_detach} and {\tt cpc\_attach}
+statements.  {\bf These statements are not implemented in CPC 0.1.} In
+this first stable release, they are equivalent to {\tt cpc\_yield}. If
+you want to try them, get the latest unstable version.
+
+\subsection{Synchronisation: condition variables}
+
+\[ \mbox{cpc-statement} ::=
+   \mathtt{cpc\_wait} \mathtt{(} \mbox{expression} \mathtt{)} \mathtt{;} \]
+
+\begin{verbatim}
+    typedef struct cpc_condvar cpc_condvar;
+    void cpc_signal(cpc_condvar *);
+    void cpc_signal_all(cpc_condvar *);
+\end{verbatim}
+
+\paragraph{\tt cpc\_wait} The {\tt cpc\_wait} statement places the
+current continuation on the list of continuations waiting on the
+condition variable passed as argument to {\tt cpc\_wait}.  Control is
+passed back to the CPC loop.  This statement is only valid in cps
+context.
+
+\paragraph{\tt cpc\_signal} The function {\tt cpc\_signal} causes the
+first of the continuations waiting on the condition variable passed as
+argument to be moved to the tail of the queue of runnable
+continuations.  Execution proceeds at the instruction following the
+call to {\tt cpc\_signal}.
+
+\paragraph{\tt cpc\_signal\_all} The function {\tt cpc\_signal\_all}
+causes all of the continuations waiting on the condition variabled
+passed as argument to be moved to the tail of the queue of runnable
+continuations.  This function guarantees that the continuations will
+be run in the order in which they were suspended.
+
+\subsection{Sleeping}
+
+\[ \mbox{cpc-statement} ::=
+     \mathtt{cpc\_sleep} \mathtt{(} \mbox{expression}
+                                   [ \mathtt{,}\ \mbox{expression}
+                                     [ \mathtt{,}\
+                                         \mbox{expression} ]]
+                         \mathtt{)} \mathtt{;} \]
+
+\paragraph{cpc\_sleep} The statement {\tt cpc\_sleep} takes three
+arguments: a time in seconds, a time in microseconds, and a condition
+variable.  It causes the current continuation to be suspended until
+either the specified amount of time has passed, or the condition
+variable is signalled, whichever happens first.
+
+The third argument can be omitted if no interruption is necessary.
+The second argument can be omitted if sub-second accuracy is not
+needed.
+
+This statement is only valid in cps context.
+
+\subsection{Waiting for I/O}
+\[ \mbox{cpc-statement} ::=
+   \mathtt{cpc\_io\_wait} \mathtt{(} \mbox{expression}
+                                   \mathtt{,}\ \mbox{expression}
+                                   [ \mathtt{,}\ \mbox{expression} ]
+                         \mathtt{)} \mathtt{;}\]
+
+\paragraph{cpc\_io\_wait} The statement {\tt cpc\_io\_wait} takes three
+arguments: a file descriptor, a direction, and a condition variable.
+The direction can be one of {\tt CPC\_IO\_IN}, meaning input, or {\tt
+  CPC\_IO\_OUT}, meaning output.
+
+This statement causes the current continuation to be suspended until
+either the given file descriptor is available for I/O in the given
+direction, or the given condition variable is signalled, whichever
+happens first.
+
+This statement is only valid in cps context
+
+\section{Limitations and implementation notes}
+
+Not all legal C code is allowable in CPC.  Some of the limitations
+described below are fundamental to the implementation technique of
+CPC; others are just artefacts of the current implementation, and will
+be lifted in a future version.
+
+\subsection{Fundamental limitations}
+
+The use of the {\tt longjmp} library function, and its variants, is
+not allowed in CPC code.
+
+\subsection{Current limitations}
+
+It is not allowed to take the address of a local variable or function
+argument in a cps function.  (It is okay to take the address of a
+structure pointed to by a local pointer variable, of course.)
+
+Old-style (``K\&R'') function definitions are not supported.
+
+\subsection{Time complexity of CPC operations}
+
+The current implementation of CPC implements all the CPS operations in
+constant time, with the following exceptions:
+\begin{itemize} 
+\item at the end of every iteration of the main loop (running all the
+  runnable continuations once), a {\tt select} system call is made; this
+  call runs in time proportional to the number of the highest active file
+  descriptor;
+\item when a continuation is queued on two structures simultaneously
+  (because of {\tt cpc\_sleep} or {\tt cpc\_io\_wait} with a non-null
+  last argument), invoking it requires dequeueing it from the second
+  queue, which takes linear time in the worst case;
+\item the {\tt cpc\_sleep} instruction runs in worst-case time
+  proportional to the number of currently sleeping continuations;
+\end{itemize}
+
+\chapter{The CPC library}
+
+The functions in the CPC library are themselves written in CPC, using
+only the primitives documented in Chapter~\ref{chapter:language}.
+
+All the functions in the CPC core library are declared in the file
+{\tt cpc-lib.h}.
+
+\section{Barriers}
+
+\begin{verbatim}
+    typedef struct cpc_barrier cpc_barrier;
+
+    cpc_barrier *cpc_barrier_get(int count);
+    cps void cpc_barrier_await(cpc_barrier *barrier);
+\end{verbatim}
+
+A barrier is a synchronisation construct that allows a set of
+continuations to be woken up at the same time.  A barrier is
+conceptually a queue of continuations and a count of continuations
+remaining to wait for.
+
+\paragraph{\tt cpc\_barrier\_get} The function {\tt cpc\_barrier\_get}
+returns a new barrier initialised to wait for {\tt count}
+continuations.
+
+\paragraph{\tt cpc\_barrier\_await} The function {\tt cpc\_barrier\_await}
+causes the current continuation to wait on the barrier given in
+argument.  This function first decrements the barrier's count; if the
+count reaches zero, it wakes up all of the continuations waiting on
+the barrier.  Otherwise, it suspends the current continuation.
+
+The function {\tt cpc\_barrier\_await} guarantees that the
+continuations are run in the order in which they were suspended.
+
+\section{Input/Output}
+
+\subsection{Setting up file descriptors}
+
+\begin{verbatim}
+    int cpc_setup_descriptor(int fd, int nonagle);
+\end{verbatim}
+
+The function \verb|cpc_setup_descriptor| sets up the file descriptor
+\verb|fd| into non-blocking mode, making it suitable for use by the
+CPC runtime.  If \verb|nonagle| is true (non-zero), the descriptor is
+assumed to refer to a socket and has the Nagle algorithm disabled (the
+socket option \verb|TCP_NODELAY| is set).
+
+This function returns 1 in case of success, -1 in case of failure.
+
+\subsection{Input/Output}
+\begin{verbatim}
+  cps int cpc_write(int fd, void *buf, size_t count);
+  cps int cpc_write_timeout(int fd, void *buf, size_t count,
+                            int secs, int micros);
+  cps int cpc_read(int fd, void *buf, size_t count);
+  cps int cpc_read_timeout(int fd, void *buf, size_t count,
+                           int secs, int micros);
+\end{verbatim}
+
+The functions \verb|cpc_write| and \verb|cpc_read| are CPC's versions
+of the \verb|write| and \verb|read| system calls.  They return the
+number of octets read/written in case of success; in case of failure,
+they return -1 with \verb|errno| set.
+
+The versions with \verb|timeout| appended return after \verb|secs|
+seconds and \verb|micros| micreseconds if no I/O has been possible.
+In this case, they return -1 with \verb|errno| set to \verb|EAGAIN|.
+
+\begin{thebibliography}{MTHM90}
+
+\bibitem[ISO99]{iso:c99}
+Information technology --- programming language {C}.
+International standard ISO/IEC~9899:1999, 1999.
+
+\bibitem[Plo75]{plotkin:call-by-lambda}
+G.~D. Plotkin.
+Call-by-name, call-by-value and the lambda-calculus.
+{\em Theoretical Computer Science}, 1:125--159, 1975.
+Also published as Memorandum SAI--RM--6, School of Artificial
+  Intelligence, University of Edinburgh, Edinburgh, 1973.
+
+\bibitem[SW74]{strachey:continuations}
+Christopher Strachey and Christopher P. Wadsworth.
+Continuations: A mathematical semantics for handling full jumps.
+Technical Monograph PRG--11, Oxford University Computing
+Laboratory, Programming Research Group, Oxford, England, 1974.
+
+\end{thebibliography}
+
+\end{document}
