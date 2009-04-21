@@ -31,7 +31,7 @@ if [ -z "$nolink" ]; then
     runtime="@CILHOME@/runtime/cpc_runtime.o @CILHOME@/runtime/libcpc.a -pthread"
 fi
 
-gcc -E -P -I @CILHOME@/runtime -include cpc_runtime.h -Wall \
+gcc -E -I @CILHOME@/runtime -include cpc_runtime.h -Wall \
   $taildef - <"$source" >"$source.i"
 #$CPC $tail "$source.i" "$source.i.c"
 $CPC "$source.i" $cildebug --out "$source.i.c"
