@@ -108,6 +108,8 @@ include ocamlutil/Makefile.ocaml
    # Now the rule to make cilly
 
 cilly: $(OBJDIR)/cilly$(EXE)
+	cp $(OBJDIR)/cilly$(EXE) bin/cpc$(EXE)
+
 $(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO)) \
                         $(CILLY_CMODULES:%=$(OBJDIR)/%.$(CMC))
 	@$(NARRATIVE) "Linking $(COMPILETOWHAT) $@ $(LINKMSG)"
