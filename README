@@ -1,31 +1,112 @@
-Quick start
-===========
+Cpc README
+**********
 
-sh build.sh
+CPC is a programming language designed for writing concurrent systems.
 
-Old instructions
-================
-sh configure
+The CPC programmer manipulates cooperatively scheduled threads; the CPC
+program is then processed by the CPC translator, which produces highly
+efficient event-loop code. In the author's opinion, this approach gives
+the best of the two worlds: the convenience of programming with threads,
+and the low memory usage of event-loop code.
 
-ocamlbuild cil.otarget \
-    && cp _build/src/main.native obj/x86_LINUX/cilly.asm.exe
-# Change x86_LINUX if needed.
+The semantics of CPC is defined as a source-to-source translation from
+CPC into plain C using a technique known as conversion into Continuation
+Passing Style.
 
-# You can use 'make' instead of ocamlbuild but it's slower and
-# less reliable.
-# make install is NOT recommended
+Requirements:
+-------------
+    - autoconf
+    - gcc (or another C compiler, but this is untested)
+    - Ocaml >= 3.08 (or >= 3.10 if you want to compile using ocamlbuild)
+    - (optional) Latex, to build the cpc manual (in doc directory)
 
-cd runtime && make
-# make install is optional
+Installation:
+-------------
+To build cpc, you juste have to run from the root directory:
 
-cd ../samples && make
-# make install doesn't exist
+    autoconf
+    ./configure
+    ./build.sh
 
-Read the .cpc files (and the Makefile) to see how it works.
+This will build the main executable, which is then copied to
+bin/cpc.asm.exe. It also builds the cpc runtime (in runtime directory)
+and a bunch of samples (in samples directory).
 
-Don't forget to re-run configure if you move the root directory.
+To clean everything, just run:
 
-More details on:
-http://www.pps.jussieu.fr/~jch/software/cpc
+    ./clean.sh
 
- For information about CIL, please see the documentation in doc/html.
+If you want a system-wide installation of cpc, you could (e.g.) copy
+bin/cpc.asm.exe and bin/cpc to /usr/local/bin and runtime/cpc_runtime.o
+and runtime/libcpc.a to /usr/local/lib.
+
+How to use:
+-----------
+You can either use bin/cpc.asm.exe directly in your Makefiles (see e.g.
+samples/Makefile and runtime/Makefile) or use the bin/cpc wrapper:
+
+    cd samples
+    ../bin/cpc bug.cpc
+    ./a.out
+    head -n1 bug.cpc
+    rm a.out
+
+Options:
+--------
+bin/cpc.asm.exe has the following useful options:
+
+--stage n           perform transformations up to stage n
+--pause             step by step cps marking [*]
+--tr cpc            print (a lot of) debug messages
+--out file          output file
+--external-patch    cpc_patch from cpc_runtime.h instead of inlining it
+
+and a gazillion useless ones, inherited from CIL, that you might
+discover through bin/cpc.asm.exe --help. Using some of them might break
+cpc completely, so use at your own risk!
+
+[*] In step by step mode, here is what you can do at each step:
+    d<Enter>    dump the current file
+    q<Enter>    quit (saving the current file)
+    r<Enter>    exit step by step mode
+    <Enter>     perform another step
+
+Known bugs and limitations:
+---------------------------
+Cpc (inheriting from CIL) doesn't handle every gcc builtin. E.g. some
+people reported that samples/ failed to compile because
+__builtin_va_arg_pack() was used by printf on their platform but not
+supported by cpc. This bug can be solved by removing -O3 in
+samples/Makefile (in the CFLAGS variable). This should be fixed soon.
+
+cpc_detach and cpc_attach are not implemented yet. An experimental
+implementation is available in the unstable branch of cpc:
+    darcs get http://www.pps.jussieu.fr/~kerneis/repos/cpc/unstable
+This branch also uses the (Linux specific) epoll system-call instead of
+select, we yields better results and allow more opened file descriptors.
+
+Please do not hesitate to report any bug at kerneis@pps.jussieu.fr.
+
+Moreover, cpc relies on CIL, which makes a number of assumptions about
+the underlying C machine and compiler. These assumptions are defined
+when ./configure is executed. As a result:
+- if you move on another machine/architecture/compiler, you should
+  re-run ./configure.
+- if you want to cross-compile, you must use the CIL_MACHINE environment
+  variable. See src/machdepenv.ml for further details or ask the
+  authors.
+
+Further details:
+----------------
+Current information about cpc can be found on the cpc web page:
+
+    http://www.pps.jussieu.fr/~jch/software/cpc
+
+The current version of cpc is built upon the CIL framework. Development
+version in kept in sync with CIL svn, but some CIL features have been
+disabled in cpc.  If you want more information about CIL, you'll find
+the (automatically generated) documentation in doc/html. Also checkout:
+http://manju.cs.berkeley.edu/cil/ for the original CIL.
+
+                           Gabriel Kerneis, <kerneis@pps.jussieu.fr>
+                           Juliusz Chroboczek, <jch@pps.jussieu.fr>
