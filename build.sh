@@ -14,7 +14,7 @@ set -e
 #ln -sfn ../_build/doc/cil.docdir doc/html
 
 # Most people should use this (not so insane) default instead
-make
+make NATIVECAML=1
 
 # The following does not depend on the choice made above
 cd runtime
