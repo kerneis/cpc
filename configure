@@ -6089,6 +6089,7 @@ chmod -w Makefile.features
     #echo "skipping [src/machdep-ml.c] because it's not in this distribution"
   fi
 }
+chmod u+x build.sh clean.sh bin/cpc
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -6692,7 +6693,6 @@ do
     "test/Makefile") CONFIG_FILES="$CONFIG_FILES test/Makefile" ;;
     "bin/cilly.bat") CONFIG_FILES="$CONFIG_FILES bin/cilly.bat" ;;
     "bin/patcher.bat") CONFIG_FILES="$CONFIG_FILES bin/patcher.bat" ;;
-    "bin/cpc") CONFIG_FILES="$CONFIG_FILES bin/cpc" ;;
     "bin/CilConfig.pm") CONFIG_FILES="$CONFIG_FILES bin/CilConfig.pm" ;;
     "doc/index.html") CONFIG_FILES="$CONFIG_FILES doc/index.html" ;;
     "doc/header.html") CONFIG_FILES="$CONFIG_FILES doc/header.html" ;;
@@ -7317,7 +7317,6 @@ $as_echo "$as_me: error: could not create -" >&2;}
     "test/Makefile":F) chmod a-w test/Makefile ;;
     "bin/cilly.bat":F) chmod a-w,a+x bin/cilly.bat ;;
     "bin/patcher.bat":F) chmod a-w,a+x bin/patcher.bat ;;
-    "bin/cpc":F) chmod a-w,a+x bin/cpc ;;
     "bin/CilConfig.pm":F) chmod a-w bin/CilConfig.pm ;;
     "doc/index.html":F) chmod a-w doc/index.html ;;
     "doc/header.html":F) chmod a-w doc/header.html ;;

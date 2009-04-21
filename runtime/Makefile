@@ -1,4 +1,4 @@
-CPC='../obj/x86_LINUX/cilly.asm.exe'
+CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-O3 -Wall
 CFLAGS=$(CDEBUGFLAGS) $(EXTRA_DEFINES)

@@ -1,4 +1,4 @@
-CPC='../obj/x86_LINUX/cilly.asm.exe'
+CPC='../bin/cpc.asm.exe'
 
 CLIBS=-I ../runtime
 CFLAGS=-O3 -Wall -g $(CLIBS)

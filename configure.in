@@ -120,7 +120,7 @@ ocamlDownloadInstructions="
 # required major/minor. 
 # required major/minor
 reqMaj=3
-reqMin=10
+reqMin=08
 knownMaj=3
 knownMin=11
 AC_MSG_CHECKING(ocaml version is at least $reqMaj.$reqMin)
@@ -554,13 +554,13 @@ CIL_CONFIG_FILES(config.mk)
 CIL_CONFIG_FILES(test/Makefile)
 CIL_CONFIG_EXE_FILES(bin/cilly.bat)
 CIL_CONFIG_EXE_FILES(bin/patcher.bat)
-CIL_CONFIG_EXE_FILES(bin/cpc)
 CIL_CONFIG_FILES(bin/CilConfig.pm)
 CIL_CONFIG_FILES(doc/index.html)
 CIL_CONFIG_FILES(doc/header.html)
 CIL_CONFIG_FILES(ocamlutil/perfcount.c)
 CIL_CONFIG_FILES(test/llvm/Makefile)
 CIL_CONFIG_FILES(src/machdep-ml.c)
+chmod u+x build.sh clean.sh bin/cpc
 
 AC_OUTPUT()
 
