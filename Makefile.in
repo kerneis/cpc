@@ -17,7 +17,8 @@
 ECHO = @
 
 # It is important to build quickbuild first,to generate the proper dependencies
-all:  quickbuild setup
+# all:  quickbuild setup
+all: cpc
 
 # Now add the defines for the CIL features
 include Makefile.features
@@ -105,11 +106,12 @@ BEFOREDEPS += $(OBJDIR)/feature_config.ml
 include ocamlutil/Makefile.ocaml
 
 
-   # Now the rule to make cilly
+   # Now the rule to make cpc and cilly
 
-cilly: $(OBJDIR)/cilly$(EXE)
+cpc: cilly
 	cp $(OBJDIR)/cilly$(EXE) bin/cpc$(EXE)
 
+cilly: $(OBJDIR)/cilly$(EXE)
 $(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO)) \
                         $(CILLY_CMODULES:%=$(OBJDIR)/%.$(CMC))
 	@$(NARRATIVE) "Linking $(COMPILETOWHAT) $@ $(LINKMSG)"
