@@ -110,6 +110,11 @@ BEFOREDEPS += $(OBJDIR)/feature_config.ml
     # Include now the common set of rules for OCAML
 include ocamlutil/Makefile.ocaml
 
+ocamlbuild:
+	ocamlbuild -X obj src/main$(EXEEXT) src/cil.$(CMXA)
+	cp _build/src/main$(EXEEXT) $(OBJDIR)/cilly$(EXE)
+	cp _build/src/cil.$(CMXA) $(OBJDIR)/
+
 
    # Now the rule to make cpc and cilly
 
