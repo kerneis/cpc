@@ -18,6 +18,7 @@ ECHO = @
 
 # It is important to build quickbuild first,to generate the proper dependencies
 # all:  quickbuild setup
+NATIVECAML := 1
 all: cpc
 
 # Now add the defines for the CIL features
