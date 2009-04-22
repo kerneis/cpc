@@ -1,0 +1,15 @@
+// should print: 42
+cps void set_point(int *p) { *p = 42; }
+cps void print(int i) { printf("%d\n", i); }
+cps void foo(int *p){
+    int x = 100;
+    set_point(p);
+    print(*p);
+}
+int main(){
+    int *p;
+    *p = 0;
+    cpc_spawn foo(p);
+    cpc_main_loop();
+    return 0;
+}

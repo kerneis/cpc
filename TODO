@@ -20,6 +20,12 @@
   => look quite good, but who knows?
 
 [src/ext/cpc.ml]
+* BUG: dereferenced pointers should be considered nasty
+  => see samples/pointer.cpc
+  Btw, one might wish to assign nasty expressions instead of nasty
+  variables. Since we're percolating and the compilers are smart, we
+  might even assign every argument of a function when one of them is
+  nasty (which would make things clearer I think).
 * in CPS conversion, if there is a typo in a cpc_spawn, building fails
   with a Not_found error message
   => print a more informative error message (or check it before)
