@@ -919,46 +919,50 @@ end
 
 (********************* Remove nasty expressions in cps calls *****************)
 
-let is_nasty v = v.vglob || has_ampersand v
+(* If one of the arguments is nasty, rebind every argument ---
+percolating variables will prevent the bindings from being free and the
+compiler should optimize it pretty well. *)
 
-let collect_nasty args =
-  let s = ref S.empty in
+exception ContainsNasty
+
+let contains_nasty args =
   let visitor = object(self)
     inherit nopCilVisitor
 
     method vvrbl v =
-      if is_nasty v then s := S.add v !s;
+      (* global variables are nasty *)
+      if v.vglob then raise ContainsNasty;
+      (* if a local variable has it's address taken,
+         avoidAmpersand has boxed it, and vlval has raised an exception
+         before we get here, detecting the box. *)
+      assert(not v.vaddrof);
       DoChildren
 
+    method vlval = function
+    | (Mem _, _) -> raise ContainsNasty
+    | _ -> DoChildren
      end in
-   ignore(List.map (visitCilExpr visitor) args);
-   S.elements !s
+  ignore(List.map (visitCilExpr visitor) args)
 
-let protect_nasty ef nasty args =
-  let assocl = List.map (fun v -> (v, makeTempVar ef v.vtype)) nasty in
-  let args' = List.map (visitCilExpr
-    (object(self)
-      inherit nopCilVisitor
-
-      method vvrbl v =
-        try ChangeTo (List.assoc v assocl)
-        with Not_found -> SkipChildren
-    end)) args in
-   let bind_list = List.map (fun (v,v') ->
-     Set((Var v',NoOffset),Lval(Var v, NoOffset),locUnknown)) assocl in
-   bind_list, args'
+let rebind ef ftype args =
+  let argstype =
+    match ftype with
+    | TFun (_,x,_,_) -> argsToList x
+    | _ -> assert false in
+  let args' = List.map (fun (s,t,_) -> makeTempVar ~name:s ef t) argstype in
+   let bind_list =
+     List.map2 (fun  v e -> Set((Var v,NoOffset), e,locUnknown)) args' args in
+   bind_list, List.map (fun v -> Lval(Var v, NoOffset)) args'
 
 class removeNastyExpressions = object(self)
   inherit (enclosingFunction dummyFunDec)
 
   method vinst = function
   | Call(ret, Lval(Var f, NoOffset), args, loc) when f.vcps ->
-      begin match collect_nasty args with
-      | [] -> SkipChildren
-      | l ->
-        let (bind_list, args') = protect_nasty ef l args in
-        ChangeTo(bind_list @[Call(ret, Lval(Var f, NoOffset),args',loc)])
-      end
+      (try contains_nasty args; SkipChildren
+      with ContainsNasty ->
+        let (bind_list, args') = rebind ef f.vtype args in
+        ChangeTo(bind_list @[Call(ret, Lval(Var f, NoOffset),args',loc)]))
   | _ -> SkipChildren
 end
 
@@ -1518,10 +1522,10 @@ let rec cps_marking f =
 let stages = [
   ("Cleaning things a bit\n", fun file ->
   visitCilFileSameGlobals (new cleaner) file);
-  ("Remove nasty expressions\n", fun file ->
-  visitCilFileSameGlobals (new removeNastyExpressions) file);
   ("Avoid ampersand\n", fun file ->
   visitCilFileSameGlobals (new avoidAmpersand file) file);
+  ("Remove nasty expressions\n", fun file ->
+  visitCilFileSameGlobals (new removeNastyExpressions) file);
   ("Handle assignment cps return values\n", fun file ->
   visitCilFileSameGlobals (new cpsReturnValues) file);
   ("Insert gotos after cps assignments and returns after cpc_done\n",
