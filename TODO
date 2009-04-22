@@ -40,8 +40,6 @@
 * OPT: Return probably does not have to be split if there is no
   assignment before it
   => is it worth the trouble?
-* OPT: do not reuse local variables (it could prevent them from being
-  percolated).
 
 [src/ext/dataflow.ml]
 * CpcConstructs do not contain instructions, but they contain

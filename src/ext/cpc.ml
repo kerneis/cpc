@@ -108,17 +108,11 @@ let add_goto_after src enclosing file stack =
     copy;
     dst]))
 
-(* Make a (single) variable to hold the return value of a given function *)
-let make_ret_var =
-    let retvar_hashtbl = Hashtbl.create 30 in fun fd typ ->
-    try
-        let v = Hashtbl.find retvar_hashtbl fd.svar.vid in
-        assert(typeSig v.vtype = typeSig typ);
-        v
-    with Not_found ->
-        let v = makeTempVar fd ~name:"__retres" typ in
-        Hashtbl.add retvar_hashtbl fd.svar.vid v;
-        v
+(* Make a variable to hold the return value of a given function *)
+(* Do NOT make a single variable per function anymore, it could prevent
+   them from being optimized by percolating. *)
+let make_ret_var fd typ =
+  makeTempVar fd ~name:"__retres" typ
 
 (* return the cps var just before a statement *)
 let rec find_var = function
