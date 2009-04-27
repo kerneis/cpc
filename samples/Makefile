@@ -1,4 +1,4 @@
-CPC='../bin/cpc.asm.exe'
+CPC='../bin/cpc.native.exe'
 
 CLIBS=-I ../runtime
 CFLAGS=-O3 -Wall -g $(CLIBS)
