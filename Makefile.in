@@ -531,7 +531,6 @@ distclean: clean
 	rm -f config.log
 	rm -f config.h
 	rm -f Makefile
-	rm -f bin/cpc.asm.exe
 
 ## Publish the distribution
 CILHTMLDEST=/var/www/cil
