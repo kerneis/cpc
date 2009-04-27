@@ -73,12 +73,6 @@ cpc completely, so use at your own risk!
 
 Known bugs and limitations:
 ---------------------------
-Cpc (inheriting from CIL) doesn't handle every gcc builtin. E.g. some
-people reported that samples/ failed to compile because
-__builtin_va_arg_pack() was used by printf on their platform but not
-supported by cpc. This bug can be solved by removing -O3 in
-samples/Makefile (in the CFLAGS variable). This should be fixed soon.
-
 cpc_detach and cpc_attach are not implemented yet. An experimental
 implementation is available in the unstable branch of cpc:
     darcs get http://www.pps.jussieu.fr/~kerneis/repos/cpc/unstable
