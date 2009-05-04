@@ -4,6 +4,8 @@ Experimental; do not redistribute.
 */
 #include <stdio.h>
 #include <string.h>
+#define EV_STANDALONE 1
+#include "ev.h"
 
 struct cpc_continuation;
 typedef void cpc_function(void*);
@@ -13,6 +15,8 @@ typedef struct cpc_continuation {
     struct cpc_continuation *next;
     struct cpc_condvar *condvar;
     struct cpc_continuation *cond_next;
+    ev_timer timer;
+    ev_io io;
     int state;
     unsigned short length;
     unsigned short size;
@@ -80,8 +84,8 @@ cpc_invoke_continuation(struct cpc_continuation *c)
 }
 #endif
 
-#define CPC_IO_IN 1
-#define CPC_IO_OUT 2
+#define CPC_IO_IN EV_READ
+#define CPC_IO_OUT EV_WRITE
 
 static inline struct cpc_continuation *
 cpc_continuation_push(cpc_continuation *c, cpc_function *f)

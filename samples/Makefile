@@ -1,9 +1,9 @@
 CPC='../bin/cpc.native.exe'
 
-CLIBS=-I ../runtime
+CLIBS=-I ../runtime -I ../libev
 CFLAGS=-O3 -Wall -g $(CLIBS)
 
-LDLIBS=../runtime/libcpc.a ../runtime/cpc_runtime.o -pthread
+LDLIBS=../runtime/libcpc.a ../runtime/cpc_runtime.o -lm -pthread
 
 .SUFFIXES: .cpc .cpi
 

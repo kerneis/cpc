@@ -1,7 +1,8 @@
 CPC='../bin/cpc.native.exe'
 
 CDEBUGFLAGS=-O3 -Wall
-CFLAGS=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
+CLIBS=-I ../libev
+CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
 
 PREFIX=/usr/local
 
