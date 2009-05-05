@@ -1,7 +1,7 @@
 CPC='../bin/cpc.native.exe'
 
-CDEBUGFLAGS=-O3 -Wall
-CLIBS=-I ../libev
+CDEBUGFLAGS=-O3 -Wall -fno-strict-aliasing
+CLIBS=-I ../libev -pthread
 CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
 
 PREFIX=/usr/local
