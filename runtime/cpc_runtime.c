@@ -38,7 +38,8 @@ cpc_continuation *cpc_ready_1;
 static cpc_continuation_queue ready = {NULL, NULL};
 
 static void io_cb (struct ev_loop *, ev_io *, int);
-static void timer_cb (struct ev_loop *, ev_io *, int);
+static void timer_cb (struct ev_loop *, ev_timer *, int);
+static void idle_cb (struct ev_loop *, ev_idle *, int);
 
 struct cpc_continuation *
 cpc_continuation_get(int size)
@@ -52,8 +53,7 @@ cpc_continuation_get(int size)
 void
 cpc_continuation_free(struct cpc_continuation *c)
 {
-    assert(c->state == STATE_UNKNOWN && c->condvar == NULL &&
-    !ev_is_active(&c->io) && !ev_is_active(&c->timer));
+    assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
     free(c);
 }
 
@@ -75,8 +75,6 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
         d->condvar = NULL;
         d->cond_next = NULL;
         d->state = STATE_UNKNOWN;
-        ev_init(&d->timer, timer_cb);
-        ev_init(&d->io, io_cb);
         return d;
     }
 
@@ -86,8 +84,9 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->condvar = c->condvar;
     d->cond_next = c->cond_next;
     d->state = c->state;
-    d->io = c->io;
-    d->timer = c->timer;
+    assert(c->state == STATE_UNKNOWN); /* Otherwise, you have to use a
+    pointer to a watcher, and use malloc. */
+    //d->watcher = c->watcher;
     free(c);
 
     return d;
@@ -107,8 +106,7 @@ cpc_continuation_copy(struct cpc_continuation *c)
     d->length = c->length;
     d->condvar = c->condvar;
     d->state = c->state;
-    d->io = c->io;
-    d->timer = c->timer;
+    assert(c->state == STATE_UNKNOWN); // See above.
 
     return d;
 }
@@ -233,9 +231,9 @@ static void
 dequeue_other(cpc_continuation *cont)
 {
     if(cont->state == STATE_SLEEPING)
-        ev_timer_stop(loop, &cont->timer);
+        ev_timer_stop(loop, &cont->watcher.timer);
     else if(cont->state >= 0) {
-        ev_io_stop(loop, &cont->io);
+        ev_io_stop(loop, &cont->watcher.io);
     } else
         assert(cont->state == STATE_UNKNOWN);
     cont->state = STATE_UNKNOWN;
@@ -321,16 +319,15 @@ cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
     if(cont == NULL)
         cont = cpc_continuation_expand(NULL, 0);
 
-    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN &&
-    !ev_is_active(&cont->timer));
+    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
     if(cond) {
         cont->condvar = cond;
         cond_enqueue(&cond->queue, cont);
     }
     cont->state = STATE_SLEEPING;
     timeout = sec + ((ev_tstamp) usec) / 1000000.;
-    ev_timer_set(&cont->timer, timeout, 0.);
-    ev_timer_start(loop, &cont->timer);
+    ev_timer_init(&cont->watcher.timer, timer_cb, timeout, 0.);
+    ev_timer_start(loop, &cont->watcher.timer);
     return;
 }
 
@@ -341,8 +338,7 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
     if(cont == NULL)
         return;
 
-    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN &&
-    !ev_is_active(&cont->io));
+    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
 
     if(cond) {
         cont->condvar = cond;
@@ -350,8 +346,8 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
     }
 
     cont->state = fd /*| ((direction & 3) << 29)*/;
-    ev_io_set(&cont->io, fd, direction);
-    ev_io_start(loop, &cont->io);
+    ev_io_init(&cont->watcher.io, io_cb, fd, direction);
+    ev_io_start(loop, &cont->watcher.io);
     return;
 }
 
@@ -375,8 +371,8 @@ io_cb(struct ev_loop *loop, ev_io *w, int revents)
     /* Ugly pointer arithmetic to get the continuation including the
      * watcher w */
     struct cpc_continuation *c = (struct cpc_continuation *)
-    (((char *) w ) - offsetof(struct cpc_continuation, io));
-    
+    (((char *) w ) - offsetof(struct cpc_continuation, watcher));
+
     assert(c->state == w->fd);
 
     ev_io_stop(loop, w);
@@ -389,13 +385,13 @@ io_cb(struct ev_loop *loop, ev_io *w, int revents)
 }
 
 static void
-timer_cb(struct ev_loop *loop, ev_io *w, int revents)
+timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 {
     /* Ugly pointer arithmetic to get the continuation including the
      * watcher w */
     struct cpc_continuation *c = (struct cpc_continuation *)
-    (((char *)w) - offsetof(struct cpc_continuation, timer));
-    
+    (((char *)w) - offsetof(struct cpc_continuation, watcher));
+
     assert(c->state == STATE_SLEEPING);
 
     ev_timer_stop(loop, w);
@@ -428,8 +424,7 @@ idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
     q = ready;
     ready.head = ready.tail = NULL;
     while((c = dequeue(&q))) {
-        assert(c->state == STATE_UNKNOWN && c->condvar == NULL &&
-                !ev_is_active(&c->timer) && !ev_is_active(&c->io));
+        assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
         cpc_really_invoke_continuation(c);
         exhaust_ready_1();
     }
@@ -438,8 +433,6 @@ idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
 void 
 cpc_main_loop(void)
 {
-    ev_prepare prepare;
-
     cpc_ready_1 = NULL;
     loop = ev_default_loop(0);
     ev_idle_init(&run, idle_cb);
