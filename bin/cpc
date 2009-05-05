@@ -1,6 +1,6 @@
 #!/bin/sh
 
-CPC=`dirname $0`/cpc.asm.exe
+CPC=`dirname $0`/cpc.native.exe
 RUNTIME=`dirname $0`/../runtime
 
 set -e
@@ -36,5 +36,5 @@ gcc -E -I $RUNTIME -include cpc_runtime.h -Wall \
   $taildef - <"$source" >"$source.i"
 #$CPC $tail "$source.i" "$source.i.c"
 $CPC "$source.i" $cildebug --out "$source.i.c"
-gcc -I $RUNTIME -Wall $nolink $debug $optimise $taildef -o "$object" \
+gcc -Wall $nolink $debug $optimise $taildef -o "$object" \
   "$source.i.c" $runtime
