@@ -127,7 +127,7 @@ enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
         queue->tail = c;
     }
     // XXX
-    if(loop)
+    if(loop && queue == &ready)
         ev_idle_start(loop, &run);
 }
 
