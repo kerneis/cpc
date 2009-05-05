@@ -138,21 +138,6 @@ enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
         ev_idle_start(loop, &run);
 }
 
-static void
-enqueue_head(cpc_continuation_queue *queue, cpc_continuation *c)
-{
-    if(c == NULL)
-        c = cpc_continuation_expand(NULL, 0);
-
-    if(queue->head == NULL) {
-        c->next = NULL;
-        queue->head = queue->tail = c;
-    } else {
-        c->next = queue->head;
-        queue->head = c;
-    }
-}
-
 static cpc_continuation *
 dequeue(cpc_continuation_queue *queue)
 {
@@ -166,25 +151,6 @@ dequeue(cpc_continuation_queue *queue)
     cont->next = NULL;
     return cont;
 }    
-
-static void
-dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
-{
-    cpc_continuation *c, *next;
-    c = queue->head;
-    if(c == cont) {
-        queue->head = queue->head->next;
-        if(queue->head == NULL)
-            queue->tail = NULL;
-        return;
-    }
-    while(c->next != cont)
-        c = c->next;
-    next = c->next;
-    c->next = c->next->next;
-    if(c->next == NULL)
-        queue->tail = c;
-}
 
 static void
 cond_enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
