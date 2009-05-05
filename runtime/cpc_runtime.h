@@ -12,18 +12,12 @@ struct cpc_continuation;
 typedef void cpc_function(void*);
 typedef struct cpc_condvar cpc_condvar;
 
-typedef union {
-    ev_io io;
-    ev_timer timer;
-    ev_idle idle;
-} watcher;
-
 typedef struct cpc_continuation {
     struct cpc_continuation *next;
     struct cpc_condvar *condvar;
     struct cpc_continuation *cond_next;
     struct cpc_continuation **ready;
-    watcher watcher;
+    union ev_any_watcher watcher;
     int state;
     unsigned short length;
     unsigned short size;
