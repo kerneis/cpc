@@ -73,7 +73,6 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
         d->condvar = NULL;
         d->cond_next = NULL;
         d->state = STATE_UNKNOWN;
-        d->ready = NULL;
         return d;
     }
 
@@ -83,10 +82,6 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->condvar = c->condvar;
     d->cond_next = c->cond_next;
     d->state = c->state;
-    d->ready = c->ready;
-    assert(c->state == STATE_UNKNOWN); /* Otherwise, you have to use a
-    pointer to a watcher, and use malloc. */
-    //d->watcher = c->watcher;
     free(c);
 
     return d;
@@ -106,8 +101,6 @@ cpc_continuation_copy(struct cpc_continuation *c)
     d->length = c->length;
     d->condvar = c->condvar;
     d->state = c->state;
-    d->ready = c->ready;
-    assert(c->state == STATE_UNKNOWN); // See above.
 
     return d;
 }
@@ -407,13 +400,10 @@ timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 static inline void
 exhaust_ready(cpc_continuation *c)
 {
-    cpc_continuation *q = c;
-
-    c->ready = &q;
-
-    while(q) {
-        c = q;
-        q = NULL;
+    cpc_continuation *c;
+    while(cpc_ready_1) {
+        c = cpc_ready_1;
+        cpc_ready_1 = NULL;
         cpc_really_invoke_continuation(c);
     }
 }
@@ -424,14 +414,69 @@ idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
     struct cpc_continuation *c;
     struct cpc_continuation_queue q;
 
-    ev_idle_stop(loop, w);
-    q = ready;
-    ready.head = ready.tail = NULL;
-    while((c = dequeue(&q))) {
-        assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
-        exhaust_ready(c);
-    }
-}
+    /* Make sure cpc_now has a reasonable initial value. */
+    gettimeofday(&cpc_now, NULL);
+
+    while(ready.head || sleeping.head || num_fds > 0) {
+        q = ready;
+        ready.head = ready.tail = NULL;
+        while(1) {
+            c = dequeue(&q);
+            if(c == NULL) break;
+            assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
+            cpc_really_invoke_continuation(c);
+            exhaust_ready_1();
+        }
+        if(ready.head && !sleeping.head && num_fds == 0 &&
+           !cpc_pessimise_runtime)
+            continue;
+
+        gettimeofday(&cpc_now, NULL);
+
+        if(sleeping.head) {
+            while(1) {
+                c = timed_dequeue(&sleeping, &cpc_now);
+                if(c == NULL) break;
+                assert(c->state == STATE_SLEEPING);
+                if(c->condvar)
+                    cond_dequeue_1(&c->condvar->queue, c);
+                c->condvar = NULL;
+                c->state = STATE_UNKNOWN;
+                cpc_really_invoke_continuation(c);
+                exhaust_ready_1();
+            }
+        }
+
+        if(ready.head && !sleeping.head && num_fds == 0 &&
+           !cpc_pessimise_runtime)
+            continue;
+
+        memcpy(&r_readfds, &readfds, sizeof(fd_set));
+        memcpy(&r_writefds, &writefds, sizeof(fd_set));
+        memcpy(&r_exceptfds, &exceptfds, sizeof(fd_set));
+        gettimeofday(&cpc_now, NULL);
+        if(ready.head || sleeping.head) {
+            if(ready.head) {
+                when.tv_sec = 0;
+                when.tv_usec = 0;
+            } else {
+                timeval_minus(&when, &sleeping.head->time, &cpc_now);
+            }
+            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
+                        &when);
+        } else {
+            if(num_fds == 0)
+                break;
+            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
+                        NULL);
+        }
+        if(rc == 0 || (rc < 0 && errno == EINTR)) {
+            continue;
+        } else if(rc < 0) {
+            perror("select");
+            sleep(1);
+            continue;
+        }
 
 void 
 cpc_main_loop(void)
