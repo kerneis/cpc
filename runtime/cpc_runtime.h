@@ -4,6 +4,9 @@ Experimental; do not redistribute.
 */
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
+#define EV_STANDALONE 1
+#include "ev.h"
 
 struct cpc_continuation;
 typedef void cpc_function(void*);
@@ -19,6 +22,8 @@ typedef struct cpc_continuation {
     struct cpc_continuation *next;
     struct cpc_condvar *condvar;
     struct cpc_continuation *cond_next;
+    struct cpc_continuation **ready;
+    watcher watcher;
     int state;
     unsigned short length;
     unsigned short size;
