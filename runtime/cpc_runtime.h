@@ -4,6 +4,7 @@ Experimental; do not redistribute.
 */
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 #define EV_STANDALONE 1
 #include "ev.h"
 
@@ -22,6 +23,7 @@ typedef struct cpc_continuation {
     struct cpc_condvar *condvar;
     struct cpc_continuation *cond_next;
     watcher watcher;
+    struct cpc_continuation **ready;
     int state;
     unsigned short length;
     unsigned short size;
@@ -33,8 +35,6 @@ struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);
 struct cpc_continuation *cpc_continuation_copy(struct cpc_continuation *c);
 
-extern cpc_continuation *cpc_ready_1;
-        
 static inline void* 
 cpc_alloc(struct cpc_continuation **cp, int s)
 {
@@ -84,7 +84,8 @@ cpc_really_invoke_continuation(struct cpc_continuation *c)
 static inline void
 cpc_invoke_continuation(struct cpc_continuation *c)
 {
-    cpc_ready_1 = c;
+    assert(c->ready);
+    *(c->ready) = c;
     return;
 }
 #endif

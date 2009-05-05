@@ -33,8 +33,6 @@ struct cpc_condvar {
 #define STATE_UNKNOWN -1
 #define STATE_SLEEPING -2
 
-cpc_continuation *cpc_ready_1;
-
 static cpc_continuation_queue ready = {NULL, NULL};
 
 static void io_cb (struct ev_loop *, ev_io *, int);
@@ -75,6 +73,7 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
         d->condvar = NULL;
         d->cond_next = NULL;
         d->state = STATE_UNKNOWN;
+        d->ready = NULL;
         return d;
     }
 
@@ -84,6 +83,7 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->condvar = c->condvar;
     d->cond_next = c->cond_next;
     d->state = c->state;
+    d->ready = c->ready;
     assert(c->state == STATE_UNKNOWN); /* Otherwise, you have to use a
     pointer to a watcher, and use malloc. */
     //d->watcher = c->watcher;
@@ -106,6 +106,7 @@ cpc_continuation_copy(struct cpc_continuation *c)
     d->length = c->length;
     d->condvar = c->condvar;
     d->state = c->state;
+    d->ready = c->ready;
     assert(c->state == STATE_UNKNOWN); // See above.
 
     return d;
@@ -404,12 +405,15 @@ timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 }
 
 static inline void
-exhaust_ready_1()
+exhaust_ready(cpc_continuation *c)
 {
-    cpc_continuation *c;
-    while(cpc_ready_1) {
-        c = cpc_ready_1;
-        cpc_ready_1 = NULL;
+    cpc_continuation *q = c;
+
+    c->ready = &q;
+
+    while(q) {
+        c = q;
+        q = NULL;
         cpc_really_invoke_continuation(c);
     }
 }
@@ -425,15 +429,13 @@ idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
     ready.head = ready.tail = NULL;
     while((c = dequeue(&q))) {
         assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
-        cpc_really_invoke_continuation(c);
-        exhaust_ready_1();
+        exhaust_ready(c);
     }
 }
 
 void 
 cpc_main_loop(void)
 {
-    cpc_ready_1 = NULL;
     loop = ev_default_loop(0);
     ev_idle_init(&run, idle_cb);
     ev_idle_start(loop, &run);
