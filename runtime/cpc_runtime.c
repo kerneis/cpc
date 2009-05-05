@@ -12,6 +12,7 @@ Experimental; do not redistribute.
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <pthread.h>
 
 
 #include "cpc_runtime.h"
@@ -19,6 +20,9 @@ Experimental; do not redistribute.
 
 struct ev_loop *loop = NULL;
 ev_idle run;
+
+static ev_async attach_sig;
+static pthread_mutex_t attach_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct cpc_continuation_queue {
     struct cpc_continuation *head;
@@ -32,12 +36,15 @@ struct cpc_condvar {
 
 #define STATE_UNKNOWN -1
 #define STATE_SLEEPING -2
+#define STATE_DETACHED -3
 
 static cpc_continuation_queue ready = {NULL, NULL};
+static cpc_continuation_queue attach_queue = {NULL, NULL};
 
 static void io_cb (struct ev_loop *, ev_io *, int);
 static void timer_cb (struct ev_loop *, ev_timer *, int);
 static void idle_cb (struct ev_loop *, ev_idle *, int);
+static inline void exhaust_ready(cpc_continuation *);
 
 struct cpc_continuation *
 cpc_continuation_get(int size)
@@ -355,14 +362,33 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
 void
 cpc_prim_attach(cpc_continuation *cont)
 {
-    cpc_really_invoke_continuation(cont);
+    cont->state = STATE_UNKNOWN;
+    pthread_mutex_lock (&attach_mutex);
+    enqueue(&attach_queue, cont);
+    pthread_mutex_unlock (&attach_mutex);
+    ev_async_send(loop, &attach_sig);
     return;
+}
+
+void *
+perform_detach(void *cont)
+{
+    struct cpc_continuation *c = (struct cpc_continuation *)cont;
+    c->state = STATE_DETACHED;
+    exhaust_ready(c);
+    return NULL;
 }
 
 void
 cpc_prim_detach(cpc_continuation *cont)
 {
-    cpc_really_invoke_continuation(cont);
+    pthread_t id;
+    pthread_attr_t attr;
+
+    ev_ref(loop);
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_create(&id, &attr, perform_detach, (void *)cont);
     return;
 }
 
@@ -431,10 +457,27 @@ idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
     }
 }
 
+static void
+attach_cb(struct ev_loop *loop, ev_async *w, int revents)
+{
+    struct cpc_continuation *c;
+
+    pthread_mutex_lock (&attach_mutex);
+    while((c = dequeue(&attach_queue))) {
+        assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
+        ev_unref(loop);
+        exhaust_ready(c);
+    }
+    pthread_mutex_unlock (&attach_mutex);
+}
+
 void 
 cpc_main_loop(void)
 {
     loop = ev_default_loop(0);
+    ev_async_init(&attach_sig, attach_cb);
+    ev_async_start(loop, &attach_sig);
+    ev_unref(loop);
     ev_idle_init(&run, idle_cb);
     ev_idle_start(loop, &run);
 
