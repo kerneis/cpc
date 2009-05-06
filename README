@@ -37,7 +37,7 @@ To clean everything, just run:
     ./clean.sh
 
 If you want a system-wide installation of cpc, you could (e.g.) copy
-bin/cpc.native.exe and bin/cpc to /usr/local/bin and runtime/cpc_runtime.o
+bin/cpc.native.exe and bin/cpc to /usr/local/bin and runtime/cpc_runtime.a
 and runtime/libcpc.a to /usr/local/lib.
 
 How to use:

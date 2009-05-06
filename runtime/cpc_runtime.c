@@ -18,8 +18,13 @@ Experimental; do not redistribute.
 #include "cpc_runtime.h"
 #include "ev.c"
 
+#include "nft_pool.h"
+
 struct ev_loop *loop = NULL;
 ev_idle run;
+
+#define MAX_THREADS 50
+nft_pool_t *thread_pool;
 
 static ev_async attach_sig;
 static pthread_mutex_t attach_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -348,13 +353,8 @@ perform_detach(void *cont)
 void
 cpc_prim_detach(cpc_continuation *cont)
 {
-    pthread_t id;
-    pthread_attr_t attr;
-
     ev_ref(loop);
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&id, &attr, perform_detach, (void *)cont);
+    nft_pool_add(thread_pool, (void(*)(void*)) perform_detach, cont);
     return;
 }
 
@@ -447,5 +447,9 @@ cpc_main_loop(void)
     ev_idle_init(&run, idle_cb);
     ev_idle_start(loop, &run);
 
+    thread_pool = nft_pool_create(MAX_THREADS, 0);
+
     ev_loop(loop, 0);
+
+    nft_pool_destroy(thread_pool);
 }
