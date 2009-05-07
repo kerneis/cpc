@@ -73,15 +73,14 @@ cpc completely, so use at your own risk!
 
 Known bugs and limitations:
 ---------------------------
-cpc_detach and cpc_attach are not implemented yet. An experimental
-implementation is available in the unstable branch of cpc:
-    darcs get http://www.pps.jussieu.fr/~kerneis/repos/cpc/unstable
-This branch also uses the (Linux specific) epoll system-call instead of
-select, we yields better results and allow more opened file descriptors.
+cpc_detach and cpc_attach should come in pairs, otherwise cpc_mainloop()
+might not return.
 
-Please do not hesitate to report any bug at kerneis@pps.jussieu.fr.
+Moreover, cpc keywords are NOT supported in detached mode (except
+cpc_attach, of course). Note that this includes cpc_spawn: you have to
+re-attach in order to spawn a new cooperative thread.
 
-Moreover, cpc relies on CIL, which makes a number of assumptions about
+Cpc relies on CIL, which makes a number of assumptions about
 the underlying C machine and compiler. These assumptions are defined
 when ./configure is executed. As a result:
 - if you move on another machine/architecture/compiler, you should
@@ -89,6 +88,8 @@ when ./configure is executed. As a result:
 - if you want to cross-compile, you must use the CIL_MACHINE environment
   variable. See src/machdepenv.ml for further details or ask the
   authors.
+
+Please do not hesitate to report any bug at kerneis@pps.jussieu.fr.
 
 Further details:
 ----------------
