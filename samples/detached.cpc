@@ -22,8 +22,12 @@ int
 main()
 {
     cpc_spawn { g('a'); printf("A a fini, B devrait bientot.\n"); }
-    cpc_spawn { g('b'); }
-    cpc_spawn { g('c'); cpc_detach;/* do not attach on purpose */ }
+    cpc_spawn { g('b'); cpc_detach; printf("B meurt détaché.\n"); }
+    cpc_spawn {
+        printf("C va dormir.\n");
+        cpc_detached sleep(1);
+        printf("C s'est réveillé.\n");
+    }
     cpc_main_loop();
     return 0;
 }
