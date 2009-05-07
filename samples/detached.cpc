@@ -23,6 +23,7 @@ main()
 {
     cpc_spawn { g('a'); printf("A a fini, B devrait bientot.\n"); }
     cpc_spawn { g('b'); }
+    cpc_spawn { g('c'); cpc_detach;/* do not attach on purpose */ }
     cpc_main_loop();
     return 0;
 }

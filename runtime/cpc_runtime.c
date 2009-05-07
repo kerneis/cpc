@@ -42,6 +42,7 @@ struct cpc_condvar {
 #define STATE_UNKNOWN -1
 #define STATE_SLEEPING -2
 #define STATE_DETACHED -3
+#define STATE_GARBAGE -4
 
 static cpc_continuation_queue ready = {NULL, NULL};
 static cpc_continuation_queue attach_queue = {NULL, NULL};
@@ -63,6 +64,13 @@ cpc_continuation_get(int size)
 void
 cpc_continuation_free(struct cpc_continuation *c)
 {
+    /* Detached continuation are re-attached in a GARBAGE state and
+     * freed by attach_cb */
+    if(c->state == STATE_DETACHED) {
+        c->state = STATE_GARBAGE;
+        cpc_prim_attach(c);
+        return;
+    }
     assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
     free(c);
 }
@@ -96,8 +104,8 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->cond_next = c->cond_next;
     d->state = c->state;
     d->ready = c->ready;
-    assert(c->state == STATE_UNKNOWN); /* Otherwise, you have to use a
-    pointer to a watcher, and use malloc. */
+    /* Otherwise, you have to use a pointer to a watcher, and use malloc. */
+    assert(c->state == STATE_UNKNOWN || c->state == STATE_DETACHED);
     //d->watcher = c->watcher;
     free(c);
 
@@ -119,7 +127,7 @@ cpc_continuation_copy(struct cpc_continuation *c)
     d->condvar = c->condvar;
     d->state = c->state;
     d->ready = c->ready;
-    assert(c->state == STATE_UNKNOWN); // See above.
+    assert(c->state == STATE_UNKNOWN || c->state == STATE_DETACHED); // See above.
 
     return d;
 }
@@ -333,7 +341,10 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
 void
 cpc_prim_attach(cpc_continuation *cont)
 {
-    cont->state = STATE_UNKNOWN;
+    if(cont->state == STATE_DETACHED)
+        cont->state = STATE_UNKNOWN;
+    else
+        assert(cont->state == STATE_GARBAGE);
     pthread_mutex_lock (&attach_mutex);
     enqueue(&attach_queue, cont);
     pthread_mutex_unlock (&attach_mutex);
@@ -430,6 +441,11 @@ attach_cb(struct ev_loop *loop, ev_async *w, int revents)
 
     pthread_mutex_lock (&attach_mutex);
     while((c = dequeue(&attach_queue))) {
+        if(c->state == STATE_GARBAGE) {
+            free(c);
+            ev_unref(loop);
+            continue;
+        }
         assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
         ev_unref(loop);
         exhaust_ready(c);
@@ -441,9 +457,11 @@ void
 cpc_main_loop(void)
 {
     loop = ev_default_loop(0);
+
     ev_async_init(&attach_sig, attach_cb);
     ev_async_start(loop, &attach_sig);
     ev_unref(loop);
+
     ev_idle_init(&run, idle_cb);
     ev_idle_start(loop, &run);
 
