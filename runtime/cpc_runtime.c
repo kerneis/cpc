@@ -364,6 +364,7 @@ perform_detach(void *cont)
 void
 cpc_prim_detach(cpc_continuation *cont)
 {
+    assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
     ev_ref(loop);
     nft_pool_add(thread_pool, (void(*)(void*)) perform_detach, cont);
     return;
