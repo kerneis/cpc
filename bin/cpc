@@ -1,6 +1,6 @@
 #!/bin/sh
 
-CPC=`dirname $0`/cpc.native.exe
+CPC=`dirname $0`/cpc.asm.exe
 RUNTIME=`dirname $0`/../runtime
 LIBEV=`dirname $0`/../libev
 

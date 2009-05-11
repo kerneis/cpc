@@ -29,7 +29,7 @@ To build cpc, you juste have to run from the root directory:
     ./build.sh
 
 This will build the main executable, which is then copied to
-bin/cpc.native.exe. It also builds the cpc runtime (in runtime directory)
+bin/cpc.asm.exe. It also builds the cpc runtime (in runtime directory)
 and a bunch of samples (in samples directory).
 
 To clean everything, just run:
@@ -37,12 +37,12 @@ To clean everything, just run:
     ./clean.sh
 
 If you want a system-wide installation of cpc, you could (e.g.) copy
-bin/cpc.native.exe and bin/cpc to /usr/local/bin and runtime/cpc_runtime.a
+bin/cpc.native.exe and bin/cpc to /usr/local/bin and runtime/cpc_runtime.o
 and runtime/libcpc.a to /usr/local/lib.
 
 How to use:
 -----------
-You can either use bin/cpc.native.exe directly in your Makefiles (see e.g.
+You can either use bin/cpc.asm.exe directly in your Makefiles (see e.g.
 samples/Makefile and runtime/Makefile) or use the bin/cpc wrapper:
 
     cd samples
@@ -53,7 +53,7 @@ samples/Makefile and runtime/Makefile) or use the bin/cpc wrapper:
 
 Options:
 --------
-bin/cpc.native.exe has the following useful options:
+bin/cpc.asm.exe has the following useful options:
 
 --stage n           perform transformations up to stage n
 --pause             step by step cps marking [*]
@@ -62,7 +62,7 @@ bin/cpc.native.exe has the following useful options:
 --external-patch    cpc_patch from cpc_runtime.h instead of inlining it
 
 and a gazillion useless ones, inherited from CIL, that you might
-discover through bin/cpc.native.exe --help. Using some of them might break
+discover through bin/cpc.asm.exe --help. Using some of them might break
 cpc completely, so use at your own risk!
 
 [*] In step by step mode, here is what you can do at each step:

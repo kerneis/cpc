@@ -1,4 +1,4 @@
-CPC='../bin/cpc.native.exe'
+CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-O3 -Wall -fno-strict-aliasing
 CLIBS=-I ../libev -I ../Nifty -pthread
