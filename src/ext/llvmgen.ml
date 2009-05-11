@@ -822,6 +822,8 @@ class llvmGeneratorClass : llvmGenerator = object (self)
       | Block b -> gBlock slabel b
       | TryFinally (_, _, _) -> raise (Unimplemented "TryFinally")
       | TryExcept (_, _, _, _) -> raise (Unimplemented "TryExcept")
+      | CpcFun _ | CpcIoWait _ | CpcSleep _ | CpcWait _ | CpcSpawn _
+      | CpcCut _ -> raise (Unimplemented "Cpc construct")
 
     and gReturnVoid (label:string) sterm sbrk scont : llvmBlock = 
       mkBlock label [] (TRet [])
