@@ -70,9 +70,8 @@ clean:
 	 trivial-httpd-pth static-httpd-pth
 
 .cpc.cpi:
-	$(CPP) $(CFLAGS) -include cpc_runtime.h \
-	  - <$< >$@
-
+	$(CPP) -x c $(CFLAGS) -include cpc_runtime.h \
+	  -o $@ $<
 .cpi.c:
 	$(CPC) --check $< --out $@
 
