@@ -899,18 +899,27 @@ class cpsReturnValues = object(self)
   inherit (enclosingFunction dummyFunDec)
 
   method vinst = function
-  | Call (Some (Var _, NoOffset), Lval (Var f, NoOffset), _, _)
-      when f.vcps -> DoChildren
-  | Call (Some l, Lval (Var f, NoOffset), args, loc) as i when f.vcps ->
+  | Call (r, Lval (Var f, NoOffset), args, loc) as i when f.vcps ->
       let typ = fst4 (splitFunctionTypeVI f) in
-      let v = (if (typeSig typ = typeSig voidType) then
-        E.s (E.bug "Assignment of a function returning void: %a" d_instr i);
-        makeTempVar ef typ) in
-      ChangeTo [
-        Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc);
-        Set(l, Lval(Var v, NoOffset), loc)
-        ]
-  | _ -> DoChildren
+      begin match r with
+      | Some _ when (typeSig typ = typeSig voidType) -> (* Wrong assignment *)
+          E.s (E.bug "Assignment of a function returning void: %a" d_instr i);
+      | Some (Var _, NoOffset) -> SkipChildren (* Simple good assignment *)
+      | Some l -> (* Some other valid but complex assignment *)
+          let v = makeTempVar ef typ in
+          ChangeTo [
+            Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc);
+            Set(l, Lval(Var v, NoOffset), loc)
+          ]
+      | None when  (typeSig typ <> typeSig voidType) -> (* Missing assignment *)
+          let v = makeTempVar ef typ in
+          E.warn "Ignoring a cps return value: %a" d_instr i;
+          ChangeTo [
+          Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc)]
+      | None -> SkipChildren (* No assignement (void function) *)
+      end
+  | _ -> SkipChildren
+
 end
 
 (********************* Remove nasty expressions in cps calls *****************)

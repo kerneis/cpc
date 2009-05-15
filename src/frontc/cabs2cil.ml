@@ -6461,10 +6461,14 @@ and doStatement (s : A.statement) : chunk =
      | CPC_SPAWN (s, loc) ->
         let loc' = convLoc loc in
         let mkSpawn f args = mkStmt (CpcSpawn (f, args, loc')) in
+        let returns_void f = match splitFunctionTypeVI f with
+          (t,_,_,_) -> typeSig t = typeSig voidType in
         currentLoc := loc';
         begin match compactStmts (pushPostIns (doStatement s)) with
         | [] -> skipChunk
-        | [{skind=Instr[Call(None,f,args,_)]}] -> s2c (mkSpawn f args)
+        | [{skind=Instr[Call(None,Lval(Var f, NoOffset),args,_)]}]
+            when f.vcps && returns_void f ->
+              s2c (mkSpawn (Lval (Var f, NoOffset)) args)
         | body ->
           let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
           let f = {(emptyFunction name) with sbody = mkBlock (body @
