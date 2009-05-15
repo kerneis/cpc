@@ -29,6 +29,18 @@ struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);
 struct cpc_continuation *cpc_continuation_copy(struct cpc_continuation *c);
 
+static void
+print_continuation(struct cpc_continuation *c, char *s)
+{
+    int i;
+    fprintf(stderr,"(%s) At %p %u:\n%p\t%p\t%p\t%p\t%d\t%u\t%u\n",s,c,
+    sizeof(cpc_function*),
+    c->next,c->condvar,c->cond_next,c->ready,c->state,c->length,c->size);
+    for(i=0; i < c->length; i++)
+        fprintf(stderr,"%d ",c->c[i]);
+    fprintf(stderr,"\n");
+}
+
 static inline void* 
 cpc_alloc(struct cpc_continuation **cp, int s)
 {
