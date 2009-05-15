@@ -1,4 +1,5 @@
 /* 
+Copyright (c) 2008, 2009 by Gabriel Kerneis.
 Copyright (c) 2004, 2005 by Juliusz Chroboczek.
 Experimental; do not redistribute.
 */

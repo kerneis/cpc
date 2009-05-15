@@ -1,3 +1,5 @@
+(* Copyright (c) 2008, 2009. Gabriel Kerneis. *)
+
 open Cil
 open Pretty
 module E = Errormsg
