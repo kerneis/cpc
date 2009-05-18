@@ -24,6 +24,10 @@ Experimental; do not redistribute.
 struct ev_loop *loop = NULL;
 ev_idle run;
 
+pthread_t main_loop_id;
+
+#define IS_DETACHED (loop && !pthread_equal(main_loop_id,pthread_self()))
+
 #define MAX_THREADS 50
 nft_pool_t *thread_pool;
 
@@ -259,7 +263,16 @@ cpc_condvar_release(cpc_condvar *cond)
 void
 cpc_schedule(struct cpc_continuation *cont)
 {
-    enqueue(&ready, cont);
+    assert(cont);
+    if(IS_DETACHED)
+        if(cont->state == STATE_UNKNOWN)
+            cpc_prim_attach(cont); /* spawn in detached mode */
+        else { /* yield in detached mode */
+            assert(cont->state == STATE_DETACHED);
+            cpc_invoke_continuation(cont);
+        }
+    else
+        enqueue(&ready, cont);
 }
 
 void
@@ -304,6 +317,14 @@ cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
 {
     ev_tstamp timeout;
     
+    if(IS_DETACHED) {
+        assert(cond == NULL);
+        sleep(sec);
+        usleep(usec);
+        cpc_invoke_continuation(cont);
+        return;
+    }
+
     if(cont == NULL)
         cont = cpc_continuation_expand(NULL, 0);
 
@@ -323,6 +344,12 @@ void
 cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
                  cpc_continuation *cont)
 {
+    if(IS_DETACHED) {
+        assert(cond == NULL);
+        cpc_invoke_continuation(cont);
+        return;
+    }
+
     if(cont == NULL)
         return;
 
@@ -344,6 +371,8 @@ cpc_prim_attach(cpc_continuation *cont)
 {
     if(cont->state == STATE_DETACHED)
         cont->state = STATE_UNKNOWN;
+    else if(cont->state == STATE_UNKNOWN)
+        assert(IS_DETACHED); /* spawn in detached mode */
     else
         assert(cont->state == STATE_GARBAGE);
     pthread_mutex_lock (&attach_mutex);
@@ -459,6 +488,8 @@ void
 cpc_main_loop(void)
 {
     loop = ev_default_loop(0);
+
+    main_loop_id = pthread_self();
 
     ev_async_init(&attach_sig, attach_cb);
     ev_async_start(loop, &attach_sig);
