@@ -312,6 +312,20 @@ cpc_signal_all(cpc_condvar *cond)
     }
 }
 
+int
+cpc_condvar_count(cpc_condvar *cond)
+{
+    cpc_continuation *cont = cond->queue.head;
+    int i = 0;
+
+    cont = cond->queue.head;
+    while(cont) {
+        i++;
+        cont = cont->next;
+    }
+    return i;
+}
+
 void
 cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
 {

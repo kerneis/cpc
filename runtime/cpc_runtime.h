@@ -130,6 +130,7 @@ void cpc_condvar_release(cpc_condvar*);
 void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
 void cpc_signal(cpc_condvar*);
 void cpc_signal_all(cpc_condvar*);
+int cpc_condvar_count(cpc_condvar*);
 void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*);
 
 void cpc_prim_attach(cpc_continuation*);
