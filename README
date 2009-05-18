@@ -80,6 +80,9 @@ might not return.
 Moreover, cpc keywords are NOT supported in detached mode (except
 cpc_attach, of course). Note that this includes cpc_spawn: you have to
 re-attach in order to spawn a new cooperative thread.
+    NB: there is an experimental support of cpc_spawn, cpc_yield,
+    cpc_sleep and cpc_io_wait at the moment. It might be dropped so do
+    not rely on it. Condition variables are still NOT supported.
 
 Cpc relies on CIL, which makes a number of assumptions about
 the underlying C machine and compiler. These assumptions are defined
