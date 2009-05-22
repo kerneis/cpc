@@ -263,6 +263,8 @@ exception AddGoto of mark_context
 (* Functionalize a statement with a label *)
 exception FunctionalizeGoto of stmt * mark_context
 
+let completedFun = ref []
+
 class markCps = fun file -> object(self)
   inherit nopCilVisitor
 
@@ -482,11 +484,14 @@ class markCps = fun file -> object(self)
     end
 
   method vfunc (f:fundec) : fundec visitAction =
+    if List.memq f !completedFun then SkipChildren else begin
     Cfg.clearCFGinfo f;
     ignore(Cfg.cfgFun f);
     let context = copy_context c in
     c <- {(fresh_context ()) with cps_fun = f.svar.vcps};
-    ChangeDoChildrenPost (f, fun f -> c <- context; f)
+    ChangeDoChildrenPost (f, fun f -> c <- context;
+      completedFun := f :: !completedFun; f)
+    end
 
 end
 
