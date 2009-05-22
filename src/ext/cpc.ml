@@ -1474,9 +1474,7 @@ let set_stage x = stage := x
 
 let rec cps_marking f =
   try
-    if Trace.traceActive "cpc"
-    then trace (dprintf "New turn\n")
-    else E.log ".";
+    trace (dprintf "New turn\n");
     visitCilFileSameGlobals (new cleaner) f;
     let r = if !pause then read_line () else "" in
     if r = "q" then raise Exit else
@@ -1558,7 +1556,7 @@ let rec doit (f: file) =
   try
     ignore(List.fold_left (fun n (descr,step) ->
         if !stage < n then raise Exit;
-        E.log "Stage %d: %s" n descr;
+        trace (dprintf "Stage %d: %s" n descr);
         step f;
         n+1) 0 stages);
     E.log "Finished\n"
