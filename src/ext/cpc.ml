@@ -1561,7 +1561,7 @@ let rec doit (f: file) =
     ignore(List.fold_left (fun n (descr,step) ->
         if !stage < n then raise Exit;
         trace (dprintf "Stage %d: %s" n descr);
-        step f;
+        Stats.time descr step f;
         n+1) 0 stages);
     trace (dprintf "Finished\n")
   with Exit -> E.log "Exit\n"
