@@ -1482,7 +1482,6 @@ let rec cps_marking f =
     else if r = "r" then (pause := false; cps_marking f)
     else
     visitCilFileSameGlobals (new markCps f) f;
-    if not (Trace.traceActive "cpc") then E.log "\n"
   with
   | TrivializeStmt s when s = dummyStmt ->
       E.s (E.error "break or continue with no enclosing loop")
