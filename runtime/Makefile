@@ -41,5 +41,5 @@ clean:
 	  -o $@ $<
 
 .cpi.c:
-	$(CPC) --check $< --out $@
+	$(CPC) $< --out $@
 
