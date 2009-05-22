@@ -1559,7 +1559,7 @@ let rec doit (f: file) =
         trace (dprintf "Stage %d: %s" n descr);
         step f;
         n+1) 0 stages);
-    E.log "Finished\n"
+    trace (dprintf "Finished\n")
   with Exit -> E.log "Exit\n"
 
 let feature : featureDescr =
