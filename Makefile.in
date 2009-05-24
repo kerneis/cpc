@@ -113,7 +113,7 @@ include ocamlutil/Makefile.ocaml
 
 OBEXEEXT = $(EXEEXT:asm=native)
 ocamlbuild:
-	ocamlbuild -no-links -Xs obj,runtime,samples,doc,test src/main$(OBEXEEXT) src/cil.$(CMXA)
+	ocamlbuild -no-links -Xs obj,runtime,samples,doc,test,Nifty src/main$(OBEXEEXT) src/cil.$(CMXA)
 	cp _build/src/main$(OBEXEEXT) $(OBJDIR)/cilly$(EXE)
 	cp _build/src/cil.$(CMXA) $(OBJDIR)/
 
