@@ -6465,7 +6465,9 @@ and doStatement (s : A.statement) : chunk =
           (t,_,_,_) -> typeSig t = typeSig voidType in
         currentLoc := loc';
         begin match compactStmts (pushPostIns (doStatement s)) with
-        | [] -> skipChunk
+        | [] ->
+            ignore(E.warn "empty cpc_spawn in %a" d_loc loc');
+            skipChunk
         | [{skind=Instr[Call(None,Lval(Var f, NoOffset),args,_)]}]
             when f.vcps && returns_void f ->
               s2c (mkSpawn (Lval (Var f, NoOffset)) args)
