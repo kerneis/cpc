@@ -5375,7 +5375,9 @@ and visitCilStmt (vis: cilVisitor) (s: stmt) : stmt =
   currentLoc := oldloc;
   res
   
-and childrenStmt (toPrepend: instr list ref) (vis:cilVisitor) (s:stmt): stmt =
+and childrenStmt (toPrepend: instr list ref) : cilVisitor -> stmt -> stmt =
+  (* this is a hack to avoid currying and reduce GC pressure *)
+  () ; fun vis s ->
   let fExp e = (visitCilExpr vis e) in
   let fBlock b = visitCilBlock vis b in
   let fInst i = visitCilInstr vis i in
