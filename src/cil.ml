@@ -5199,7 +5199,7 @@ let doVisitList  (vis: cilVisitor)
         ChangeDoChildrenPost (nodespre, _) -> nodespre
       | _ -> [node]
       in
-      let nodespost = mapNoCopy (children vis) nodespre in
+      let nodespost = mapNoCopy (fun n -> children vis n) nodespre in
       match action with
         ChangeDoChildrenPost (_, f) -> f nodespost
       | _ -> nodespost
@@ -5331,8 +5331,8 @@ and visitCilInstr (vis: cilVisitor) (i: instr) : instr list =
   vis#unqueueInstr () @ res
 
 and childrenInstr (vis: cilVisitor) (i: instr) : instr =
-  let fExp = visitCilExpr vis in
-  let fLval = visitCilLval vis in
+  let fExp e = visitCilExpr vis e in
+  let fLval lv = visitCilLval vis lv in
   match i with
   | Set(lv,e,l) -> 
       let lv' = fLval lv in let e' = fExp e in
@@ -5649,11 +5649,12 @@ and visitCilFunction (vis : cilVisitor) (f : fundec) : fundec =
   f
 
 and childrenFunction (vis : cilVisitor) (f : fundec) : fundec =
+  let visitVarDecl vd = visitCilVarDecl vis vd in
   f.svar <- visitCilVarDecl vis f.svar; (* hit the function name *)
   (* visit local declarations *)
-  f.slocals <- mapNoCopy (visitCilVarDecl vis) f.slocals;
+  f.slocals <- mapNoCopy visitVarDecl f.slocals;
   (* visit the formals *)
-  let newformals = mapNoCopy (visitCilVarDecl vis) f.sformals in
+  let newformals = mapNoCopy visitVarDecl f.sformals in
   (* Make sure the type reflects the formals *)
   setFormals f newformals;
   (* Remember any new instructions that were generated while visiting
