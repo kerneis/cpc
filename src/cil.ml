@@ -5158,15 +5158,8 @@ let doVisit (vis: cilVisitor)
   match action with
     SkipChildren -> node
   | ChangeTo node' -> node'
-  | _ -> (* DoChildren and ChangeDoChildrenPost *)
-      let nodepre = match action with
-        ChangeDoChildrenPost (node', _) -> node'
-      | _ -> node
-      in
-      let nodepost = children vis nodepre in
-      match action with
-        ChangeDoChildrenPost (_, f) -> f nodepost
-      | _ -> nodepost
+  | DoChildren -> children vis node
+  | ChangeDoChildrenPost(node', f) -> f (children vis node')
 
 (* mapNoCopy is like map but avoid copying the list if the function does not 
  * change the elements. *)
@@ -5194,15 +5187,9 @@ let doVisitList  (vis: cilVisitor)
   match action with
     SkipChildren -> [node]
   | ChangeTo nodes' -> nodes'
-  | _ -> 
-      let nodespre = match action with
-        ChangeDoChildrenPost (nodespre, _) -> nodespre
-      | _ -> [node]
-      in
-      let nodespost = mapNoCopy (fun n -> children vis n) nodespre in
-      match action with
-        ChangeDoChildrenPost (_, f) -> f nodespost
-      | _ -> nodespost
+  | DoChildren -> [children vis node]
+  | ChangeDoChildrenPost(nodes', f) ->
+      f (mapNoCopy (fun n -> children vis n) nodes')
   
 let debugVisit = false
 
