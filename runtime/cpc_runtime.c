@@ -510,6 +510,7 @@ cpc_main_loop(void)
     ev_unref(loop);
 
     ev_idle_init(&run, idle_cb);
+    ev_set_priority(&run, EV_MAXPRI);
     ev_idle_start(loop, &run);
 
     thread_pool = nft_pool_create(MAX_THREADS, 0);
