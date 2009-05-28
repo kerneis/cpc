@@ -87,7 +87,7 @@ let timestamp () =
 
 let make_label =
   let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "__cpc_label_%s_%d" (timestamp ()) !i
+  fun () -> incr i; Printf.sprintf "add_goto%d" !i
 
 let add_goto src dst =
   assert (src != dummyStmt && dst != dummyStmt);
@@ -1258,9 +1258,8 @@ end
 
 exception GotoContent of stmt list
 
-let make_function_name =
-  let i = ref 0 in
-  fun base -> incr i; Printf.sprintf "__cpc_%s_%d" base !i
+let make_function_name base =
+  Printf.sprintf "__cpc_%s_%s" base (timestamp ())
 
 exception FoundType of typ
 
