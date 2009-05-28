@@ -6497,34 +6497,34 @@ and doStatement (s : A.statement) : chunk =
      | CPC_SLEEP (e, A.NOTHING, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        let (_, e', _) = doExp false e (AExp None) in
-        s2c (mkStmt (CpcSleep (e', integer 0, null, loc')))
+        let (c, e', _) = doExp false e (AExp None) in
+        c @@ s2c (mkStmt (CpcSleep (e', integer 0, null, loc')))
      | CPC_SLEEP (e1, e2, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        let (_, e1', _) = doExp false e1 (AExp None) in
-        let (_, e2', _) = doExp false e2 (AExp None) in
-        s2c (mkStmt (CpcSleep (e1', e2', null, loc')))
+        let (c1, e1', _) = doExp false e1 (AExp None) in
+        let (c2, e2', _) = doExp false e2 (AExp None) in
+        c1 @@ c2 @@ s2c (mkStmt (CpcSleep (e1', e2', null, loc')))
      | CPC_SLEEP (e1, e2, e3, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        let (_, e1', _) = doExp false e1 (AExp None) in
-        let (_, e2', _) = doExp false e2 (AExp None) in
-        let (_, e3', _) = doExp false e3 (AExp None) in
-        s2c (mkStmt (CpcSleep (e1', e2', e3', loc')))
+        let (c1, e1', _) = doExp false e1 (AExp None) in
+        let (c2, e2', _) = doExp false e2 (AExp None) in
+        let (c3, e3', _) = doExp false e3 (AExp None) in
+        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcSleep (e1', e2', e3', loc')))
      | CPC_IO_WAIT (e1, e2, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        let (_, e1', _) = doExp false e1 (AExp None) in
-        let (_, e2', _) = doExp false e2 (AExp None) in
-        s2c (mkStmt (CpcIoWait (e1', e2', null, loc')))
+        let (c1, e1', _) = doExp false e1 (AExp None) in
+        let (c2, e2', _) = doExp false e2 (AExp None) in
+        c1 @@ c2 @@ s2c (mkStmt (CpcIoWait (e1', e2', null, loc')))
      | CPC_IO_WAIT (e1, e2, e3, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        let (_, e1', _) = doExp false e1 (AExp None) in
-        let (_, e2', _) = doExp false e2 (AExp None) in
-        let (_, e3', _) = doExp false e3 (AExp None) in
-        s2c (mkStmt (CpcIoWait (e1', e2', e3', loc')))
+        let (c1, e1', _) = doExp false e1 (AExp None) in
+        let (c2, e2', _) = doExp false e2 (AExp None) in
+        let (c3, e3', _) = doExp false e3 (AExp None) in
+        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcIoWait (e1', e2', e3', loc')))
      | CPC_FUN d -> doDecl false d
 
 
