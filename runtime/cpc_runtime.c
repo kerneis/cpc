@@ -271,8 +271,10 @@ cpc_schedule(struct cpc_continuation *cont)
             assert(cont->state == STATE_DETACHED);
             cpc_invoke_continuation(cont);
         }
-    else
+    else {
+        assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
         enqueue(&ready, cont);
+     }
 }
 
 void
