@@ -3,7 +3,7 @@ CPC='../bin/cpc.asm.exe'
 CLIBS=-I ../include
 CFLAGS=-O3 -Wall -g $(CLIBS)
 
-LDLIBS=../runtime/libcpc.a ../runtime/cpc_runtime.a -lm -pthread
+LDLIBS=-L../runtime -lm -pthread -lcpcfull
 
 .SUFFIXES: .cpc .cpi
 

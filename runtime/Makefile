@@ -10,17 +10,17 @@ PREFIX=/usr/local
 
 .PHONY: all install clean
 
-all: cpc_runtime.a libcpc.a
+all: libcpc.a libcpcfull.a
 
 cpc_runtime.o: cpc_runtime.c
 	$(CC) $(CFLAGS) -c $<
 
-cpc_runtime.a: cpc_runtime.o ../Nifty/nft_pool.o
+libcpc.a: cpc_runtime.o ../Nifty/nft_pool.o
 	rm -f $@
 	ar rc $@ $^
 	ranlib $@
 
-libcpc.a: cpc_barrier.o cpc_io.o
+libcpcfull.a: cpc_runtime.o ../Nifty/nft_pool.o cpc_barrier.o cpc_io.o
 	rm -f $@
 	ar rc $@ $^
 	ranlib $@
@@ -31,7 +31,7 @@ install: all
 clean:
 	rm -f *~
 	rm -f cpc_runtime.o ../Nifty/nft_pool.o
-	rm -f libcpc.a cpc_runtime.a
+	rm -f libcpc.a libcpcfull.a
 	rm -f cpc_barrier.o cpc_io.o
 	rm -f cpc_barrier.cpi cpc_io.cpi
 	rm -f cpc_barrier.c cpc_io.c

@@ -1,8 +1,6 @@
 #!/bin/sh
 
-CPC=`dirname $0`/cpc.asm.exe
-RUNTIME=`dirname $0`/../runtime
-LIBEV=`dirname $0`/../libev
+CPC=cpc.asm.exe
 
 set -e
 
@@ -29,13 +27,9 @@ source="$1"
 
 defobject="${defobject:-"${source%.cpc}.o"}"
 object=${object:-"$defobject"}
-if [ -z "$nolink" ]; then
-    runtime="$RUNTIME/cpc_runtime.a $RUNTIME/libcpc.a -pthread"
-fi
 
-gcc -E -I $RUNTIME -I $LIBEV -include cpc_runtime.h -Wall \
+gcc -E -I`dirname $0`/../include -I cpc -include cpc_runtime.h -Wall \
   $taildef - <"$source" >"$source.i"
-#$CPC $tail "$source.i" "$source.i.c"
 $CPC "$source.i" $cildebug --out "$source.i.c"
-gcc -Wall $nolink $debug $optimise $taildef -lm -o "$object" \
-  "$source.i.c" $runtime
+gcc -Wall $nolink $debug $optimise $taildef -L`dirname $0`/../runtime -lm -pthread -o "$object" \
+  "$source.i.c" -lcpcfull
