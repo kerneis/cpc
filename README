@@ -34,6 +34,10 @@ This will build the main executable, which is then copied to
 bin/cpc.asm.exe. It also builds the cpc runtime (in runtime directory)
 and a bunch of samples (in samples directory).
 
+At last, if you want to clean everything:
+    make uninstall
+    make clean (removes the Makefile as well; ./configure to recover it)
+
 How to use:
 -----------
 You can either use bin/cpc.asm.exe directly in your Makefiles (see e.g.
@@ -91,8 +95,8 @@ when ./configure is executed. As a result:
 - if you move on another machine/architecture/compiler, you should
   re-run ./configure.
 - if you want to cross-compile, you must use the CIL_MACHINE environment
-  variable. See src/machdepenv.ml for further details or ask the
-  authors.
+  variable. See the CIL documentation and src/machdepenv.ml for further
+  details.
 
 Please do not hesitate to report any bug at kerneis@pps.jussieu.fr.
 
