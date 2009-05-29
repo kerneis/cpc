@@ -1,7 +1,7 @@
 CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-O3 -Wall -fno-strict-aliasing
-CLIBS=-I ../libev -I ../Nifty -pthread
+CLIBS=-I ../include -I ../libev -pthread
 CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
 
 PREFIX=/usr/local

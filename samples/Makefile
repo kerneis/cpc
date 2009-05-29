@@ -1,6 +1,6 @@
 CPC='../bin/cpc.asm.exe'
 
-CLIBS=-I ../runtime -I ../libev
+CLIBS=-I ../include
 CFLAGS=-O3 -Wall -g $(CLIBS)
 
 LDLIBS=../runtime/libcpc.a ../runtime/cpc_runtime.a -lm -pthread

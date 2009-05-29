@@ -3,7 +3,7 @@
 # Build settings. You will need to adjust these depending on your platform.
 #
 CC		= gcc
-CPPFLAGS	= -I . -D_REENTRANT
+CPPFLAGS	= -I ../include -D_REENTRANT
 
 #
 # By default, use gettimeofday() to get accurate time.
