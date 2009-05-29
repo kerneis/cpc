@@ -691,7 +691,7 @@ install_lib := $(OCAML_CIL_LIB_CMODULES:%=$(OBJDIR)/lib%.a)
 
 install_cpc_lib := libcpcfull.a libcpc.a
 install_cpc_bin := cpc cpc.asm.exe
-install_cpc_include := include/*
+install_cpc_include := include/cpc/*
 
 install: cpc
 	$(INSTALL) -d $(DESTDIR)$(libdir)

@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-#include "cpc_lib.h"
+#include "cpc/cpc_lib.h"
 
 cps void
 cpsmain()

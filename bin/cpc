@@ -1,6 +1,11 @@
 #!/bin/sh
-
-CPC=`dirname $0`/cpc.asm.exe
+ROOT=`dirname $0`
+# Assume cpc.asm.exe is in the same directory.
+CPC=$ROOT/cpc.asm.exe
+# The -I and -L flags are hacks to make this script work even if cpc has
+# not been installed system-wide.
+LOCAL_INC=-I$ROOT/../include
+LOCAL_LIB=-L$ROOT/../runtime
 
 set -e
 
@@ -28,8 +33,8 @@ source="$1"
 defobject="${defobject:-"${source%.cpc}.o"}"
 object=${object:-"$defobject"}
 
-gcc -E -I`dirname $0`/../include -I cpc -include cpc_runtime.h -Wall \
+gcc -E $LOCAL_INC -include cpc/cpc_runtime.h -Wall \
   $taildef - <"$source" >"$source.i"
 $CPC "$source.i" $cildebug --out "$source.i.c"
-gcc -Wall $nolink $debug $optimise $taildef -L`dirname $0`/../runtime -lm -pthread -o "$object" \
+gcc -Wall $nolink $debug $optimise $taildef $LOCAL_LIB -lm -pthread -o "$object" \
   "$source.i.c" -lcpcfull
