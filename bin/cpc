@@ -1,6 +1,6 @@
 #!/bin/sh
 
-CPC=cpc.asm.exe
+CPC=`dirname $0`/cpc.asm.exe
 
 set -e
 
