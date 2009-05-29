@@ -33,8 +33,8 @@ source="$1"
 defobject="${defobject:-"${source%.cpc}.o"}"
 object=${object:-"$defobject"}
 
-gcc -E $LOCAL_INC -include cpc/cpc_runtime.h -Wall \
-  $taildef - <"$source" >"$source.i"
+gcc -E -x c $LOCAL_INC -include cpc/cpc_runtime.h -Wall \
+  $taildef  -o "$source.i" "$source"
 $CPC "$source.i" $cildebug --out "$source.i.c"
 gcc -Wall $nolink $debug $optimise $taildef $LOCAL_LIB -lm -pthread -o "$object" \
   "$source.i.c" -lcpcfull

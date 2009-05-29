@@ -37,7 +37,7 @@ tcat: tcat.o
 trivial-httpd: trivial-httpd.o
 trivial-httpd.o: trivial-httpd.c
 static-httpd.cpi: trivial-httpd.cpc
-	$(CPP) -P $(CFLAGS) -include cpc_runtime.h \
+	$(CPP) -P $(CFLAGS) -include cpc/cpc_runtime.h \
 	-D__extension__= -D'__attribute__(x)=' \
 	-DSTATIC - <$< >$@
 static-httpd: static-httpd.o
@@ -70,7 +70,7 @@ clean:
 	 trivial-httpd-pth static-httpd-pth
 
 .cpc.cpi:
-	$(CPP) -x c $(CFLAGS) -include cpc_runtime.h \
+	$(CPP) -x c $(CFLAGS) -include cpc/cpc_runtime.h \
 	  -o $@ $<
 .cpi.c:
 	$(CPC) $< --out $@
