@@ -24,21 +24,15 @@ Installation:
 -------------
 To build cpc, you juste have to run from the root directory:
 
-    autoconf
+    chmod u+x configure
     ./configure
-    ./build.sh
+    make
+    make samples (optional)
+    make install (optional, as root)
 
 This will build the main executable, which is then copied to
 bin/cpc.asm.exe. It also builds the cpc runtime (in runtime directory)
 and a bunch of samples (in samples directory).
-
-To clean everything, just run:
-
-    ./clean.sh
-
-If you want a system-wide installation of cpc, you could (e.g.) copy
-bin/cpc.native.exe and bin/cpc to /usr/local/bin and runtime/cpc_runtime.o
-and runtime/libcpc.a to /usr/local/lib.
 
 How to use:
 -----------
@@ -50,6 +44,13 @@ samples/Makefile and runtime/Makefile) or use the bin/cpc wrapper:
     ./a.out
     head -n1 bug.cpc
     rm a.out
+
+If you choose to install cpc, you should add:
+    -I cpc
+to your compile flags and:
+    -lm -pthread -lcpcfull
+to your link flags. You can replace -lcpcfull by -lcpc if you do not use
+the functions defined in <cpc_lib.h>.
 
 Options:
 --------
