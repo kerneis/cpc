@@ -16,7 +16,7 @@ Experimental; do not redistribute.
 #include <pthread.h>
 
 
-#include "cpc_runtime.h"
+#include "cpc/cpc_runtime.h"
 #include "ev.c"
 
 #include "nft_pool.h"

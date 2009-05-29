@@ -37,7 +37,7 @@ clean:
 	rm -f cpc_barrier.c cpc_io.c
 
 .cpc.cpi:
-	$(CC) -E -x c $(CFLAGS) -include cpc_runtime.h \
+	$(CC) -E -x c $(CFLAGS) -include cpc/cpc_runtime.h \
 	  -o $@ $<
 
 .cpi.c:
