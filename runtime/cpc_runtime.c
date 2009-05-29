@@ -21,15 +21,15 @@ Experimental; do not redistribute.
 
 #include "nft_pool.h"
 
-struct ev_loop *loop = NULL;
-ev_idle run;
+static struct ev_loop *loop = NULL;
+static ev_idle run;
 
-pthread_t main_loop_id;
+static pthread_t main_loop_id;
 
 #define IS_DETACHED (loop && !pthread_equal(main_loop_id,pthread_self()))
 
 #define MAX_THREADS 50
-nft_pool_t *thread_pool;
+static nft_pool_t *thread_pool;
 
 static ev_async attach_sig;
 static pthread_mutex_t attach_mutex = PTHREAD_MUTEX_INITIALIZER;
