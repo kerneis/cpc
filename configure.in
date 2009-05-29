@@ -562,7 +562,7 @@ CIL_CONFIG_FILES(doc/header.html)
 CIL_CONFIG_FILES(ocamlutil/perfcount.c)
 CIL_CONFIG_FILES(test/llvm/Makefile)
 CIL_CONFIG_FILES(src/machdep-ml.c)
-chmod u+x build.sh clean.sh bin/cpc
+chmod u+x bin/cpc
 
 AC_OUTPUT()
 

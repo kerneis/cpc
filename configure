@@ -6093,7 +6093,7 @@ chmod -w Makefile.features
     #echo "skipping [src/machdep-ml.c] because it's not in this distribution"
   fi
 }
-chmod u+x build.sh clean.sh bin/cpc
+chmod u+x bin/cpc
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
