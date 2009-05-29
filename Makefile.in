@@ -121,6 +121,7 @@ ocamlbuild:
 
 cpc: $(BUILDER)
 	cp $(OBJDIR)/cilly$(EXE) bin/cpc$(EXE)
+	cd runtime; $(MAKE) all
 
 cilly: $(OBJDIR)/cilly$(EXE)
 $(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO)) \
@@ -661,14 +662,18 @@ checkbindistrib:
 
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
+INSTALL_PROGRAM = @INSTALL_PROGRAM@
 
 prefix = @prefix@
 exec_prefix = @exec_prefix@
 datarootdir = @datarootdir@
 libdir = @libdir@
-pkglibdir = $(libdir)/cil
+pkglibdir = $(libdir)/cpc
 datadir = @datadir@
-pkgdatadir = $(datadir)/cil
+pkgdatadir = $(datadir)/cpc
+includedir = @includedir@
+pkgincludedir = $(includedir)/cpc
+bindir = @bindir@
 
 all_distrib := $(DISTRIB_OCAMLUTIL) $(DISTRIB_SRC) $(DISTRIB_SRC_FRONTC) $(DISTRIB_SRC_EXT) $(DISTRIB_SRC_EXT_PTA)
 all_ml      := $(filter %.ml,  $(all_distrib))
@@ -681,14 +686,17 @@ install_cmx := $(install_mli:%.mli=$(OBJDIR)/%.cmx)
 install_cma := $(addprefix $(OBJDIR)/cil., cma cmxa a)
 install_lib := $(OCAML_CIL_LIB_CMODULES:%=$(OBJDIR)/lib%.a)
 
-install: $(install_cmi) $(install_cma) $(install_lib)
+install_cpc_lib := runtime/cpc_runtime.a runtime/libcpc.a
+install_cpc_bin := bin/cpc bin/cpc.asm.exe
+install_cpc_include := include/*
+
+install: cpc
 	$(INSTALL) -d $(DESTDIR)$(pkglibdir)
-	$(INSTALL_DATA) $(install_cma) $(DESTDIR)$(pkglibdir)
-	$(INSTALL_DATA) $(install_cmi) $(DESTDIR)$(pkglibdir)
-	$(INSTALL_DATA) $(install_cmx) $(DESTDIR)$(pkglibdir)
-	$(INSTALL_DATA) $(install_lib) $(DESTDIR)$(pkglibdir)
-	$(INSTALL) -d $(DESTDIR)$(pkgdatadir)
-	$(INSTALL_DATA) $(addprefix lib/, $(filter %.pm, $(DISTRIB_LIB))) $(DESTDIR)$(pkgdatadir)
+	$(INSTALL_DATA) $(install_cpc_lib) $(DESTDIR)$(pkglibdir)
+	$(INSTALL) -d $(DESTDIR)$(bindir)
+	$(INSTALL_PROGRAM) $(install_cpc_bin) $(DESTDIR)$(bindir)
+	$(INSTALL) -d $(DESTDIR)$(pkgincludedir)
+	$(INSTALL_DATA) $(install_cpc_include) $(DESTDIR)$(pkgincludedir)
 
 cil.spec: cil.spec.in
 	./config.status $@
