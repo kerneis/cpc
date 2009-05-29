@@ -1,7 +1,7 @@
 CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-O3 -Wall -fno-strict-aliasing
-CLIBS=-I ../include -I ../libev -pthread
+CLIBS=-I ../include/cpc -I ../libev -pthread
 CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
 
 PREFIX=/usr/local
@@ -37,7 +37,7 @@ clean:
 	rm -f cpc_barrier.c cpc_io.c
 
 .cpc.cpi:
-	$(CC) -E -x c $(CFLAGS) -include cpc/cpc_runtime.h \
+	$(CC) -E -x c $(CFLAGS) -include cpc_runtime.h \
 	  -o $@ $<
 
 .cpi.c:
