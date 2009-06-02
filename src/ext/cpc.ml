@@ -25,6 +25,18 @@ let (=) x y = (compare x y) = 0
 
 let trace = Trace.trace "cpc"
 
+(* recursing into vtype is very expensive in terms of memory allocation,
+   and thus time spent in the GC. We try as much as possible to use this
+   customized base visitor, which avoid this pitfall.
+   WARNING: vtype goes into attributes and TArray, both of them
+   containing expressions, and thus variables. So, do NOT use this
+   visitor if you need to inspect and/or change expressions or
+   variables. *)
+class mynopCilVisitor = object(self)
+    inherit nopCilVisitor
+    method vtype v = SkipChildren
+end
+
 (*************** Utility functions *******************************************)
 
 let fst4 (x,_,_,_) = x
@@ -45,7 +57,7 @@ let first_instr s = match s.skind with
 
 class replaceGotos start replace_with =
   object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   method vstmt s = match s.skind with
   | Goto (g, loc) when !g == start ->
@@ -129,7 +141,7 @@ let rec find_var = function
 and extract the last var of <cps call>.
 *)
 class lastVar = fun start -> object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   method vstmt s = match s.skind, s.succs with
   | Goto(g, _), [succ] when !g == start && !g == succ -> begin
@@ -154,7 +166,7 @@ let find_last_var start file =
 
 (* return the nearest enclosing function of a statement *)
 class enclosingFunction = fun fd_opt -> object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   val mutable ef = fd_opt
 
@@ -187,7 +199,7 @@ exception FoundCompinfo of compinfo
 
 let find_struct name file =
   let visitor = object(self)
-    inherit nopCilVisitor
+    inherit mynopCilVisitor
 
     method vglob = function
       | GCompTag ({cname = n} as c,_) when n = name ->
@@ -203,7 +215,7 @@ exception FoundType of typ
 
 let find_type name file =
   let visitor = object(self)
-    inherit nopCilVisitor
+    inherit mynopCilVisitor
 
     method vglob = function
       | GType ({tname = n} as typeinfo,_) when n = name ->
@@ -217,7 +229,7 @@ let find_type name file =
 
 let find_function name file =
   let visitor = object(self)
-    inherit nopCilVisitor
+    inherit mynopCilVisitor
 
     method vglob = function
       | GVarDecl(v,_)
@@ -266,7 +278,7 @@ exception FunctionalizeGoto of stmt * mark_context
 let completedFun = ref []
 
 class markCps = fun file -> object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   val mutable c = fresh_context ()
 
@@ -849,7 +861,7 @@ class avoidAmpersand f =
       Call(Some (Var v, NoOffset), malloc, [sizeOf (typeOfLval mem_v)],locUnknown)) l)) in
     let insert_free = visitCilStmt
       (object(self)
-       inherit nopCilVisitor
+       inherit mynopCilVisitor
        method vstmt s = match s.skind with
        | Return (retval, loc) ->
           let rv, assign = match retval with
@@ -867,7 +879,8 @@ class avoidAmpersand f =
     mallocs :: (List.map insert_free stmts)
   in
   object(self)
-  inherit nopCilVisitor
+  inherit nopCilVisitor (* do not use mynopCilVisitor, lval can be
+  hidden in types *)
 
   method vlval = function
   | (Var v, _) as l when has_ampersand v ->
@@ -937,7 +950,8 @@ exception ContainsNasty
 
 let contains_nasty args =
   let visitor = object(self)
-    inherit nopCilVisitor
+    inherit nopCilVisitor (* do not use mynopCilVisitor, lval can be
+    hidden in types *)
 
     method vvrbl v =
       (* global variables are nasty *)
@@ -995,7 +1009,7 @@ let rec insert_gotos il =
     s :: dst :: tl
 
 class insertGotos = object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   method vstmt s = match s.skind with
   | Instr il ->
@@ -1016,14 +1030,15 @@ end
 class removeIdentity = fun file ->
   let replaceVar fd fd' = visitCilFileSameGlobals (
     object(self)
-      inherit nopCilVisitor
+      inherit nopCilVisitor (* do not use mynopCilVisitor, variables can
+      be hidden in types *)
 
       method vvrbl v =
         if v = fd then ChangeTo fd' else SkipChildren
     end)
     file in
   object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   method vfunc fd =
     if not fd.svar.vcps then SkipChildren
@@ -1046,7 +1061,7 @@ end
 (********************* Cleaning **********************************************)
 
 class cleaner = object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   method vblock (b: block) : block visitAction =
     ChangeDoChildrenPost (b, fun b ->
@@ -1055,7 +1070,7 @@ class cleaner = object(self)
 end
 
 class folder = object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   method vstmt s = match s.skind with
   | If(e,b1,b2,_) -> begin match isInteger e with
@@ -1128,7 +1143,8 @@ let make_fresh_varinfo fd =
   List.combine args new_args
 
 class uniqueVarinfo = object(self)
-    inherit nopCilVisitor
+    inherit nopCilVisitor (* do not use mynopCilVisitor, variables can
+    be hidden in types *)
 
     val mutable current_map = []
 
@@ -1160,7 +1176,7 @@ class uniqueVarinfo = object(self)
 let collect_local_fun fd =
   let fun_list = ref [] in
   let collector = object(self)
-    inherit nopCilVisitor
+    inherit mynopCilVisitor
 
     method vstmt s = match s.skind with
     | CpcFun (fd, _) ->
@@ -1174,7 +1190,7 @@ let collect_local_fun fd =
 (* remove local functions *)
 let remove_local_fun fd =
   visitCilFunction (object(self)
-    inherit nopCilVisitor
+    inherit mynopCilVisitor
 
     method vstmt s = match s.skind with
     | CpcFun (fd, _) ->
@@ -1188,7 +1204,8 @@ let free_vars fd =
   let bounded = List.fold_left (fun s x -> S.add x s) args fd.slocals in
   let vars = ref S.empty in
   let collector = object(self)
-    inherit nopCilVisitor
+    inherit nopCilVisitor (* do not use mynopCilVisitor, variables can
+    be hidden in types *)
 
     method vvrbl v =
       if not (v.vglob || isFunctionType v.vtype)
@@ -1220,7 +1237,7 @@ let remove_free_vars enclosing_fun loc =
     let new_args = List.map (fun v -> Lval(Var v, NoOffset)) fv in
     let insert =
       object(self)
-        inherit nopCilVisitor
+        inherit mynopCilVisitor
 
         method vinst = function
           | Call(lval, Lval ((Var f, NoOffset) as l), args, loc)
@@ -1258,7 +1275,7 @@ let remove_free_vars enclosing_fun loc =
   iter local_funs
 
 class lambdaLifter = object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   method vglob (g: global) : global list visitAction = match g with
   | GFun (fd,loc) -> ChangeTo(remove_free_vars fd loc)
@@ -1276,7 +1293,7 @@ let make_function_name base =
 exception FoundType of typ
 
 class hasReturn = object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   method vstmt s = match s.skind with
   | Return (Some e, _) -> raise (FoundType (typeOf e))
@@ -1299,7 +1316,7 @@ class functionalizeGoto start file =
       let fd = emptyFunction (make_function_name label) in
       let () = fd.svar.vcps <- true in
       object(self)
-        inherit nopCilVisitor
+        inherit mynopCilVisitor
 
         val mutable acc = false (* are we in an accumulating phase?*)
         val mutable stack = []
@@ -1428,7 +1445,7 @@ let rec choose_stmt set start =
 XXX code must be kept in sync with functionalizeGotos !!! ---
 and return the nearest enclosing loop/switch statement *)
 class findEnclosing = fun start -> object(self)
-  inherit nopCilVisitor
+  inherit mynopCilVisitor
 
   val mutable nearest_loop = dummyStmt
   val mutable seen_start = false
