@@ -1054,6 +1054,18 @@ class cleaner = object(self)
       b)
 end
 
+class folder = object(self)
+  inherit nopCilVisitor
+
+  method vstmt s = match s.skind with
+  | If(e,b1,b2,_) -> begin match isInteger e with
+    | Some 0L -> ChangeDoChildrenPost(mkStmt (Block b2), fun x -> x)
+    | Some _ -> ChangeDoChildrenPost(mkStmt (Block b1), fun x -> x)
+    | None -> DoChildren
+    end
+  | _ -> DoChildren
+end
+
 (************** Percolate local variables ************************************)
 
 (* If a local variable is used in a single local function, it should be
@@ -1526,6 +1538,8 @@ let rec cps_marking f =
       end
 
 let stages = [
+  ("Folding if-then-else\n", fun file ->
+  visitCilFileSameGlobals (new folder) file);
   ("Cleaning things a bit\n", fun file ->
   visitCilFileSameGlobals (new cleaner) file);
   ("Avoid ampersand\n", fun file ->
