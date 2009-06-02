@@ -69,16 +69,9 @@ module E=Errormsg
    None means the succ is the function return. It does not mean the break/cont
    is invalid. We assume the validity has already been checked.
 *)
-(* At the end of CFG computation, 
-   - numNodes = total number of CFG nodes 
-   - length(nodeList) = numNodes
-*)
 
-let numNodes = ref 0 (* number of nodes in the CFG *)
-let nodeList : stmt list ref = ref [] (* All the nodes in a flat list *) (* ab: Added to change dfs from quadratic to linear *)
-let start_id = ref 0 (* for unique ids across many functions  -- but NOT local functions *)
-
-let local_fun : fundec list ref= ref []
+let start_id = ref 0 (* for unique ids across many functions *)
+let numInternalNodes = ref 0 (* number of nodes in internal functions *)
 
 class caseLabeledStmtFinder slr = object(self)
     inherit nopCilVisitor
@@ -103,159 +96,50 @@ let findCaseLabeledStmts (b : block) : stmt list =
     ignore(visitCilBlock vis b);
     !slr
 
-(*------------------------------------------------------------*)
-
-(**************************************************************)
-(* do something for all stmts in a fundec *)
-
-let rec forallStmts (todo) (fd : fundec) =
-  begin
-    fasBlock todo fd.sbody;
-  end
-
-and fasBlock (todo) (b : block) =
-  List.iter (fasStmt todo) b.bstmts
-
-and fasStmt (todo) (s : stmt) =
-  begin
-    ignore(todo s);
-    match s.skind with
-      | Block b -> fasBlock todo b
-      | If (_, tb, fb, _) -> (fasBlock todo tb; fasBlock todo fb)
-      | Switch (_, b, _, _) -> fasBlock todo b
-      | Loop (b, _, _, _) -> fasBlock todo b
-      | CpcCut _ | CpcWait _ | CpcSleep _
-      | CpcIoWait _ | CpcSpawn _
-      | (Return _ | Break _ | Continue _ | Goto _ | Instr _) -> ()
-      | TryExcept _ | TryFinally _ -> E.s (E.unimp "try/except/finally")
-      | CpcFun (fd, _) -> forallStmts todo fd
-  end
-;;
-
-(**************************************************************)
-(* printing the control flow graph - you have to compute it first *)
-
-let d_cfgnodename () (s : stmt) =
-  dprintf "%d" s.sid
-
-let d_cfgnodelabel () (s : stmt) =
-  let label =
-  begin
-    match s.skind with
-      | If (e, _, _, _)  -> "if" (*sprint ~width:999 (dprintf "if %a" d_exp e)*)
-      | Loop _ -> "loop"
-      | Break _ -> "break"
-      | Continue _ -> "continue"
-      | Goto _ -> "goto"
-      | Instr _ -> "instr"
-      | Switch _ -> "switch"
-      | Block _ -> "block"
-      | Return _ -> "return"
-      | TryExcept _ -> "try-except"
-      | TryFinally _ -> "try-finally"
-      | CpcCut (Yield, _) -> "cpc-yield"
-      | CpcCut (Done, _) -> "cpc-done"
-      | CpcCut (Attach _, _) -> "cpc-attach"
-      | CpcCut (Detach, _) -> "cpc-detach"
-      | CpcSpawn _ -> "cpc-spawn"
-      | CpcWait _ -> "cpc-wait"
-      | CpcSleep _ -> "cpc-sleep"
-      | CpcIoWait _ -> "cpc-io-wait"
-      | CpcFun _ -> "cpc-fun"
-  end in
-    dprintf "%d: %s" s.sid label
-
-let d_cfgedge (src) () (dest) =
-  dprintf "%a -> %a"
-    d_cfgnodename src
-    d_cfgnodename dest
-
-let d_cfgnode () (s : stmt) =
-    dprintf "%a [label=\"%a\"]\n\t%a"
-    d_cfgnodename s
-    d_cfgnodelabel s
-    (d_list "\n\t" (d_cfgedge s)) s.succs
-
-(**********************************************************************)
-(* entry points *)
-
-(** print control flow graph (in dot form) for fundec to channel *)
-let printCfgChannel (chan : out_channel) (fd : fundec) =
-  let pnode (s:stmt) = fprintf chan "%a\n" d_cfgnode s in
-    begin
-      ignore (fprintf chan "digraph CFG_%s {\n" fd.svar.vname);
-      forallStmts pnode fd;
-      ignore(fprintf chan  "}\n");
-    end
-
-(** Print control flow graph (in dot form) for fundec to file *)
-let printCfgFilename (filename : string) (fd : fundec) =
-  let chan = open_out filename in
-    begin
-      printCfgChannel chan fd;
-      close_out chan;
-    end
-
-
-;;
-
-(**********************************************************************)
-
-
-let clearCFGinfo (fd : fundec) =
-  let clear s =
-    s.sid <- -1;
-    s.succs <- [];
-    s.preds <- [];
-  in
-  forallStmts clear fd
-
 (* entry point *)
 
 (** Compute a control flow graph for fd.  Stmts in fd have preds and succs
   filled in *)
 let rec cfgFun (fd : fundec): int = 
   begin
-    numNodes := !start_id;
-    nodeList := [];
-    local_fun := [];
+    let internals = !numInternalNodes in
+    let initial_id = !start_id in
+    let nodeList = ref [] in
 
-    cfgBlock fd.sbody None None None;
+    cfgBlock fd.sbody None None None nodeList;
 
-    fd.smaxstmtid <- Some(!numNodes);
+    fd.smaxstmtid <- Some(!start_id);
     fd.sallstmts <- List.rev !nodeList;
-    nodeList := [];
-    
-    let locals = !local_fun in
-    let res = !numNodes - !start_id in
-    
-    local_fun := [];
-    (* Every local function uses the same start_id than fd *)
-    List.iter (fun f -> clearCFGinfo f; ignore (cfgFun f)) locals;
+
+    let res = !start_id - initial_id - !numInternalNodes in
+    if internals = 0 then numInternalNodes := 0;
     res
   end
 
 
 and cfgStmts (ss: stmt list) 
-                 (next:stmt option) (break:stmt option) (cont:stmt option) =
+             (next:stmt option) (break:stmt option) (cont:stmt option)
+             (nodeList:stmt list ref) =
   match ss with
     [] -> ();
-  | [s] -> cfgStmt s next break cont
+  | [s] -> cfgStmt s next break cont nodeList
   | hd::tl ->
-      cfgStmt hd (Some (List.hd tl))  break cont;
-      cfgStmts tl next break cont
+      cfgStmt hd (Some (List.hd tl))  break cont nodeList;
+      cfgStmts tl next break cont nodeList
 
 and cfgBlock  (blk: block) 
-              (next:stmt option) (break:stmt option) (cont:stmt option) = 
-   cfgStmts blk.bstmts next break cont
+              (next:stmt option) (break:stmt option) (cont:stmt option)
+              (nodeList:stmt list ref) =
+   cfgStmts blk.bstmts next break cont nodeList
 
 
 (* Fill in the CFG info for a stmt
    Meaning of next, break, cont should be clear from earlier comment
 *)
-and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option) =
-  incr numNodes;
-  s.sid <- !numNodes;
+and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option)
+            (nodeList:stmt list ref) =
+  incr start_id;
+  s.sid <- !start_id;
   nodeList := s :: !nodeList; (* Future traversals can be made in linear time. e.g.  *)
   if s.succs <> [] then
     E.s (bug "CFG must be cleared before being computed!");
@@ -299,11 +183,11 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option) 
       (* The succs of If is [true branch;false branch] *)
       addBlockSucc blk2 next;
       addBlockSucc blk1 next;
-      cfgBlock blk1 next break cont;
-      cfgBlock blk2 next break cont
+      cfgBlock blk1 next break cont nodeList;
+      cfgBlock blk2 next break cont nodeList
   | Block b -> 
       addBlockSucc b next;
-      cfgBlock b next break cont
+      cfgBlock b next break cont nodeList
   | Switch(_,blk,l,_) ->
       let bl = findCaseLabeledStmts blk in
       List.iter addSucc (List.rev bl(*l*)); (* Add successors in order *)
@@ -315,26 +199,132 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option) 
                 bl) 
       then 
         addOptionSucc next;
-      cfgBlock blk next next cont
+      cfgBlock blk next next cont nodeList
   | Loop(blk, loc, s1, s2) ->
       s.skind <- Loop(blk, loc, (Some s), next);
       addBlockSucc blk (Some s);
-      cfgBlock blk (Some s) next (Some s)
+      cfgBlock blk (Some s) next (Some s) nodeList
       (* Since all loops have terminating condition true, we don't put
          any direct successor to stmt following the loop *)
   | TryExcept _ | TryFinally _ -> 
       E.s (E.unimp "try/except/finally")
-  (* XXX We also compute the successor of cpc_done, which must be a return. *)
+  (* We also MUST compute the successor of cpc_done, which must be a return. *)
   | CpcCut _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcSpawn _ ->
       addOptionSucc next
   | CpcFun (fd, _) ->
-      (* Do not recurse into CpcFun --- this is done later *)
       addOptionSucc next;
-      local_fun := fd :: !local_fun
+      let internalNodes = cfgFun fd in
+      numInternalNodes := !numInternalNodes + internalNodes
 
+(*------------------------------------------------------------*)
+
+(**************************************************************)
+(* do something for all stmts in a fundec *)
+
+let rec forallStmts (todo) (fd : fundec) = 
+  begin
+    fasBlock todo fd.sbody;
+  end
+
+and fasBlock (todo) (b : block) =
+  List.iter (fasStmt todo) b.bstmts
+
+and fasStmt (todo) (s : stmt) =
+  begin
+    ignore(todo s);
+    match s.skind with
+      | Block b -> fasBlock todo b
+      | If (_, tb, fb, _) -> (fasBlock todo tb; fasBlock todo fb)
+      | Switch (_, b, _, _) -> fasBlock todo b
+      | Loop (b, _, _, _) -> fasBlock todo b
+      | CpcCut _ | CpcWait _ | CpcSleep _
+      | CpcIoWait _ | CpcSpawn _
+      | (Return _ | Break _ | Continue _ | Goto _ | Instr _) -> ()
+      | TryExcept _ | TryFinally _ -> E.s (E.unimp "try/except/finally")
+      | CpcFun (fd, _) -> forallStmts todo fd
+  end
+;;
+
+(**************************************************************)
+(* printing the control flow graph - you have to compute it first *)
+
+let d_cfgnodename () (s : stmt) =
+  dprintf "%d" s.sid
+
+let d_cfgnodelabel () (s : stmt) =
+  let label = 
+  begin
+    match s.skind with
+      | If (e, _, _, _)  -> "if" (*sprint ~width:999 (dprintf "if %a" d_exp e)*)
+      | Loop _ -> "loop"
+      | Break _ -> "break"
+      | Continue _ -> "continue"
+      | Goto _ -> "goto"
+      | Instr _ -> "instr"
+      | Switch _ -> "switch"
+      | Block _ -> "block"
+      | Return _ -> "return"
+      | TryExcept _ -> "try-except"
+      | TryFinally _ -> "try-finally"
+      | CpcCut (Yield, _) -> "cpc-yield"
+      | CpcCut (Done, _) -> "cpc-done"
+      | CpcCut (Attach _, _) -> "cpc-attach"
+      | CpcCut (Detach, _) -> "cpc-detach"
+      | CpcSpawn _ -> "cpc-spawn"
+      | CpcWait _ -> "cpc-wait"
+      | CpcSleep _ -> "cpc-sleep"
+      | CpcIoWait _ -> "cpc-io-wait"
+      | CpcFun _ -> "cpc-fun"
+  end in
+    dprintf "%d: %s" s.sid label
+
+let d_cfgedge (src) () (dest) =
+  dprintf "%a -> %a"
+    d_cfgnodename src
+    d_cfgnodename dest
+
+let d_cfgnode () (s : stmt) =
+    dprintf "%a [label=\"%a\"]\n\t%a" 
+    d_cfgnodename s
+    d_cfgnodelabel s
+    (d_list "\n\t" (d_cfgedge s)) s.succs
+
+(**********************************************************************)
+(* entry points *)
+
+(** print control flow graph (in dot form) for fundec to channel *)
+let printCfgChannel (chan : out_channel) (fd : fundec) =
+  let pnode (s:stmt) = fprintf chan "%a\n" d_cfgnode s in
+    begin
+      ignore (fprintf chan "digraph CFG_%s {\n" fd.svar.vname);
+      forallStmts pnode fd;
+      ignore(fprintf chan  "}\n");
+    end
+
+(** Print control flow graph (in dot form) for fundec to file *)
+let printCfgFilename (filename : string) (fd : fundec) =
+  let chan = open_out filename in
+    begin
+      printCfgChannel chan fd;
+      close_out chan;
+    end
+
+
+;;
+
+(**********************************************************************)
+
+
+let clearCFGinfo (fd : fundec) =
+  let clear s =
+    s.sid <- -1;
+    s.succs <- [];
+    s.preds <- [];
+  in
+  forallStmts clear fd
 
 let clearFileCFG (f : file) =
-  start_id := 0; numNodes := 0;
+  start_id := 0;
   iterGlobals f (fun g ->
     match g with GFun(fd,_) ->
       clearCFGinfo fd
@@ -343,8 +333,7 @@ let clearFileCFG (f : file) =
 let computeFileCFG (f : file) =
   iterGlobals f (fun g ->
     match g with GFun(fd,_) ->
-      numNodes := cfgFun fd;
-      start_id := !start_id + !numNodes
+      ignore(cfgFun fd)
     | _ -> ())
 
 let allStmts (f : file) : stmt list =

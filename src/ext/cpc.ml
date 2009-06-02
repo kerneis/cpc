@@ -39,6 +39,130 @@ end
 
 (*************** Utility functions *******************************************)
 
+(* From src/cil.ml, modified to transform loops as well *)
+let switch_count = ref (-1)
+let get_switch_count () =
+  switch_count := 1 + !switch_count ;
+  !switch_count
+
+let switch_label = ref (-1)
+
+let rec xform_switch_stmt s break_dest cont_dest label_index = begin
+  s.labels <- List.map (fun lab -> match lab with
+    Label _ -> lab
+  | Case(e,l) ->
+      let suffix =
+	match getInteger e with
+	| Some value ->
+	    if compare_cilint value zero_cilint < 0 then
+	      "neg_" ^ string_of_cilint (neg_cilint value)
+	    else
+	      string_of_cilint value
+	| None ->
+	    incr switch_label;
+	    "exp_" ^ string_of_int !switch_label
+      in
+      let str = Pretty.sprint !lineLength
+	  (Pretty.dprintf "switch_%d_%s" label_index suffix) in
+      (Label(str,l,false))
+  | Default(l) -> (Label(Printf.sprintf
+                  "switch_%d_default" label_index,l,false))
+  ) s.labels ;
+  match s.skind with
+  | Instr _ | Return _ | Goto _ -> ()
+  | Break(l) -> begin try
+                  s.skind <- Goto(break_dest (),l)
+                with e ->
+                  ignore (error "prepareCFG: break: %a@!" d_stmt s) ;
+                  raise e
+                end
+  | Continue(l) -> begin try
+                  s.skind <- Goto(cont_dest (),l)
+                with e ->
+                  ignore (error "prepareCFG: continue: %a@!" d_stmt s) ;
+                  raise e
+                end
+  | If(e,b1,b2,l) -> xform_switch_block b1 break_dest cont_dest label_index ;
+                     xform_switch_block b2 break_dest cont_dest label_index
+  | Switch(e,b,sl,l) -> begin
+      let i = get_switch_count () in
+      let break_stmt = mkStmt (Instr []) in
+      break_stmt.labels <-
+				[Label((Printf.sprintf "switch_%d_break" i),l,false)] ;
+      let break_block = mkBlock [ break_stmt ] in
+      let body_block = b in
+      let body_if_stmtkind = (If(zero,body_block,break_block,l)) in
+
+      (* The default case, if present, must be used only if *all*
+      non-default cases fail [ISO/IEC 9899:1999, §6.8.4.2, ¶5]. As a
+      result, we sort the order in which we handle the labels (but not the
+      order in which we print out the statements, so fall-through still
+      works as expected). *)
+      let compare_choices s1 s2 = match s1.labels, s2.labels with
+      | (Default(_) :: _), _ -> 1
+      | _, (Default(_) :: _) -> -1
+      | _, _ -> 0
+      in
+
+      let rec handle_choices sl = match sl with
+        [] -> body_if_stmtkind
+      | stmt_hd :: stmt_tl -> begin
+        let rec handle_labels lab_list = begin
+          match lab_list with
+            [] -> handle_choices stmt_tl
+          | Case(ce,cl) :: lab_tl ->
+              let pred = BinOp(Eq,e,ce,intType) in
+              let then_block = mkBlock [ mkStmt (Goto(ref stmt_hd,cl)) ] in
+              let else_block = mkBlock [ mkStmt (handle_labels lab_tl) ] in
+              If(pred,then_block,else_block,cl)
+          | Default(dl) :: lab_tl ->
+              (* ww: before this was 'if (1) goto label', but as Ben points
+              out this might confuse someone down the line who doesn't have
+              special handling for if(1) into thinking that there are two
+              paths here. The simpler 'goto label' is what we want. *)
+              Block(mkBlock [ mkStmt (Goto(ref stmt_hd,dl)) ;
+                              mkStmt (handle_labels lab_tl) ])
+          | Label(_,_,_) :: lab_tl -> handle_labels lab_tl
+        end in
+        handle_labels stmt_hd.labels
+      end in
+      s.skind <- handle_choices (List.sort compare_choices sl) ;
+      xform_switch_block b (fun () -> ref break_stmt) cont_dest i
+    end
+  | Loop(b,l,_,_) ->
+          let i = get_switch_count () in
+          let break_stmt = mkStmt (Instr []) in
+          break_stmt.labels <-
+						[Label((Printf.sprintf "while_%d_break" i),l,false)] ;
+          let cont_stmt = mkStmt (Instr []) in
+          cont_stmt.labels <-
+						[Label((Printf.sprintf "while_%d_continue" i),l,false)] ;
+          b.bstmts <- cont_stmt :: b.bstmts @ [mkStmt(Continue l); break_stmt] ;
+          let break_dest () = ref break_stmt in
+          let cont_dest () = ref cont_stmt in
+          xform_switch_block b break_dest cont_dest label_index ;
+          s.skind <- Block b
+  | Block(b) -> xform_switch_block b break_dest cont_dest label_index
+
+  | TryExcept _ | TryFinally _ ->
+      failwith "xform_switch_statement: structured exception handling not implemented"
+  | CpcCut _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcFun _
+  | CpcSpawn _ -> ()
+
+end and xform_switch_block b break_dest cont_dest label_index =
+  try
+    let rec link_succs sl = match sl with
+    | [] -> ()
+    | hd :: tl -> (if hd.succs = [] then hd.succs <- tl) ; link_succs tl
+    in
+    link_succs b.bstmts ;
+    List.iter (fun stmt ->
+      xform_switch_stmt stmt break_dest cont_dest label_index) b.bstmts ;
+  with e ->
+    List.iter (fun stmt -> ignore
+      (warn "(cpc) xform_switch_block: %a@!" d_stmt stmt)) b.bstmts ;
+    raise e
+
 let fst4 (x,_,_,_) = x
 
 (* override Cil.sizeOf *)
@@ -87,7 +211,7 @@ let copyClearStmt s file stack =
 (* FIXME: every loop/switch is removed, although only the first one
 would be necessary *)
 let eliminate_switch_loop s =
-  xform_switch_stmt s ~remove_loops:true
+  xform_switch_stmt s
     (fun () -> failwith "break with no enclosing loop")
     (fun () -> failwith "continue with no enclosing loop") (-1)
 

@@ -19,6 +19,6 @@
 
 */
 
-static char *rcsid = "@(#)$Id$";
+static char *rcsid = "@(#)$Id: version.c 192 2001-02-17 22:56:13Z necula $";
 
 char version_string[] = "GNU ed version 0.2";

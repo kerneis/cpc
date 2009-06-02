@@ -112,7 +112,7 @@ BEFOREDEPS += $(OBJDIR)/feature_config.ml
 include ocamlutil/Makefile.ocaml
 
 OBEXEEXT = $(EXEEXT:asm=native)
-IGNOREDIRS = obj,doc,test
+IGNOREDIRS = obj,runtime,samples,doc,test,Nifty,bench
 ocamlbuild:
 	ocamlbuild -cflags "$(COMPILE_FLAGS)" -lflags "$(LINK_FLAGS)" \
 	-Xs $(IGNOREDIRS) -no-links src/main$(OBEXEEXT) src/cil.$(CMXA)
@@ -300,10 +300,7 @@ $(OBJDIR)/libperfcount.a: %: %($(OBJDIR)/perfcount.$(CMC))
 ifeq ($(NATIVECAML),1)
 $(OBJDIR)/libcil.o: $(OCAML_CIL_LIB_CMODULES:%=$(OBJDIR)/lib%.a) \
                     $(OCAML_CIL_LIB_MODULES:%=$(OBJDIR)/%.$(CMO))
-	ocamlopt -output-obj -o $(OBJDIR)/libcil.o $(CILLY_LIBS:%=%.cmxa) $^
-	rm -f $@
-	ar rcs $@ $(OBJDIR)/libcil.o
-	rm -f $(OBJDIR)/libcil.o
+	ocamlopt -output-obj -o $@ $(CILLY_LIBS:%=%.cmxa) $^
 else
 $(OBJDIR)/libcil.o:
 	@echo "Can only build $@ when NATIVECAML is 1."
@@ -539,7 +536,7 @@ distclean: clean
 	rm -f config.log
 	rm -f config.h
 	rm -f Makefile
-	rm -rf bin/cpc.*.exe _build
+	rm -rf bin/cpc.*.exe
 
 ## Publish the distribution
 CILHTMLDEST=/var/www/cil

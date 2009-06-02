@@ -36,7 +36,6 @@ dispatch begin
 	make "cilversion.ml";
 	make "feature_config.ml";
 	make "machdep.ml";
-	make "lib/Cilly.pm";
 
     | _ ->
 	()
