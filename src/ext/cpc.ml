@@ -1352,9 +1352,8 @@ let free_vars fd =
 let remove_free_vars enclosing_fun loc =
   let rec make_globals gfuns = function
     | [] ->
-        List.rev_append gfuns
-        [GVarDecl(enclosing_fun.svar,locUnknown);
-        GFun(remove_local_fun enclosing_fun,loc)]
+        GVarDecl(enclosing_fun.svar,locUnknown) ::
+        List.rev_append gfuns [GFun(remove_local_fun enclosing_fun,loc)]
     | fd :: tl ->
         GVarDecl(fd.svar,locUnknown) ::
           make_globals (GFun(remove_local_fun fd,locUnknown) :: gfuns) tl in
