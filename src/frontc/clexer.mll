@@ -230,6 +230,7 @@ let init_lexicon _ =
       ("cpc_detach", fun loc -> CPC_DETACH loc);
       ("cpc_spawn", fun loc -> CPC_SPAWN loc);
       ("cpc_detached", fun loc -> CPC_DETACHED loc);
+      ("cpc_attached", fun loc -> CPC_ATTACHED loc);
     ]
 
 (* Mark an identifier as a type name. The old mapping is preserved and will 

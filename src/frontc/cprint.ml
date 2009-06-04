@@ -744,6 +744,12 @@ and print_statement stat =
       new_line () ;
       indent () ;
       print_substatement stat;
+  | CPC_ATTACHED (stat, loc) ->
+      setLoc loc;
+      print "cpc_attached";
+      new_line () ;
+      indent () ;
+      print_substatement stat;
   | CPC_SPAWN (stat, loc) ->
       setLoc loc;
       print "cpc_spawn";

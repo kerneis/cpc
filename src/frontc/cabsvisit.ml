@@ -472,6 +472,9 @@ and childrenStatement vis s =
   | CPC_DETACHED (stmt, l) ->
       let s' = vs l stmt in
       if s' != stmt then CPC_DETACHED (s', l) else s
+  | CPC_ATTACHED (stmt, l) ->
+      let s' = vs l stmt in
+      if s' != stmt then CPC_ATTACHED (s', l) else s
   | CPC_SPAWN (stmt, l) ->
       let s' = vs l stmt in
       if s' != stmt then CPC_SPAWN (s', l) else s

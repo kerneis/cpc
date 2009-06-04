@@ -6490,6 +6490,9 @@ and doStatement (s : A.statement) : chunk =
       | CPC_DETACHED (s, loc) ->
           doStatement (A.SEQUENCE (CPC_DETACH loc, A.SEQUENCE (
             s, CPC_ATTACH (NOTHING, loc), loc), loc))
+      | CPC_ATTACHED (s, loc) ->
+          doStatement (A.SEQUENCE (CPC_ATTACH (NOTHING, loc), A.SEQUENCE (
+            s, CPC_DETACH loc, loc), loc))
      (*| CPC_FORK (s, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';

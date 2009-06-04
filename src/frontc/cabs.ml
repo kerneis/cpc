@@ -235,6 +235,7 @@ and statement =
  | CPC_DETACH of cabsloc
  | CPC_SPAWN of statement * cabsloc
  | CPC_DETACHED of statement * cabsloc
+ | CPC_ATTACHED of statement * cabsloc
  (*| CPC_FORK of statement * cabsloc*)
  | CPC_WAIT of expression * cabsloc
  | CPC_SLEEP of expression * expression * expression * cabsloc
