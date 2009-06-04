@@ -98,6 +98,11 @@ let doCollapseCallCast: bool ref = ref true
   * to parse additional source files without hearing about confclits. *)
 let cacheGlobals: bool ref = ref true
 
+(** This indicates whether we are in a cpc_detached or cpc_attached
+  * block (or none of them) *)
+type detached_state = A | D | N
+let detachedState = ref N
+
 (** A hook into the code for processing typeof. *)
 let typeForTypeof: (Cil.typ -> Cil.typ) ref = ref (fun t -> t)
 
@@ -858,7 +863,11 @@ module BlockChunk =
     let skipChunk = empty
         
     let returnChunk (e: exp option) (l: location) : chunk = 
-      { stmts = [ mkStmt (Return(e, l)) ];
+      { stmts = (match !detachedState with
+        | N -> [ mkStmt (Return(e, l)) ]
+        | A -> [ mkStmt (CpcCut(Detach,l)); mkStmt (Return(e, l)) ]
+        | D -> [ mkStmt (CpcCut(Attach null,l)); mkStmt (Return(e, l)) ]
+        );
         postins = [];
         cases = []
       }
@@ -985,7 +994,11 @@ module BlockChunk =
     let gotoChunk (ln: string) (l: location) : chunk = 
       let gref = ref dummyStmt in
       addGoto ln gref;
-      { stmts = [ mkStmt (Goto (gref, l)) ];
+      { stmts = (match !detachedState with
+        | N -> [ mkStmt (Goto(gref, l)) ]
+        | A -> [ mkStmt (CpcCut(Detach,l)); mkStmt (Goto(gref, l)) ]
+        | D -> [ mkStmt (CpcCut(Attach null,l)); mkStmt (Goto(gref, l)) ]
+        );
         postins = [];
         cases = [];
       }
@@ -5534,6 +5547,9 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
       (*let oldenv = H.copy env in
       let oldgenv = H.copy genv in*)
       let targethash = H.copy gotoTargetHash in
+      if !detachedState <> N then (
+      detachedState := N;
+      E.s (error "Internal function %s forbidden inside an attached or detached block (at %a)" n d_loc funloc));
 (*      ignore (E.log "Definition of %s at %a\n" n d_loc funloc); *)
       currentLoc := funloc;
       E.withContext
@@ -5942,6 +5958,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               List.exists stmtCanBreak b.bstmts
             in
             if blockFallsThrough !currentFunctionFDEC.sbody then begin
+              if !detachedState <> N then
+              E.s (bug "detachedState is different from N. This should not happen. Please, report the bug with the body of function %s" !currentFunctionFDEC.svar.vname);
               let retval = 
                 match unrollType !currentReturnType with
                   TVoid _ -> None
@@ -6321,6 +6339,9 @@ and doStatement (s : A.statement) : chunk =
 
     | A.COMPGOTO (e, loc) -> begin
         let loc' = convLoc loc in
+        if !detachedState <> N then (
+        detachedState := N;
+        E.s (E.error "Computed gotos forbidden inside and detached or attached block (at %a)" d_loc loc'));
         currentLoc := loc';
         (* Do the expression *)
         let se, e', t' = doExp false e (AExp (Some voidPtrType)) in
@@ -6466,6 +6487,10 @@ and doStatement (s : A.statement) : chunk =
         currentLoc := loc';
         s2c (mkStmt (CpcCut (Detach, loc')))
      | CPC_SPAWN (s, loc) ->
+        (* The body of a cpc_spawn should always be converted as if it
+           were outside of every detached/attached block *)
+        let ds = !detachedState in
+        detachedState := N;
         let loc' = convLoc loc in
         let mkSpawn f args = mkStmt (CpcSpawn (f, args, loc')) in
         let returns_void f = match splitFunctionTypeVI f with
@@ -6474,26 +6499,41 @@ and doStatement (s : A.statement) : chunk =
         begin match compactStmts (pushPostIns (doStatement s)) with
         | [] ->
             ignore(E.warn "empty cpc_spawn in %a" d_loc loc');
+            detachedState := ds;
             skipChunk
         | [{skind=Instr[Call(None,Lval(Var f, NoOffset),args,_)]}]
             when f.vcps && returns_void f ->
+	      detachedState := ds;
               s2c (mkSpawn (Lval (Var f, NoOffset)) args)
         | body ->
           let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
           let f = {(emptyFunction name) with sbody = mkBlock (body @
             [mkStmt (Return (None,locUnknown))])} in
           f.svar.vcps <- true;
+          detachedState := ds;
           s2c (mkStmt (Block (mkBlock [
           mkStmt(CpcFun(f, loc'));
           mkSpawn (Lval (Var f.svar,NoOffset)) []
           ])))
         end
       | CPC_DETACHED (s, loc) ->
-          doStatement (A.SEQUENCE (CPC_DETACH loc, A.SEQUENCE (
-            s, CPC_ATTACH (NOTHING, loc), loc), loc))
+          let ds = !detachedState in
+          detachedState := D;
+          let c = doStatement (A.SEQUENCE (CPC_DETACH loc, A.SEQUENCE (
+            s, CPC_ATTACH (NOTHING, loc), loc), loc)) in
+          if canDrop c then (detachedState := ds; c) else (
+          detachedState := N;
+          E.s (E.error "labels forbidden in cpc_detached (%a)" d_loc 
+            (convLoc loc)))
       | CPC_ATTACHED (s, loc) ->
-          doStatement (A.SEQUENCE (CPC_ATTACH (NOTHING, loc), A.SEQUENCE (
-            s, CPC_DETACH loc, loc), loc))
+          let ds = !detachedState in
+          detachedState := A;
+          let c = doStatement (A.SEQUENCE (CPC_ATTACH (NOTHING, loc),
+            A.SEQUENCE (s, CPC_DETACH loc, loc), loc)) in
+          if canDrop c then (detachedState := ds; c) else (
+          detachedState := N;
+          E.s (E.error "labels forbidden in cpc_attached (%a)" d_loc
+            (convLoc loc)))
      (*| CPC_FORK (s, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
