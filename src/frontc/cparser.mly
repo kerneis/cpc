@@ -925,8 +925,10 @@ statement:
 |   CPC_YIELD SEMICOLON   { CPC_YIELD ((*handleLoc*) $1) }
 |   CPC_DONE SEMICOLON   { CPC_DONE ((*handleLoc*) $1) }
 |   CPC_ATTACH SEMICOLON   { CPC_ATTACH (NOTHING, (*handleLoc*) $1) }
+/* Attach to a specific scheduler --- disabled in the current runtime
 |   CPC_ATTACH LPAREN expression RPAREN SEMICOLON
                         { CPC_ATTACH (fst $3, (*handleLoc*) $1) }
+*/
 |   CPC_DETACH SEMICOLON   { CPC_DETACH ((*handleLoc*) $1) }
 |   CPC_SPAWN statement   { CPC_SPAWN ($2, (*handleLoc*) $1) }
 |   CPC_DETACHED statement   { CPC_DETACHED ($2, (*handleLoc*) $1) }

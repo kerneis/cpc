@@ -6456,10 +6456,11 @@ and doStatement (s : A.statement) : chunk =
         currentLoc := loc';
         s2c (mkStmt (CpcCut (Attach null, loc')))
      | CPC_ATTACH (e, loc) ->
-        let loc' = convLoc loc in
+        E.s (error "cpc_attach(scheduler) is disabled");
+        (*let loc' = convLoc loc in
         currentLoc := loc';
         let (_, e', _) = doExp false e (AExp None) in
-        s2c (mkStmt (CpcCut (Attach e', loc')))
+        s2c (mkStmt (CpcCut (Attach e', loc')))*)
      | CPC_DETACH loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
