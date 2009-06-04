@@ -9,12 +9,20 @@ g(char c)
 
     for(i = 0; i < 10; i++) {
         cpc_detached {
+            // forbidden_label:
             f();
+            cpc_spawn { printf("%c has been there\n", c); }
+            if(i==9)
+              goto end;
+            // cps void forbidden_function(void) { return; }
             if(i % 2 == 0)
-                f();
+                cpc_attached f();
+            if(i == 8 && c == 'b')
+                return;
         }
         f();
     }
+    end: printf("This is the end of %c.\n", c);
 }
 
 
@@ -23,9 +31,18 @@ main()
 {
     cpc_spawn { g('a'); printf("A a fini, B devrait bientot.\n"); }
     cpc_spawn { g('b'); cpc_detach; printf("B meurt détaché.\n"); }
-    cpc_spawn {
+    cpc_spawn
+    {
         printf("C va dormir.\n");
-        cpc_detached sleep(1);
+        while(1)
+            cpc_detached
+            {
+                printf("C est detaché !\n");
+                break;
+            }
+        // We should be attached here, but break are not
+        // handled properly, so we are still detached in fact.
+        sleep(1);
         printf("C s'est réveillé.\n");
     }
     cpc_main_loop();
