@@ -19,6 +19,8 @@ Experimental; do not redistribute.
 #include "cpc_runtime.h"
 #include "ev.c"
 
+#include <poll.h>
+
 #include "nft_pool.h"
 
 static struct ev_loop *loop = NULL;
