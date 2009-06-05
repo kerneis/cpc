@@ -356,12 +356,34 @@ cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
     return;
 }
 
+static inline int
+cpc_d_io_wait(int fd, int direction)
+{
+    struct pollfd pfd[1];
+    int pollevent = direction == CPC_IO_OUT ? POLLOUT : POLLIN;
+    int rc;
+
+    pfd[0].fd = fd;
+    pfd[0].events = pollevent;
+    pfd[0].revents = 0;
+
+    rc = poll(pfd, 1, -1);
+    if(rc < 0)
+        return -1;
+
+    if(pfd[0].revents & pollevent)
+        return 1;
+
+    return 0;
+}
+
 void
 cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
                  cpc_continuation *cont)
 {
     if(IS_DETACHED) {
         assert(cond == NULL);
+        cpc_d_io_wait(fd, direction); // XXX No error handling
         cpc_invoke_continuation(cont);
         return;
     }
