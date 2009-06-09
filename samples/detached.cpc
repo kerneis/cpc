@@ -45,6 +45,15 @@ main()
         sleep(1);
         printf("C s'est réveillé.\n");
     }
+    cpc_spawn
+    {
+        printf("D1.\n");
+        cpc_detach; cpc_detach;
+        printf("D2.\n");
+        cpc_sleep(1,500);
+        cpc_attach; cpc_attach; cpc_attach;
+        printf("D3.\n");
+    }
     cpc_main_loop();
     return 0;
 }
