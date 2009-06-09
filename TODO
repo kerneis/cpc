@@ -4,7 +4,6 @@
 * Handle CPC constructs in computeCFGInfo (function succpred_stmt)
   => needs careful analysis. Handling in xform_switch_stmt is probably
      broken too, btw. Anyway, this is now done in src/ext/cfg.ml.
-* Improve xform_switch_stmt (needless to eliminate inner loops)
 * peepHole doesn't dive into CpcFun
   => I think one should lambda-lift CpcFun before using it anyway.
      It is used in src/frontc/cabs2cil.ml too, but there is no
@@ -20,6 +19,7 @@
   => look quite good, but who knows?
 
 [src/ext/cpc.ml]
+* Improve xform_switch_stmt (needless to eliminate inner loops)
 * in CPS conversion, if there is a typo in a cpc_spawn, building fails
   with a Not_found error message
   => print a more informative error message (or check it before)
@@ -53,15 +53,3 @@
 * do the right thing with CpcFun (there is much more to save and restore
   than the few global references I deal with --- hashtables, startEnv(),
   etc.)
-
-[runtime/cpc_runtime.c]
-* Include a trampoline in detached mode
-  => use thread-local variables?
-* What about condition variables in detached mode?
-  => not supported at all...
-* Multiple schedulers are unusable because they die (and kill the thread
-  pool) when it becomes empty. So, a few questions:
-  => when should a scheduler be killed? is main_loop mandatory? how to
-  avoid busy wait when a scheduler has no attached continuation?
-  => cpc_spawn should provide an (unambiguous) syntax to spawn to a
-  specific scheduler.
