@@ -59,6 +59,18 @@ static void timer_cb (struct ev_loop *, ev_timer *, int);
 static void idle_cb (struct ev_loop *, ev_idle *, int);
 static inline void exhaust_ready(cpc_continuation *);
 
+void
+cpc_print_continuation(struct cpc_continuation *c, char *s)
+{
+    int i;
+    fprintf(stderr,"(%s) At %p %lu:\n%p\t%p\t%p\t%p\t%d\t%u\t%u\n",s,c,
+    sizeof(cpc_function*),
+    c->next,c->condvar,c->cond_next,c->ready,c->state,c->length,c->size);
+    for(i=0; i < c->length; i++)
+        fprintf(stderr,"%d ",c->c[i]);
+    fprintf(stderr,"\n");
+}
+
 struct cpc_continuation *
 cpc_continuation_get(int size)
 {
