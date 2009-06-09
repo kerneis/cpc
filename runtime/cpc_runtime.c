@@ -1,12 +1,9 @@
-/* 
+/*
 Copyright (c) 2008, 2009 by Gabriel Kerneis.
 Copyright (c) 2004, 2005 by Juliusz Chroboczek.
 Experimental; do not redistribute.
 */
 
-#include <sys/time.h>
-#include <time.h>
-#include <sys/select.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -15,11 +12,10 @@ Experimental; do not redistribute.
 #include <assert.h>
 #include <pthread.h>
 
-
 #include "cpc_runtime.h"
 #include "ev.c"
 
-#include <poll.h>
+#include <poll.h> /* cpc_d_io_wait */
 
 #include "nft_pool.h"
 
@@ -30,7 +26,7 @@ static pthread_t main_loop_id;
 
 #define IS_DETACHED (loop && !pthread_equal(main_loop_id,pthread_self()))
 
-#define MAX_THREADS 50
+#define MAX_THREADS 20
 static nft_pool_t *thread_pool;
 
 static ev_async attach_sig;
@@ -49,6 +45,7 @@ struct cpc_condvar {
 #define STATE_UNKNOWN -1
 #define STATE_SLEEPING -2
 #define STATE_DETACHED -3
+/* Detached continuations that must be discarded */
 #define STATE_GARBAGE -4
 
 static cpc_continuation_queue ready = {NULL, NULL};
@@ -59,16 +56,23 @@ static void timer_cb (struct ev_loop *, ev_timer *, int);
 static void idle_cb (struct ev_loop *, ev_idle *, int);
 static inline void exhaust_ready(cpc_continuation *);
 
+/*** Basic operations on continuations ***/
+
 void
 cpc_print_continuation(struct cpc_continuation *c, char *s)
 {
-    int i;
+    int i = 0;
     fprintf(stderr,"(%s) At %p %lu:\n%p\t%p\t%p\t%p\t%d\t%u\t%u\n",s,c,
     sizeof(cpc_function*),
     c->next,c->condvar,c->cond_next,c->ready,c->state,c->length,c->size);
-    for(i=0; i < c->length; i++)
-        fprintf(stderr,"%d ",c->c[i]);
-    fprintf(stderr,"\n");
+    while(i < c->length) {
+        fprintf(stderr,"%02x",c->c[i]);
+        i++;
+        if(i%16 == 0 || i == c->length)
+            fprintf(stderr,"\n");
+        else if(i%2 == 0)
+            fprintf(stderr, " ");
+    }
 }
 
 struct cpc_continuation *
@@ -83,8 +87,9 @@ cpc_continuation_get(int size)
 void
 cpc_continuation_free(struct cpc_continuation *c)
 {
-    /* Detached continuation are re-attached in a GARBAGE state and
-     * freed by attach_cb */
+    /* Detached continuations are re-attached in a GARBAGE state and
+     * freed by attach_cb, so that the event loop is aware they have
+     * been discarded. */
     if(c->state == STATE_DETACHED) {
         c->state = STATE_GARBAGE;
         cpc_prim_attach(c);
@@ -123,9 +128,17 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->cond_next = c->cond_next;
     d->state = c->state;
     d->ready = c->ready;
-    /* Otherwise, you have to use a pointer to a watcher, and use malloc. */
-    assert(c->state == STATE_UNKNOWN || c->state == STATE_DETACHED);
-    //d->watcher = c->watcher;
+    /* The ev_watcher struct is stored directly in the continuation. But
+     * it must not be copied since libev uses pointers to this struct.
+     * Rather than using malloc and a pointer to the structure, we claim
+     * that cpc_continuation_expand and cpc_continuation_copy cannot be
+     * called when the continuation is sleeping or io_waiting. Checking
+     * the claim, just in case we missed something:
+     */
+    assert(("This is a bug, please report it.",
+            c->state == STATE_UNKNOWN || c->state == STATE_DETACHED));
+    /* And do not copy c->watcher since it's meaningless garbage. */
+
     free(c);
 
     return d;
@@ -146,10 +159,13 @@ cpc_continuation_copy(struct cpc_continuation *c)
     d->condvar = c->condvar;
     d->state = c->state;
     d->ready = c->ready;
-    assert(c->state == STATE_UNKNOWN || c->state == STATE_DETACHED); // See above.
+    assert(("This is a bug, please report it.", /* See above for more details. */
+            c->state == STATE_UNKNOWN || c->state == STATE_DETACHED));
 
     return d;
 }
+
+/*** Basic operations on queues ***/
 
 static void
 enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
@@ -165,9 +181,6 @@ enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
         queue->tail->next = c;
         queue->tail = c;
     }
-    // XXX
-    if(loop && queue == &ready)
-        ev_idle_start(loop, &run);
 }
 
 static cpc_continuation *
@@ -182,7 +195,7 @@ dequeue(cpc_continuation_queue *queue)
         queue->tail = NULL;
     cont->next = NULL;
     return cont;
-}    
+}
 
 static void
 cond_enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
@@ -212,7 +225,7 @@ cond_dequeue(cpc_continuation_queue *queue)
         queue->tail = NULL;
     cont->cond_next = NULL;
     return cont;
-}    
+}
 
 static void
 cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
@@ -245,6 +258,8 @@ dequeue_other(cpc_continuation *cont)
     cont->state = STATE_UNKNOWN;
 }
 
+/*** Condition variables ***/
+
 cpc_condvar *
 cpc_condvar_get()
 {
@@ -259,6 +274,7 @@ cpc_condvar_get()
 cpc_condvar *
 cpc_condvar_retain(cpc_condvar *cond)
 {
+    assert(!IS_DETACHED);
     cond->refcount++;
     return cond;
 }
@@ -266,7 +282,7 @@ cpc_condvar_retain(cpc_condvar *cond)
 void
 cpc_condvar_release(cpc_condvar *cond)
 {
-    assert(cond->refcount > 0);
+    assert(!IS_DETACHED && cond->refcount > 0);
     cond->refcount--;
     if(cond->refcount == 0) {
         assert(cond->queue.head == NULL);
@@ -274,63 +290,11 @@ cpc_condvar_release(cpc_condvar *cond)
     }
 }
 
-void
-cpc_schedule(struct cpc_continuation *cont)
-{
-    assert(cont);
-    if(IS_DETACHED)
-        if(cont->state == STATE_UNKNOWN)
-            cpc_prim_attach(cont); /* spawn in detached mode */
-        else { /* yield in detached mode */
-            assert(cont->state == STATE_DETACHED);
-            cpc_invoke_continuation(cont);
-        }
-    else {
-        assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
-        enqueue(&ready, cont);
-     }
-}
-
-void
-cpc_prim_wait(cpc_condvar *cond, cpc_continuation *cont)
-{
-    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
-    cont->condvar = cond;
-    cond_enqueue(&cond->queue, cont);
-}
-
-void
-cpc_signal(cpc_condvar *cond)
-{
-    cpc_continuation *cont;
-    cont = cond_dequeue(&cond->queue);
-    if(cont == NULL)
-        return;
-    assert(cont->condvar == cond);
-    cont->condvar = NULL;
-    dequeue_other(cont);
-    enqueue(&ready, cont);
-}
-
-void 
-cpc_signal_all(cpc_condvar *cond)
-{
-    cpc_continuation *cont;
-
-    while(1) {
-        cont = cond_dequeue(&cond->queue);
-        if(cont == NULL)
-            break;
-        assert(cont->condvar == cond);
-        cont->condvar = NULL;
-        dequeue_other(cont);
-        enqueue(&ready, cont);
-    }
-}
-
 int
 cpc_condvar_count(cpc_condvar *cond)
 {
+    assert(!IS_DETACHED);
+
     cpc_continuation *cont = cond->queue.head;
     int i = 0;
 
@@ -343,14 +307,58 @@ cpc_condvar_count(cpc_condvar *cond)
 }
 
 void
+cpc_prim_wait(cpc_condvar *cond, cpc_continuation *cont)
+{
+    assert(!IS_DETACHED && cont->condvar == NULL && cont->state == STATE_UNKNOWN);
+    cont->condvar = cond;
+    cond_enqueue(&cond->queue, cont);
+}
+
+void
+cpc_signal(cpc_condvar *cond)
+{
+    assert(!IS_DETACHED);
+    cpc_continuation *cont;
+    cont = cond_dequeue(&cond->queue);
+    if(cont == NULL)
+        return;
+    assert(cont->condvar == cond);
+    cont->condvar = NULL;
+    dequeue_other(cont);
+    enqueue(&ready, cont);
+    if(loop)
+        ev_idle_start(loop, &run);
+}
+
+void
+cpc_signal_all(cpc_condvar *cond)
+{
+    cpc_continuation *cont;
+
+    assert(!IS_DETACHED);
+    while(1) {
+        cont = cond_dequeue(&cond->queue);
+        if(cont == NULL)
+            break;
+        assert(cont->condvar == cond);
+        cont->condvar = NULL;
+        dequeue_other(cont);
+        enqueue(&ready, cont);
+        if(loop)
+            ev_idle_start(loop, &run);
+    }
+}
+
+/*** cpc_sleep ***/
+
+void
 cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
 {
-    ev_tstamp timeout;
-    
-    if(IS_DETACHED) {
-        assert(cond == NULL);
-        sleep(sec);
-        usleep(usec);
+    ev_tstamp timeout = sec + ((ev_tstamp) usec) / 1e6;
+
+    if(cont->state == STATE_DETACHED) {
+        assert(IS_DETACHED && cond == NULL);
+        ev_sleep(timeout); /* Uses nanosleep or select */
         cpc_invoke_continuation(cont);
         return;
     }
@@ -364,11 +372,33 @@ cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
         cond_enqueue(&cond->queue, cont);
     }
     cont->state = STATE_SLEEPING;
-    timeout = sec + ((ev_tstamp) usec) / 1000000.;
     ev_timer_init(&cont->watcher.timer, timer_cb, timeout, 0.);
     ev_timer_start(loop, &cont->watcher.timer);
     return;
 }
+
+static void
+timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
+{
+    /* Ugly pointer arithmetic to get the continuation including the
+     * watcher w */
+    struct cpc_continuation *c = (struct cpc_continuation *)
+    (((char *)w) - offsetof(struct cpc_continuation, watcher));
+
+    assert(c->state == STATE_SLEEPING);
+
+    ev_timer_stop(loop, w);
+    c->state = STATE_UNKNOWN;
+    if(c->condvar) {
+        cond_dequeue_1(&c->condvar->queue, c);
+    }
+    c->condvar = NULL;
+    enqueue(&ready, c);
+    if(loop)
+        ev_idle_start(loop, &run);
+}
+
+/*** cpc_io_wait ***/
 
 static inline int
 cpc_d_io_wait(int fd, int direction)
@@ -395,8 +425,8 @@ void
 cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
                  cpc_continuation *cont)
 {
-    if(IS_DETACHED) {
-        assert(cond == NULL);
+    if(cont->state == STATE_DETACHED) {
+        assert(IS_DETACHED && cond == NULL);
         cpc_d_io_wait(fd, direction); // XXX No error handling
         cpc_invoke_continuation(cont);
         return;
@@ -418,40 +448,6 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
     return;
 }
 
-void
-cpc_prim_attach(cpc_continuation *cont)
-{
-    if(cont->state == STATE_DETACHED)
-        cont->state = STATE_UNKNOWN;
-    else if(cont->state == STATE_UNKNOWN)
-        assert(IS_DETACHED); /* spawn in detached mode */
-    else
-        assert(cont->state == STATE_GARBAGE);
-    pthread_mutex_lock (&attach_mutex);
-    enqueue(&attach_queue, cont);
-    pthread_mutex_unlock (&attach_mutex);
-    ev_async_send(loop, &attach_sig);
-    return;
-}
-
-void *
-perform_detach(void *cont)
-{
-    struct cpc_continuation *c = (struct cpc_continuation *)cont;
-    c->state = STATE_DETACHED;
-    exhaust_ready(c);
-    return NULL;
-}
-
-void
-cpc_prim_detach(cpc_continuation *cont)
-{
-    assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
-    ev_ref(loop);
-    nft_pool_add(thread_pool, (void(*)(void*)) perform_detach, cont);
-    return;
-}
-
 static void
 io_cb(struct ev_loop *loop, ev_io *w, int revents)
 {
@@ -469,52 +465,31 @@ io_cb(struct ev_loop *loop, ev_io *w, int revents)
     }
     c->condvar = NULL;
     enqueue(&ready, c);
+    if(loop)
+        ev_idle_start(loop, &run);
 }
 
-static void
-timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
+/*** cpc_attach ****/
+
+void
+cpc_prim_attach(cpc_continuation *cont)
 {
-    /* Ugly pointer arithmetic to get the continuation including the
-     * watcher w */
-    struct cpc_continuation *c = (struct cpc_continuation *)
-    (((char *)w) - offsetof(struct cpc_continuation, watcher));
-
-    assert(c->state == STATE_SLEEPING);
-
-    ev_timer_stop(loop, w);
-    c->state = STATE_UNKNOWN;
-    if(c->condvar) {
-        cond_dequeue_1(&c->condvar->queue, c);
+    if(!IS_DETACHED) {
+        assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+        cpc_invoke_continuation(cont);
+        return;
     }
-    c->condvar = NULL;
-    enqueue(&ready, c);
-}
-
-static inline void
-exhaust_ready(cpc_continuation *c)
-{
-    cpc_continuation *cpc_ready_1 = c;
-    c->ready = &cpc_ready_1;
-    while(cpc_ready_1) {
-        c = cpc_ready_1;
-        cpc_ready_1 = NULL;
-        cpc_really_invoke_continuation(c);
-    }
-}
-
-static void
-idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
-{
-    struct cpc_continuation *c;
-    struct cpc_continuation_queue q;
-
-    ev_idle_stop(loop, w);
-    q = ready;
-    ready.head = ready.tail = NULL;
-    while((c = dequeue(&q))) {
-        assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
-        exhaust_ready(c);
-    }
+    if(cont->state == STATE_DETACHED)
+        cont->state = STATE_UNKNOWN;
+    else
+        /* cont must be freed, but we have to attach it first, so that
+         * the event loop doesn't wait for it forever. */
+        assert(cont->state == STATE_GARBAGE);
+    pthread_mutex_lock (&attach_mutex);
+    enqueue(&attach_queue, cont);
+    pthread_mutex_unlock (&attach_mutex);
+    ev_async_send(loop, &attach_sig);
+    return;
 }
 
 static void
@@ -536,7 +511,86 @@ attach_cb(struct ev_loop *loop, ev_async *w, int revents)
     pthread_mutex_unlock (&attach_mutex);
 }
 
-void 
+/*** cpc_detach ***/
+
+static void *
+perform_detach(void *cont)
+{
+    struct cpc_continuation *c = (struct cpc_continuation *)cont;
+    c->state = STATE_DETACHED;
+    exhaust_ready(c);
+    return NULL;
+}
+
+void
+cpc_prim_detach(cpc_continuation *cont)
+{
+    if(cont->state == STATE_DETACHED) {
+        assert(IS_DETACHED);
+        cpc_invoke_continuation(cont);
+        return;
+    }
+    assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+    ev_ref(loop);
+    nft_pool_add(thread_pool, (void(*)(void*)) perform_detach, cont);
+    return;
+}
+
+/*** cpc_yield and cpc_spawn ***/
+
+void
+cpc_schedule(struct cpc_continuation *cont)
+{
+    assert(cont);
+    if(IS_DETACHED)
+        if(cont->state == STATE_UNKNOWN)
+            /* spawn in detached mode */
+            cpc_prim_attach(cont);
+        else {
+            /* yield in detached mode */
+            assert(cont->state == STATE_DETACHED);
+            cpc_invoke_continuation(cont);
+        }
+    else {
+        assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+        enqueue(&ready, cont);
+        if(loop)
+            ev_idle_start(loop, &run);
+     }
+}
+
+/*** Executing continuations with trampolines ***/
+
+static inline void
+exhaust_ready(cpc_continuation *c)
+{
+    cpc_continuation *cpc_ready_1 = c;
+    c->ready = &cpc_ready_1;
+    while(cpc_ready_1) {
+        c = cpc_ready_1;
+        cpc_ready_1 = NULL;
+        cpc_really_invoke_continuation(c);
+    }
+}
+
+/*** The default callback, which runs continuations ***/
+
+static void
+idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
+{
+    struct cpc_continuation *c;
+    struct cpc_continuation_queue q;
+
+    ev_idle_stop(loop, w);
+    q = ready;
+    ready.head = ready.tail = NULL;
+    while((c = dequeue(&q))) {
+        assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
+        exhaust_ready(c);
+    }
+}
+
+void
 cpc_main_loop(void)
 {
     loop = ev_default_loop(0);
@@ -548,6 +602,7 @@ cpc_main_loop(void)
     ev_unref(loop);
 
     ev_idle_init(&run, idle_cb);
+    /* Executing continuations must be the task of highest priority. */
     ev_set_priority(&run, EV_MAXPRI);
     ev_idle_start(loop, &run);
 
