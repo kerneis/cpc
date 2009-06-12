@@ -3,7 +3,7 @@
 \title{The CPC manual}
 \author{Juliusz Chroboczek, Gabriel Kerneis\\
 {\tt <jch@pps.jussieu.fr>, <kerneis@pps.jussieu.fr>}}
-\date{10 April 2009}
+\date{12 June 2009}
 
 \begin{document}
 \maketitle
@@ -39,7 +39,7 @@ called is defined in Sec.~\ref{sec:contexts}.
 Intuitively, cps code is ``interruptible'': it is possible to
 interrupt the flow of a block of cps code in order to pass control to
 another piece of code or to wait for an event to happen.  Native code,
-on the other hand, is ``atomic''; if a sequence of native code is
+on the other hand, is ``atomic'': if a sequence of native code is
 executed, it must be completed before anything else is allowed to run.
 
 Technically, native function calls are executed by using the machine's
@@ -90,7 +90,9 @@ defined as follows:
 \item the body of a cps function is in cps context
   (Sec.~\ref{sec:cpc-functions};
 \item the body of a {\tt cpc\_spawn} statement is in cps context
-  (Sec.~\ref{sec:cooperating}).
+  (Sec.~\ref{sec:cooperating});
+\item the body of a {\tt cpc\_detached} or {\tt cpc\_attached} statement is
+  in cps context (Sec.~\ref{sec:native-threads}).
 \end{itemize}
 Any construct that is not in cps context is said to be in native
 context.
@@ -133,16 +135,13 @@ nothing more to do).
 
 CPC has a number of statements not present in the C language.
 
-\subsection{Cooperating: yielding, spawning and detaching} \label{sec:cooperating}
+\subsection{Cooperating: yielding, spawning} \label{sec:cooperating}
 
 \begin{eqnarray*}
 \mbox{cpc-statement} & ::= & 
      \mathtt{cpc\_yield} \mathtt{;} \\
  &|& \mathtt{cpc\_done} \mathtt{;} \\
- &|& \mathtt{cpc\_spawn}\ \mbox{statement} \\
- &|& \mathtt{cpc\_attach} \mathtt{;} \\
- &|& \mathtt{cpc\_detach} \mathtt{;} \\
- &|& \mathtt{cpc\_detached}\ \mbox{statement} \\
+ &|& \mathtt{cpc\_spawn}\ \mbox{statement}
 \end{eqnarray*}
 
 \paragraph{\tt cpc\_yield} The {\tt cpc\_yield} statement causes the
@@ -160,15 +159,6 @@ created and placed at the end of the queue of runnable continuations.
 Execution then proceeds after the {\tt cpc\_spawn} statement (control
 is {\em not\/} passed back to the main CPC loop).  This statement is
 valid in arbitrary context.
-
-\paragraph{{\tt cpc\_detach}, {\tt cpc\_attach}} The {\tt cpc\_detach}
-and {\tt cpc\_attach} statements respectively detach and attach the
-current continuation from and to the cooperative scheduler, running it
-as a native, preemptive, thread. The {\tt cpc\_detached} statement
-surrounds its argument with {\tt cpc\_detach} and {\tt cpc\_attach}
-statements.  {\bf These statements are not implemented in CPC 0.1.} In
-this first stable release, they are equivalent to {\tt cpc\_yield}. If
-you want to try them, get the latest unstable version.
 
 \subsection{Synchronisation: condition variables}
 
@@ -239,6 +229,36 @@ happens first.
 
 This statement is only valid in cps context
 
+\subsection{Interaction with native threads} \label{sec:native-threads}
+\begin{eqnarray*}
+\mbox{cpc-statement} ::=
+ &|& \mathtt{cpc\_detach} \mathtt{;} \\
+ &|& \mathtt{cpc\_attach} \mathtt{;} \\
+ &|& \mathtt{cpc\_detached}\ \mbox{statement} \\
+ &|& \mathtt{cpc\_attached}\ \mbox{statement}
+\end{eqnarray*}
+
+A continuation can be scheduled to be run by a native thread; intuitively,
+the continuation ``becomes'' a native thread.  When this happens, we say
+that the continuation has been {\em detached\/} from the CPC scheduler.
+The opposite operation is known as {\em attaching\/} a detached
+continuation to the CPC scheduler.
+
+\paragraph{cpc\_detach, cpc\_attach} The {\tt cpc\_detach} statement
+detaches the current continuation; the following statements are executed in
+a dedicated native thread.  The opposite operation is performed by {\tt
+  cpc\_attach}, which causes the current continuation to be scheduled by
+the CPC scheduler.
+
+The {\tt cpc\_detach} and {\tt cpc\_attach} statements can only appear in
+cpc context.
+
+\paragraph{cpc\_detached, cpc\_attached} The body of a {\tt cpc\_detached}
+statement is run detached : an implicit {\tt cpc\_detach} is executed upon
+entering the body, and a {\tt cpc\_attach} is executed upon exiting.  The
+{\tt cpc\_attached} construct is dual : a {\tt cpc\_attach} is executed
+upon entry, and a {\tt cpc\_detach} is executed upon exit.
+
 \section{Limitations and implementation notes}
 
 Not all legal C code is allowable in CPC.  Some of the limitations
@@ -252,10 +272,6 @@ The use of the {\tt longjmp} library function, and its variants, is
 not allowed in CPC code.
 
 \subsection{Current limitations}
-
-It is not allowed to take the address of a local variable or function
-argument in a cps function.  (It is okay to take the address of a
-structure pointed to by a local pointer variable, of course.)
 
 Old-style (``K\&R'') function definitions are not supported.
 
