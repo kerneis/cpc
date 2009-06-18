@@ -400,6 +400,12 @@ timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 
 /*** cpc_io_wait ***/
 
+void
+cpc_signal_fd(int fd, int direction)
+{
+    ev_feed_fd_event (loop, fd, direction);
+}
+
 static inline int
 cpc_d_io_wait(int fd, int direction)
 {

@@ -119,6 +119,7 @@ extern cpc_condvar *cpc_condvar_get(void);
 extern cpc_condvar *cpc_condvar_retain(cpc_condvar*);
 extern void cpc_condvar_release(cpc_condvar*);
 extern void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
+extern void cpc_signal_fd(int, int);
 extern void cpc_signal(cpc_condvar*);
 extern void cpc_signal_all(cpc_condvar*);
 extern int cpc_condvar_count(cpc_condvar*);
