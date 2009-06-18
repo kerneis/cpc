@@ -839,16 +839,22 @@ class cpsConverter = fun file ->
   | CpcCut _
   | CpcWait _ | CpcSleep _
   | CpcIoWait _ | Instr _ when s.cps ->
+      (* If the labels are not empty, this must be first cps statement,
+         so the stack has to be empty. *)
+      assert(s.labels = [] || stack = []);
+      let l = s.labels in
       stack <- (copyClearStmt s file stack)::stack;
-      s.skind <- Instr [];
+      (* Restore the labels, if any. *)
+      s.labels <- l;
       SkipChildren
   | Return (ret_exp,loc) when s.cps ->
-      let res =
-        mkStmt (Block (mkBlock [
+      (* Do not use ChangeTo to preserve the labels. *)
+      assert(s.labels = [] || stack = []);
+      s.skind <- Block (mkBlock [
           self#do_convert ret_exp;
-          mkStmt (Return (None, loc))])) in
+          mkStmt (Return (None, loc))]);
       stack <- [];
-      ChangeTo res
+      SkipChildren
   | CpcCut _
   | CpcWait _ | CpcSleep _
   | CpcIoWait _ -> assert false
