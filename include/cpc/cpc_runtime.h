@@ -3,11 +3,17 @@ Copyright (c) 2008, 2009 by Gabriel Kerneis.
 Copyright (c) 2004, 2005 by Juliusz Chroboczek.
 Experimental; do not redistribute.
 */
+#include <stddef.h>
 #define EV_STANDALONE 1
 #define EV_STAT_ENABLE 0
 #define EV_PERIODIC_ENABLE 0
 #define EV_EMBED_ENABLE 0
+/* XXX This is not portable -- int should be sig_atomic_t, but this
+ * would require signal.h. */
+#define EV_ATOMIC_T int volatile
 #include "ev.h"
+
+extern void *memcpy (void *dest, const void *src, size_t n);
 
 typedef struct cpc_continuation {
     struct cpc_continuation *next;
