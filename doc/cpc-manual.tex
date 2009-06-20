@@ -3,29 +3,32 @@
 \title{The CPC manual}
 \author{Juliusz Chroboczek, Gabriel Kerneis\\
 {\tt <jch@pps.jussieu.fr>, <kerneis@pps.jussieu.fr>}}
-\date{12 June 2009}
+\date{20 June 2009}
 
 \begin{document}
 \maketitle
 
 \chapter{The CPC language} \label{chapter:language}
 
-CPC is a programming language designed for any situation where
-even-driven programming is suitable --- most notably, for writing
-concurrent programs.  The semantics of CPC is defined as a
-source-to-source translation from CPC into plain C using a
-technique known as {\em translation into Continuation Passing Style\/}
-(CPS) \cite{strachey:continuations, plotkin:call-by-lambda}.
+CPC is a programming language designed for writing concurrent programs, for
+example network servers and clients.  CPC is impemented as a
+source-to-source translation from CPC into plain C using a technique known
+as {\em translation into Continuation Passing Style\/} (CPS)
+\cite{strachey:continuations, plotkin:call-by-lambda}.
 
-The main abstraction provided by CPC is a {\em continuation}, roughly
-corresponding to what other concurrent programming systems term a {\em
-thread\/} or {\em lightweight process\/}\footnote{From the
-programmer's point of view, the main difference is that a thread has
-a long-term identity (a thread or process identifier) which makes it
-possible to have constructs such as {\em join\/} or {\em kill}.
-Continuations, on the other hand, are transient: after execution of
-some code, the former continuation no longer exists, and a new
-continuation has been created.}.
+The main abstraction provided by CPC is a {\em CPC thread}.  From the
+programmer's view, a CPC thread roughly corresponds to other programming
+languages' notion of {\em thread\/} or {\em lightweight process}, except
+that it has no identity: there is no {\em thread identifier\/} that can be
+used to kill or suspend a given CPC thread.
+
+A CPC thread can be in one of two states: {\em attached\/} to the CPC
+scheduler, and {\em detached}.  At a given time, the set of all attached
+threads are scheduled cooperatively, and an attached thread cannot only be
+preempted by other attached threads because of explicit programmer action.
+A detached thread, on the other hand, is associated to a native
+operating-system thread, and is scheduled by the operating system
+asynchronously with respect to all other threads.
 
 \paragraph{Structure of a CPC program}
 
@@ -36,11 +39,12 @@ only ever be called by another cps function, never by a native
 function.  The precise set of contexts where a cps function can be
 called is defined in Sec.~\ref{sec:contexts}.
 
-Intuitively, cps code is ``interruptible'': it is possible to
-interrupt the flow of a block of cps code in order to pass control to
-another piece of code or to wait for an event to happen.  Native code,
-on the other hand, is ``atomic'': if a sequence of native code is
-executed, it must be completed before anything else is allowed to run.
+Intuitively, cps code is ``interruptible'': when in the attached state, it
+is possible to interrupt the flow of a block of cps code in order to pass
+control to another piece of code or to wait for an event to happen.  Native
+code, on the other hand, is ``atomic'': if a sequence of native code is
+executed in attached state, it must be completed before anything else is
+allowed to run.
 
 Technically, native function calls are executed by using the machine's
 native stack.  Cps function calls, on the other hand, are executed by
@@ -56,24 +60,11 @@ continuations with the CPC runtime (using {\tt cpc\_spawn},
 Section~\ref{sec:cooperating}), and then passes control to the CPC
 runtime (by calling {\tt cpc\_main\_loop}, Section~\ref{sec:bootstrapping}).
 
-\paragraph{Implementatin of CPC}
-
-CPC is implemented as a source-to-source translation from the CPC
-language, a conservative extension of C, into event-driven C code.
-The resulting C code is linked against the {\em CPC scheduler}, a
-modest event loop that handles scheduling of CPC continuations.
-
-The CPC scheduler manipulates three data structures: a queue of
-runnable continuations, a priority queue of sleeping continuations,
-and a set of queues of continuations blocked on condition variables or
-waiting for I/O.
-
 \section{The CPC language}
 
-CPC is a conservative extension of the 1999 edition of the C
-programming language; thus, the syntax of CPC is defined as a set of
-productions to be added to the grammar defined in the ISO C99 standard
-\cite{iso:c99}.
+CPC is a conservative extension of the 1999 edition of the C programming
+language; thus, the syntax of CPC is defined as a set of productions to be
+added to the grammar defined in the ISO C99 standard \cite{iso:c99}.
 
 In addition to the reserved words in C99, CPC reserves the words
 {\tt cps}, {\tt cpc\_yield}, {\tt cpc\_done}, {\tt cpc\_spawn}, 
@@ -94,8 +85,7 @@ defined as follows:
 \item the body of a {\tt cpc\_detached} or {\tt cpc\_attached} statement is
   in cps context (Sec.~\ref{sec:native-threads}).
 \end{itemize}
-Any construct that is not in cps context is said to be in native
-context.
+Any construct that is not in cps context is said to be in native context.
 
 \subsection{CPS functions} \label{sec:cpc-functions}
 
@@ -126,7 +116,7 @@ is not visible in the enclosing function.
 \paragraph{\tt cpc\_main\_loop} Since \verb|main| is a native
 function, some means is necessary to pass control to cps code.  The
 function \verb|cpc_main_loop| invokes the CPC scheduler; it returns
-when all continuations have been exhausted (i.e.\ where there is
+when all threads have been exhausted (i.e.\ where there is
 nothing more to do).
 
 \subsection{CPC statements}
@@ -134,6 +124,33 @@ nothing more to do).
 \[ \mbox{statement} ::= \mbox{cpc-statement} \]
 
 CPC has a number of statements not present in the C language.
+
+\subsection{Detaching and reattaching} \label{sec:native-threads}
+\begin{eqnarray*}
+\mbox{cpc-statement} ::= &|& \mathtt{cpc\_detach} \mathtt{;} \\ &|&
+\mathtt{cpc\_attach} \mathtt{;} \\ &|&
+\mathtt{cpc\_detached}\ \mbox{statement} \\ &|&
+\mathtt{cpc\_attached}\ \mbox{statement}
+\end{eqnarray*}
+
+A thread can be {\em detached\/} from the CPC scheduler and scheduled to be
+run by a native operating-system thread; intuitively, the thread
+``becomes'' a native thread.
+
+\paragraph{cpc\_detach, cpc\_attach} The {\tt cpc\_detach} statement
+detaches the current thread; the following statements are executed in a
+dedicated native thread.  The opposite operation is performed by {\tt
+  cpc\_attach}, which causes the current continuation to be scheduled by
+the CPC scheduler.
+
+The {\tt cpc\_detach} and {\tt cpc\_attach} statements can only appear in
+cps context.
+
+\paragraph{cpc\_detached, cpc\_attached} The body of a {\tt cpc\_detached}
+statement is run detached : an implicit {\tt cpc\_detach} is executed upon
+entering the body, and a {\tt cpc\_attach} is executed upon exiting.  The
+{\tt cpc\_attached} construct is dual : a {\tt cpc\_attach} is executed
+upon entry, and a {\tt cpc\_detach} is executed upon exit.
 
 \subsection{Cooperating: yielding, spawning} \label{sec:cooperating}
 
@@ -145,20 +162,21 @@ CPC has a number of statements not present in the C language.
 \end{eqnarray*}
 
 \paragraph{\tt cpc\_yield} The {\tt cpc\_yield} statement causes the
-current continuation to be suspended, and placed at the end of the
-queue of runnable continuations.  Control is passed back to the CPC
-main loop.  This statement is only allowed in cps context.
+current continuation to be suspended, and placed at the end of the queue of
+runnable continuations.  Control is passed back to the CPC main loop.  This
+statement is only allowed in cps context, and has no effect in detached
+state.
 
 \paragraph{\tt cpc\_done} The {\tt cpc\_done} statement causes the
 current continuation to be discarded, and control to be passed back to
 the main CPC loop.  This statement is only allowed in cps context.
 
-\paragraph{\tt cpc\_spawn} The {\tt cpc\_spawn} statement causes a new
-continuation that executes the argument to {\tt cpc\_spawn} to be
-created and placed at the end of the queue of runnable continuations.
-Execution then proceeds after the {\tt cpc\_spawn} statement (control
-is {\em not\/} passed back to the main CPC loop).  This statement is
-valid in arbitrary context.
+\paragraph{\tt cpc\_spawn} The {\tt cpc\_spawn} statement creates a new
+attached thread that executes the argument to {\tt cpc\_spawn} and places
+it at the end of the queue of runnable continuations.  Execution then
+proceeds after the {\tt cpc\_spawn} statement (control is {\em not\/}
+passed back to the main CPC loop).  This statement is valid in arbitrary
+context.
 
 \subsection{Synchronisation: condition variables}
 
@@ -175,19 +193,21 @@ valid in arbitrary context.
 current continuation on the list of continuations waiting on the
 condition variable passed as argument to {\tt cpc\_wait}.  Control is
 passed back to the CPC loop.  This statement is only valid in cps
-context.
+context and attached state.
 
 \paragraph{\tt cpc\_signal} The function {\tt cpc\_signal} causes the
 first of the continuations waiting on the condition variable passed as
-argument to be moved to the tail of the queue of runnable
-continuations.  Execution proceeds at the instruction following the
-call to {\tt cpc\_signal}.
+argument to be moved to the tail of the queue of runnable continuations.
+Execution proceeds at the instruction following the call to {\tt
+  cpc\_signal}.  This statement is valid in arbitrary context, but only in
+attached state.
 
 \paragraph{\tt cpc\_signal\_all} The function {\tt cpc\_signal\_all}
-causes all of the continuations waiting on the condition variabled
-passed as argument to be moved to the tail of the queue of runnable
-continuations.  This function guarantees that the continuations will
-be run in the order in which they were suspended.
+causes all of the continuations waiting on the condition variabled passed
+as argument to be moved to the tail of the queue of runnable continuations.
+This function guarantees that the continuations will be run in the order in
+which they were suspended.  This statement is valid in arbitrary context,
+but only in attached state.
 
 \subsection{Sleeping}
 
@@ -200,15 +220,16 @@ be run in the order in which they were suspended.
 
 \paragraph{cpc\_sleep} The statement {\tt cpc\_sleep} takes three
 arguments: a time in seconds, a time in microseconds, and a condition
-variable.  It causes the current continuation to be suspended until
-either the specified amount of time has passed, or the condition
-variable is signalled, whichever happens first.
+variable.  It causes the current thread to be suspended until either the
+specified amount of time has passed, or the condition variable is
+signalled, whichever happens first.
 
 The third argument can be omitted if no interruption is necessary.
 The second argument can be omitted if sub-second accuracy is not
 needed.
 
-This statement is only valid in cps context.
+This statement is only valid in cps context.  The form with an expression
+is only valid in attached state.
 
 \subsection{Waiting for I/O}
 \[ \mbox{cpc-statement} ::=
@@ -227,37 +248,8 @@ either the given file descriptor is available for I/O in the given
 direction, or the given condition variable is signalled, whichever
 happens first.
 
-This statement is only valid in cps context
-
-\subsection{Interaction with native threads} \label{sec:native-threads}
-\begin{eqnarray*}
-\mbox{cpc-statement} ::=
- &|& \mathtt{cpc\_detach} \mathtt{;} \\
- &|& \mathtt{cpc\_attach} \mathtt{;} \\
- &|& \mathtt{cpc\_detached}\ \mbox{statement} \\
- &|& \mathtt{cpc\_attached}\ \mbox{statement}
-\end{eqnarray*}
-
-A continuation can be scheduled to be run by a native thread; intuitively,
-the continuation ``becomes'' a native thread.  When this happens, we say
-that the continuation has been {\em detached\/} from the CPC scheduler.
-The opposite operation is known as {\em attaching\/} a detached
-continuation to the CPC scheduler.
-
-\paragraph{cpc\_detach, cpc\_attach} The {\tt cpc\_detach} statement
-detaches the current continuation; the following statements are executed in
-a dedicated native thread.  The opposite operation is performed by {\tt
-  cpc\_attach}, which causes the current continuation to be scheduled by
-the CPC scheduler.
-
-The {\tt cpc\_detach} and {\tt cpc\_attach} statements can only appear in
-cpc context.
-
-\paragraph{cpc\_detached, cpc\_attached} The body of a {\tt cpc\_detached}
-statement is run detached : an implicit {\tt cpc\_detach} is executed upon
-entering the body, and a {\tt cpc\_attach} is executed upon exiting.  The
-{\tt cpc\_attached} construct is dual : a {\tt cpc\_attach} is executed
-upon entry, and a {\tt cpc\_detach} is executed upon exit.
+This statement is only valid in cps contex, and the form with a second
+expression is only valid in attached state.
 
 \section{Limitations and implementation notes}
 
@@ -280,10 +272,6 @@ Old-style (``K\&R'') function definitions are not supported.
 The current implementation of CPC implements all the CPS operations in
 constant time, with the following exceptions:
 \begin{itemize} 
-\item at the end of every iteration of the main loop (running all the
-  runnable continuations once), a {\tt select} system call is made; this
-  call runs in time proportional to the number of the highest active file
-  descriptor;
 \item when a continuation is queued on two structures simultaneously
   (because of {\tt cpc\_sleep} or {\tt cpc\_io\_wait} with a non-null
   last argument), invoking it requires dequeueing it from the second
