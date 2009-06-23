@@ -93,7 +93,7 @@ begin
   | CPC_YIELD loc -> loc
   | CPC_DONE loc -> loc
   | CPC_ATTACH (_, loc) -> loc
-  | CPC_DETACH loc -> loc
+  | CPC_DETACH (_, loc) -> loc
   | CPC_SPAWN (_,loc) -> loc
   | CPC_DETACHED (_,loc) -> loc
   | CPC_ATTACHED (_,loc) -> loc

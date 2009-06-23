@@ -734,9 +734,16 @@ and print_statement stat =
         print ");"
       end;
       new_line ()
-  | CPC_DETACH (loc) ->
+  | CPC_DETACH (exp, loc) ->
       setLoc(loc);
-      print "cpc_detach ;" ;
+      print "cpc_detach" ;
+      if exp = NOTHING
+      then print ";"
+      else begin
+        print "(";
+        print_expression exp;
+        print ");"
+      end;
       new_line ()
   | CPC_DETACHED (stat, loc) ->
       setLoc loc;

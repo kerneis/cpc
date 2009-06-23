@@ -6482,10 +6482,15 @@ and doStatement (s : A.statement) : chunk =
         currentLoc := loc';
         let (c, e', _) = doExp false e (AExp None) in
         c @@ s2c (mkStmt (CpcCut (Attach e', loc')))*)
-     | CPC_DETACH loc ->
+     | CPC_DETACH (A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         s2c (mkStmt (CpcCut (Detach null, loc')))
+     | CPC_DETACH (e, loc) ->
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        let (c, e', _) = doExp false e (AExp None) in
+        c @@ s2c (mkStmt (CpcCut (Detach e', loc')))
      | CPC_SPAWN (s, loc) ->
         (* The body of a cpc_spawn should always be converted as if it
            were outside of every detached/attached block *)
@@ -6519,7 +6524,7 @@ and doStatement (s : A.statement) : chunk =
       | CPC_DETACHED (s, loc) ->
           let ds = !detachedState in
           detachedState := D;
-          let c = doStatement (A.SEQUENCE (CPC_DETACH loc, A.SEQUENCE (
+          let c = doStatement (A.SEQUENCE (CPC_DETACH (NOTHING, loc), A.SEQUENCE (
             s, CPC_ATTACH (NOTHING, loc), loc), loc)) in
           if canDrop c then (detachedState := ds; c) else (
           detachedState := N;
@@ -6529,7 +6534,7 @@ and doStatement (s : A.statement) : chunk =
           let ds = !detachedState in
           detachedState := A;
           let c = doStatement (A.SEQUENCE (CPC_ATTACH (NOTHING, loc),
-            A.SEQUENCE (s, CPC_DETACH loc, loc), loc)) in
+            A.SEQUENCE (s, CPC_DETACH (NOTHING, loc), loc), loc)) in
           if canDrop c then (detachedState := ds; c) else (
           detachedState := N;
           E.s (E.error "labels forbidden in cpc_attached (%a)" d_loc
