@@ -6480,8 +6480,8 @@ and doStatement (s : A.statement) : chunk =
         E.s (error "cpc_attach(scheduler) is disabled");
         (*let loc' = convLoc loc in
         currentLoc := loc';
-        let (_, e', _) = doExp false e (AExp None) in
-        s2c (mkStmt (CpcCut (Attach e', loc')))*)
+        let (c, e', _) = doExp false e (AExp None) in
+        c @@ s2c (mkStmt (CpcCut (Attach e', loc')))*)
      | CPC_DETACH loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
@@ -6542,8 +6542,8 @@ and doStatement (s : A.statement) : chunk =
      | CPC_WAIT (e, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        let (_, e', _) = doExp false e (AExp None) in
-        s2c (mkStmt (CpcWait (e', loc')))
+        let (c, e', _) = doExp false e (AExp None) in
+        c @@ s2c (mkStmt (CpcWait (e', loc')))
      | CPC_SLEEP (e, A.NOTHING, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
