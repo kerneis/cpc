@@ -797,7 +797,7 @@ and stmtkind =
   | CpcIoWait of exp * exp * exp * location
   | CpcFun of fundec * location
 
-and cpc_cut = Yield | Done | Attach of exp | Detach
+and cpc_cut = Yield | Done | Attach of exp | Detach of exp
 
 (** Instructions. They may cause effects directly but may not have control
     flow.*)
@@ -3887,9 +3887,13 @@ class defaultCilPrinterClass : cilPrinter = object (self)
                 ++ self#pExp () e
                 ++ text ");")
 
-    | CpcCut (Detach, l) ->
+    | CpcCut (Detach e, l) ->
         self#pLineDirective l
-          ++ text "cpc_detach;"
+          ++ text "cpc_detach"
+          ++ (align
+                ++ text " ("
+                ++ self#pExp () e
+                ++ text ");")
 
     | CpcSpawn (f, args, l) ->
         self#pLineDirective l

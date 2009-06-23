@@ -1001,7 +1001,7 @@ and stmtkind =
   | CpcIoWait of exp * exp * exp * location
   | CpcFun of fundec * location
 
-and cpc_cut = Yield | Done | Attach of exp | Detach
+and cpc_cut = Yield | Done | Attach of exp | Detach of exp
 
 (** {b Instructions}. 
  An instruction {!Cil.instr} is a statement that has no local

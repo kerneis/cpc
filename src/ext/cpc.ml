@@ -813,7 +813,7 @@ class cpsConverter = fun file ->
         convert l @ debug "cpc_yield" @ schedule current_continuation
     | {skind=CpcCut (Attach e, _)} :: l ->
         convert l @ attach e current_continuation
-    | {skind=CpcCut (Detach, _)} :: l ->
+    | {skind=CpcCut (Detach _, _)} :: l ->
         convert l @ detach current_continuation
     | {skind=CpcWait (condvar, _)} :: l ->
         convert l @ wait condvar current_continuation

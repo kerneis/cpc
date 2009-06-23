@@ -865,7 +865,7 @@ module BlockChunk =
     let returnChunk (e: exp option) (l: location) : chunk = 
       { stmts = (match !detachedState with
         | N -> [ mkStmt (Return(e, l)) ]
-        | A -> [ mkStmt (CpcCut(Detach,l)); mkStmt (Return(e, l)) ]
+        | A -> [ mkStmt (CpcCut(Detach null,l)); mkStmt (Return(e, l)) ]
         | D -> [ mkStmt (CpcCut(Attach null,l)); mkStmt (Return(e, l)) ]
         );
         postins = [];
@@ -996,7 +996,7 @@ module BlockChunk =
       addGoto ln gref;
       { stmts = (match !detachedState with
         | N -> [ mkStmt (Goto(gref, l)) ]
-        | A -> [ mkStmt (CpcCut(Detach,l)); mkStmt (Goto(gref, l)) ]
+        | A -> [ mkStmt (CpcCut(Detach null,l)); mkStmt (Goto(gref, l)) ]
         | D -> [ mkStmt (CpcCut(Attach null,l)); mkStmt (Goto(gref, l)) ]
         );
         postins = [];
@@ -6485,7 +6485,7 @@ and doStatement (s : A.statement) : chunk =
      | CPC_DETACH loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        s2c (mkStmt (CpcCut (Detach, loc')))
+        s2c (mkStmt (CpcCut (Detach null, loc')))
      | CPC_SPAWN (s, loc) ->
         (* The body of a cpc_spawn should always be converted as if it
            were outside of every detached/attached block *)

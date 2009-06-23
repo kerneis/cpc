@@ -269,7 +269,7 @@ let d_cfgnodelabel () (s : stmt) =
       | CpcCut (Yield, _) -> "cpc-yield"
       | CpcCut (Done, _) -> "cpc-done"
       | CpcCut (Attach _, _) -> "cpc-attach"
-      | CpcCut (Detach, _) -> "cpc-detach"
+      | CpcCut (Detach _, _) -> "cpc-detach"
       | CpcSpawn _ -> "cpc-spawn"
       | CpcWait _ -> "cpc-wait"
       | CpcSleep _ -> "cpc-sleep"
