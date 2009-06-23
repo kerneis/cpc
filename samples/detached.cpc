@@ -29,8 +29,19 @@ g(char c)
 int
 main()
 {
+    cpc_threadpool *pool = cpc_threadpool_get(5);
     cpc_spawn { g('a'); printf("A a fini, B devrait bientot.\n"); }
-    cpc_spawn { g('b'); cpc_detach; printf("B meurt détaché.\n"); }
+    cpc_spawn
+    {
+        g('b');
+        cpc_detach(pool);
+        /* Yes, I can do this since cpc_threadpool_release doesn't block
+         * and waits for every thread to be attached before destroying
+         * the pool! */
+        cpc_threadpool_release(pool);
+        sleep(2);
+        printf("B meurt détaché.\n");
+    }
     cpc_spawn
     {
         printf("C va dormir.\n");
