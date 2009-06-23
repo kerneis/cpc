@@ -720,9 +720,10 @@ class cpsConverter = fun file ->
       Lval(Var cc, NoOffset)],
       locUnknown)] in
   let cpc_detach = find_function "cpc_prim_detach" file in
-  let detach cc =
-    (* cpc_prim_detach(cc) *)
+  let detach pool cc =
+    (* cpc_prim_detach(pool, cc) *)
     [Call(None,Lval(Var cpc_detach, NoOffset), [
+      pool;
       Lval(Var cc, NoOffset)],
       locUnknown)] in
   (* XXX DEBUGING *)
@@ -813,8 +814,8 @@ class cpsConverter = fun file ->
         convert l @ debug "cpc_yield" @ schedule current_continuation
     | {skind=CpcCut (Attach e, _)} :: l ->
         convert l @ attach e current_continuation
-    | {skind=CpcCut (Detach _, _)} :: l ->
-        convert l @ detach current_continuation
+    | {skind=CpcCut (Detach e, _)} :: l ->
+        convert l @ detach e current_continuation
     | {skind=CpcWait (condvar, _)} :: l ->
         convert l @ wait condvar current_continuation
     | {skind=CpcSleep (x, y, condvar, _)} :: l ->

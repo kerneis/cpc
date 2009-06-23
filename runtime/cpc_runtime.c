@@ -529,7 +529,7 @@ perform_detach(void *cont)
 }
 
 void
-cpc_prim_detach(cpc_continuation *cont)
+cpc_prim_detach(struct nft_pool *pool, cpc_continuation *cont)
 {
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED);
@@ -538,8 +538,31 @@ cpc_prim_detach(cpc_continuation *cont)
     }
     assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
     ev_ref(loop);
-    nft_pool_add(thread_pool, (void(*)(void*)) perform_detach, cont);
+    if(pool == NULL)
+        pool = thread_pool;
+    nft_pool_add(pool, (void(*)(void*)) perform_detach, cont);
     return;
+}
+
+struct nft_pool *
+cpc_threadpool_get(int max_threads)
+{
+    if(max_threads <= 0 || max_threads > MAX_THREADS)
+        max_threads = MAX_THREADS;
+    return nft_pool_create(max_threads, 0);
+}
+
+void
+cpc_threadpool_release(struct nft_pool *pool)
+{
+    /* ntf_pool_destroy is blocking until every thread in the pool is
+     * done, so we destroy it in a separate thread. */
+     pthread_t t;
+     pthread_attr_t attr;
+     pthread_attr_init(&attr);
+     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+     pthread_create(&t, &attr, (void(*)(void*)) nft_pool_destroy, (void *)pool);
+     pthread_attr_destroy(&attr);
 }
 
 /*** cpc_yield and cpc_spawn ***/
