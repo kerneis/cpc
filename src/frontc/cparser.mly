@@ -939,6 +939,12 @@ statement:
 /*|   CPC_FORK statement   { CPC_FORK ($2, (*handleLoc*) $1)} */
 |   CPC_WAIT LPAREN expression RPAREN SEMICOLON
                         { CPC_WAIT(fst $3, (*handleLoc*) $1) }
+/* cpc_wait accepts a timeout, handled via cpc_sleep with a condition
+ * variable */
+|   CPC_WAIT LPAREN expression COMMA expression RPAREN SEMICOLON
+                        { CPC_SLEEP(fst $5, NOTHING, fst $3, (*handleLoc*) $1) }
+|   CPC_WAIT LPAREN expression COMMA expression COMMA expression RPAREN SEMICOLON
+                        { CPC_SLEEP(fst $5, fst $7, fst $3, (*handleLoc*) $1) }
 |   CPC_SLEEP LPAREN expression RPAREN SEMICOLON
                         { CPC_SLEEP(fst $3, NOTHING, NOTHING, (*handleLoc*) $1) }
 |   CPC_SLEEP LPAREN expression COMMA expression RPAREN SEMICOLON
