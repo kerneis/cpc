@@ -28,7 +28,7 @@ let trace = Trace.trace "cpc"
 
 (* recursing into vtype is very expensive in terms of memory allocation,
    and thus time spent in the GC. We try as much as possible to use this
-   customized base visitor, which avoid this pitfall.
+   customized base visitor, which avoids this pitfall.
    WARNING: vtype goes into attributes and TArray, both of them
    containing expressions, and thus variables. So, do NOT use this
    visitor if you need to inspect and/or change expressions or
