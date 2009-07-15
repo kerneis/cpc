@@ -682,10 +682,15 @@ class cpsConverter = fun file ->
         mkCast (sizeOf typ) size_t],
         locUnknown)]
     in
-  let cpc_schedule = find_function "cpc_schedule" file in
-  let schedule cc =
-    (* cpc_schedule(cc); *)
-    [Call(None,Lval(Var cpc_schedule, NoOffset),
+  let cpc_spawn = find_function "cpc_prim_spawn" file in
+  let spawn cc =
+    (* cpc_prim_spawn(cc); *)
+    [Call(None,Lval(Var cpc_spawn, NoOffset),
+      [Lval(Var cc, NoOffset)],locUnknown)] in
+  let cpc_yield = find_function "cpc_prim_yield" file in
+  let yield cc =
+    (* cpc_prim_yield(cc); *)
+    [Call(None,Lval(Var cpc_yield, NoOffset),
       [Lval(Var cc, NoOffset)],locUnknown)] in
   let cpc_continuation_free = find_function "cpc_continuation_free" file in
   let continuation_free cc =
@@ -753,7 +758,7 @@ class cpsConverter = fun file ->
         [(* apply_later = (void* ) 0; *)
         Set((Var var, NoOffset),
           mkCast (integer 0) cpc_cont_ptr,locUnknown)],
-        schedule var
+        spawn var
       else (current_continuation,[],[]) in
     match i with
     (* Cps call with or without assignment (we don't care at this level) *)
@@ -811,7 +816,7 @@ class cpsConverter = fun file ->
        cpc_construct. *)
     match List.rev stack with
     | {skind=CpcCut (Yield, _)} :: l ->
-        convert l @ debug "cpc_yield" @ schedule current_continuation
+        convert l @ debug "cpc_yield" @ yield current_continuation
     | {skind=CpcCut (Attach e, _)} :: l ->
         convert l @ attach e current_continuation
     | {skind=CpcCut (Detach e, _)} :: l ->

@@ -568,24 +568,31 @@ cpc_threadpool_release(struct nft_pool *pool)
 /*** cpc_yield and cpc_spawn ***/
 
 void
-cpc_schedule(struct cpc_continuation *cont)
+cpc_prim_yield(struct cpc_continuation *cont)
 {
-    assert(cont);
-    if(IS_DETACHED)
-        if(cont->state == STATE_UNKNOWN)
-            /* spawn in detached mode */
-            cpc_prim_attach(cont);
-        else {
-            /* yield in detached mode */
-            assert(cont->state == STATE_DETACHED);
-            cpc_invoke_continuation(cont);
-        }
-    else {
-        assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+    if(cont->state == STATE_DETACHED) {
+        assert(IS_DETACHED);
+        cpc_invoke_continuation(cont);
+    } else {
+        assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
+                cont->condvar == NULL);
         enqueue(&ready, cont);
         if(loop)
             ev_idle_start(loop, &run);
-     }
+    }
+}
+
+void
+cpc_prim_spawn(struct cpc_continuation *cont)
+{
+    assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+    if(IS_DETACHED)
+        cpc_prim_attach(cont);
+    else {
+        enqueue(&ready, cont);
+        if(loop)
+            ev_idle_start(loop, &run);
+    }
 }
 
 /*** Executing continuations with trampolines ***/

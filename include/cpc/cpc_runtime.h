@@ -115,7 +115,8 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
   return;
 }
 
-extern void cpc_schedule(struct cpc_continuation *cont);
+extern void cpc_prim_spawn(struct cpc_continuation *cont);
+extern void cpc_prim_yield(struct cpc_continuation *cont);
 extern void cpc_main_loop(void);
 extern void cpc_prim_sleep(int, int, cpc_condvar*, cpc_continuation*);
 extern void print_continuation(struct cpc_continuation *c, char *s);
