@@ -62,7 +62,11 @@ void
 cpc_print_continuation(struct cpc_continuation *c, char *s)
 {
     int i = 0;
-    fprintf(stderr,"(%s) At %p %lu:\n%p\t%p\t%p\t%p\t%d\t%u\t%u\n",s,c,
+    if (c == NULL) {
+        fprintf(stderr, "(%s) NULL continuation\n", s);
+        return;
+    }
+    fprintf(stderr, "(%s) At %p %lu:\n%p\t%p\t%p\t%p\t%d\t%u\t%u\n",s,c,
     sizeof(cpc_function*),
     c->next,c->condvar,c->cond_next,c->ready,c->state,c->length,c->size);
     while(i < c->length) {
