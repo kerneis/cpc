@@ -480,8 +480,8 @@ io_cb(struct ev_loop *loop, ev_io *w, int revents)
 void
 cpc_prim_attach(cpc_continuation *cont)
 {
-    if(!IS_DETACHED) {
-        assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+    if(cont->state == STATE_UNKNOWN) {
+        assert(!IS_DETACHED && cont->condvar == NULL);
         cpc_invoke_continuation(cont);
         return;
     }
