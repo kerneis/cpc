@@ -683,10 +683,12 @@ class cpsConverter = fun file ->
         locUnknown)]
     in
   let cpc_spawn = find_function "cpc_prim_spawn" file in
-  let spawn cc =
-    (* cpc_prim_spawn(cc); *)
-    [Call(None,Lval(Var cpc_spawn, NoOffset),
-      [Lval(Var cc, NoOffset)],locUnknown)] in
+  let spawn cc context =
+    (* cpc_prim_spawn(cc, context); *)
+    [Call(None,Lval(Var cpc_spawn, NoOffset), [
+      Lval(Var cc, NoOffset);
+      context
+      ],locUnknown)] in
   let cpc_yield = find_function "cpc_prim_yield" file in
   let yield cc =
     (* cpc_prim_yield(cc); *)
@@ -747,6 +749,7 @@ class cpsConverter = fun file ->
   val mutable struct_map = []
   val mutable newarglist_map = []
   val mutable current_continuation = makeVarinfo false "dummyVar" voidType
+  val mutable cps_function = false
 
 
   method private convert_instr ?(apply_later=false) i =
@@ -758,7 +761,11 @@ class cpsConverter = fun file ->
         [(* apply_later = (void* ) 0; *)
         Set((Var var, NoOffset),
           mkCast (integer 0) cpc_cont_ptr,locUnknown)],
-        spawn var
+        spawn
+          var
+          (if cps_function
+          then Lval(Var current_continuation, NoOffset)
+          else mkCast (integer 0) voidPtrType)
       else (current_continuation,[],[]) in
     match i with
     (* Cps call with or without assignment (we don't care at this level) *)
@@ -945,6 +952,7 @@ class cpsConverter = fun file ->
       current_continuation <- begin match fd.sformals with
         | [x] -> x
         | _ -> assert false end;
+      cps_function <- true;
       fd.sbody.bstmts <-
         mkStmt(Instr (
           (* XXX DEBUGING *)
@@ -969,6 +977,9 @@ class cpsConverter = fun file ->
         :: fd.sbody.bstmts;
       fd.svar.vcps <- false; (* this is not a cps function anymore *)
       ChangeDoChildrenPost([g], fun g -> assert(stack=[]); g)
+  | GFun _ ->
+      cps_function <- false;
+      DoChildren
   | _ -> DoChildren
 end
 

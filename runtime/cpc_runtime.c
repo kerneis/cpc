@@ -587,12 +587,20 @@ cpc_prim_yield(struct cpc_continuation *cont)
 }
 
 void
-cpc_prim_spawn(struct cpc_continuation *cont)
+cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
 {
     assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
-    if(IS_DETACHED)
+    /* If context is NULL, we have to perform a syscall to know if we
+     * are detached or not */
+    if(context == NULL && IS_DETACHED)
         cpc_prim_attach(cont);
+    /* Otherwise, trust the context */
+    else if (context && context->state == STATE_DETACHED) {
+        assert(IS_DETACHED);
+        cpc_prim_attach(cont);
+    }
     else {
+        assert(!IS_DETACHED);
         enqueue(&ready, cont);
         if(loop)
             ev_idle_start(loop, &run);
