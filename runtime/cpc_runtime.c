@@ -660,3 +660,9 @@ cpc_main_loop(void)
 
     nft_pool_destroy(thread_pool);
 }
+
+double
+cpc_now(void)
+{
+    return ((double) ev_now(loop));
+}

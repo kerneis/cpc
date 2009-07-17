@@ -134,3 +134,5 @@ extern void cpc_prim_attach(cpc_continuation*);
 extern void cpc_prim_detach(struct nft_pool*, cpc_continuation*);
 extern cpc_threadpool *cpc_threadpool_get(int);
 extern void cpc_threadpool_release(cpc_threadpool *);
+
+extern double cpc_now(void);
