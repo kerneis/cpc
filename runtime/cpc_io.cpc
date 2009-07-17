@@ -20,7 +20,9 @@ cpc_setup_descriptor(int fd, int nonagle)
     if(rc < 0) return -1;
     rc = fcntl(fd, F_SETFL, rc | O_NONBLOCK);
     if(rc < 0) return -1;
-    rc = setsockopt(fd, SOL_TCP, TCP_NODELAY, (char*)&one, sizeof(one));
+    if(nonagle)
+        rc = setsockopt(fd, SOL_TCP, TCP_NODELAY, (char*)&one, sizeof(one));
+    if(rc < 0) return -1;
     return 1;
 }
 
