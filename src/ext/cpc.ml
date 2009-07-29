@@ -976,7 +976,7 @@ class cpsConverter = fun file ->
           )  args arglist_struct.cfields)))
         :: fd.sbody.bstmts;
       fd.svar.vcps <- false; (* this is not a cps function anymore *)
-      ChangeDoChildrenPost([g], fun g -> assert(stack=[]); g)
+      ChangeDoChildrenPost([g], fun g -> stack <- []; g)
   | GFun _ ->
       cps_function <- false;
       DoChildren
