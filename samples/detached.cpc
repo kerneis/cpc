@@ -9,8 +9,9 @@ g(char c)
 
     for(i = 0; i < 10; i++) {
         cpc_detached {
-            // forbidden_label:
+            forbidden_label:
             f();
+            // continue;
             cpc_spawn { printf("%c has been there\n", c); }
             if(i==9)
               goto end;
@@ -19,12 +20,52 @@ g(char c)
                 cpc_attached f();
             if(i == 8 && c == 'b')
                 return;
+            // forbidden break
+            // break;
         }
         f();
     }
     end: printf("This is the end of %c.\n", c);
 }
 
+cps void
+clock ()
+{
+    int i;
+
+    for(i=0; i < 10; i++) {
+        printf("Tic!\n");
+        cpc_sleep(0,500);
+    }
+}
+
+cps void
+test_gotos ()
+{
+    
+    cpc_spawn clock ();
+    cpc_yield;
+
+    cpc_detached {
+        printf("test_gotos: detached.\n");
+        goto attlab;
+        detlab:
+        printf("test_gotos: detlab.\n");
+        sleep(1);
+    }
+
+    printf("Back in normal (attached) mode.\n");
+    cpc_detach;
+
+    cpc_attached {
+        printf("test_gotos: attached and quit.\n");
+        return;
+        attlab:
+        printf("test_gotos: attlab.\n");
+        sleep(1);
+        goto detlab;
+    }
+}
 
 int
 main()
@@ -44,20 +85,6 @@ main()
     }
     cpc_spawn
     {
-        printf("C va dormir.\n");
-        while(1)
-            cpc_detached
-            {
-                printf("C est detaché !\n");
-                break;
-            }
-        // We should be attached here, but break are not
-        // handled properly, so we are still detached in fact.
-        sleep(1);
-        printf("C s'est réveillé.\n");
-    }
-    cpc_spawn
-    {
         printf("D1.\n");
         cpc_detach; cpc_detach;
         printf("D2.\n");
@@ -65,6 +92,7 @@ main()
         cpc_attach; cpc_attach; cpc_attach;
         printf("D3.\n");
     }
+    cpc_spawn test_gotos();
     cpc_main_loop();
     return 0;
 }
