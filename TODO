@@ -8,15 +8,13 @@
   => I think one should lambda-lift CpcFun before using it anyway.
      It is used in src/frontc/cabs2cil.ml too, but there is no
      local functions at this stage.
-* Add support for __builtin_va_arg_pack (and others?)
-  => [http://gcc.gnu.org/onlinedocs/gcc/Constructing-Calls.html#Constructing-Calls]
 
 [src/ext/...]
 * Check and correct the rough support of cpc constructs
 
 [src/ext/cfg.ml]
 * Check local functions support.
-  => look quite good, but who knows?
+  => looks quite good, but who knows?
 
 [src/ext/cpc.ml]
 * Improve xform_switch_stmt (needless to eliminate inner loops)
@@ -48,8 +46,14 @@
 
 [src/frontc/cabs2cil.ml]
 * check transformation of CPC_FUN (scoping, globals, etc.)
+* Remember if we are in a switch statement, and handle BREAK accordingly
+  (make a distinction between loops and switch)
+  => is it worth the trouble?
 
 [src/check.ml]
 * do the right thing with CpcFun (there is much more to save and restore
   than the few global references I deal with --- hashtables, startEnv(),
   etc.)
+
+[samples/detached.cpc]
+* Rewrite from scratch to test the various features.
