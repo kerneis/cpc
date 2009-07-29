@@ -1019,9 +1019,11 @@ module BlockChunk =
     let gotoChunk (ln: string) (l: location) : chunk = 
       (* The hole will hold cpc_attach or cpc_detach if necessary.
          It will be filled in resolveGotos. It must not be an Instr,
-         otherwise compactStmts might modify it, so we picked up
-         cpc_attach instead. *)
-      let hole = mkStmt (CpcCut(Attach null, locUnknown)) in
+         otherwise compactStmts might modify it, and it must not be
+         duplicated by duplicateChunk. An empty loop seems to be a good
+         choice.
+         *)
+      let hole = mkStmt (Loop (mkBlock [], locUnknown, None, None)) in
       let gref = ref dummyStmt in
       addGoto ln (gref, ref hole, !detachedState);
       { stmts = [ hole ; mkStmt (Goto(gref, l)) ];
