@@ -1456,6 +1456,8 @@ class functionalizeGoto start file =
       let label = match List.find is_label start.labels with
         | Label(l,_,_) -> l | _ -> assert false in
       let fd = emptyFunction (make_function_name label) in
+      (* the return type of the functionalized chunk *)
+      let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
       let () = fd.svar.vcps <- true in
       object(self)
         inherit mynopCilVisitor
@@ -1466,31 +1468,21 @@ class functionalizeGoto start file =
         final goto must be added there when we're done accumulating *)
         val mutable new_start = dummyStmt; (* copy of start in the stack
         -- probably useless, should be equal to last stmt in stack *)
-        (* the return type, if any, of the functionalized chunk
-           XXX To keep a syntactically correct code in intermediate
-           steps, we consider that EVERY chunk returns, hence the
-           following ret_type: *)
-        val mutable ret_type =
-            Some (fst4 (splitFunctionTypeVI enclosing_fun.svar));
 
 
 
         method private unstack_block b =
           let compute_returns s =
-            begin match ret_type with
-              (* the chunk doesn't return *)
-              | None -> None, None
-              (* the chunk returns void *)
-              | Some r when typeSig r = typeSig voidType -> None, None
-              | Some ret_type ->
-                  let f = enclosing_function s file in
-                  let v = make_ret_var f ret_type in
-                  let ret_val = Var v, NoOffset in
-                  (Some ret_val, Some (Lval ret_val))
-            end in
+            if typeSig ret_type = typeSig voidType
+            then None, None
+            else
+              let f = enclosing_function s file in
+              let v = make_ret_var f ret_type in
+              let ret_val = Var v, NoOffset in
+              (Some ret_val, Some (Lval ret_val))
+            in
           let args =
-          (match ret_type with None -> ()
-          | Some typ -> setFunctionType fd (TFun (typ,Some [],false,[])));
+          setFunctionType fd (TFun (ret_type,Some [],false,[]));
           match last_var with
           | None -> []
           | Some v -> setFormals fd [v]; [Lval(Var v, NoOffset)] in
@@ -1519,14 +1511,10 @@ class functionalizeGoto start file =
         method vstmt (s: stmt) : stmt visitAction =
           last_stmt <- s;
           if s == start then acc <- true;
-          (if acc then match has_return s, ret_type with
-          | None, _ -> ()
-          | Some r, None when
-              typeSig (fst4 (splitFunctionTypeVI enclosing_fun.svar))
-              = typeSig r ->
-                ret_type <- Some r;
-          | Some r, Some r' when typeSig r = typeSig r' -> ()
-          | _, _ -> E.s (E.error "conflicting return types"));
+          (if acc then match has_return s with
+          | None -> ()
+          | Some r when typeSig r = typeSig ret_type -> ()
+          | _ -> E.s (E.error "conflicting return types"));
           ChangeDoChildrenPost(s,
           (fun s ->
             if acc then
