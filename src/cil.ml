@@ -3882,16 +3882,14 @@ class defaultCilPrinterClass : cilPrinter = object (self)
     | CpcCut (Attach e, l) ->
         self#pLineDirective l
           ++ text "cpc_attach"
-          ++ (align
-                ++ text " ("
+          ++ (text " ("
                 ++ self#pExp () e
                 ++ text ");")
 
     | CpcCut (Detach e, l) ->
         self#pLineDirective l
           ++ text "cpc_detach"
-          ++ (align
-                ++ text " ("
+          ++ (text " ("
                 ++ self#pExp () e
                 ++ text ");")
 
@@ -3909,16 +3907,14 @@ class defaultCilPrinterClass : cilPrinter = object (self)
     | CpcWait(e, l) ->
         self#pLineDirective l
           ++ text "cpc_wait"
-          ++ (align
-                ++ text " ("
+          ++ (text " ("
                 ++ self#pExp () e
                 ++ text ");")
 
     | CpcSleep(e1, e2, e3, l) ->
         self#pLineDirective l
           ++ text "cpc_sleep"
-          ++ (align
-                ++ text " ("
+          ++ (text " ("
                 ++ self#pExp () e1
                 ++ text ", "
                 ++ self#pExp () e2
@@ -3929,8 +3925,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
     | CpcIoWait(e1, e2, e3, l) ->
         self#pLineDirective l
           ++ text "cpc_io_wait"
-          ++ (align
-                ++ text " ("
+          ++ (text " ("
                 ++ self#pExp () e1
                 ++ text ", "
                 ++ self#pExp () e2
