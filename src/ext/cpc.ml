@@ -1466,10 +1466,6 @@ class functionalizeGoto start file =
         val mutable stack = []
         val mutable last_stmt = dummyStmt; (* last stmt processed -- the
         final goto must be added there when we're done accumulating *)
-        val mutable new_start = dummyStmt; (* copy of start in the stack
-        -- probably useless, should be equal to last stmt in stack *)
-
-
 
         method private unstack_block b =
           let compute_returns s =
@@ -1493,34 +1489,30 @@ class functionalizeGoto start file =
             [mkStmt (Instr
               [Call(return_val,Lval(Var fd.svar, NoOffset),args,loc)]);
             mkStmt (Return (return_exp, loc))] in
+
           acc <- false;
           fd.sbody <- mkBlock (List.rev stack);
           stack <- [];
-          (* Trick: split in two step to make b.bstmts available as a
+          (* Trick: split in two steps to make b.bstmts available as a
           self reference for call_fun  --- DO NOT MERGE! *)
           b.bstmts <- [ mkStmt (Block (mkBlock(b.bstmts)));
               mkStmt (CpcFun (fd, locUnknown))];
           b.bstmts <- compactStmts
             (b.bstmts @ call_fun (List.hd b.bstmts));
-          assert(new_start != dummyStmt);
-          assert(new_start == List.hd fd.sbody.bstmts);
-          assert(List.for_all is_label new_start.labels); (*No Case or Default*)
-          visitCilFileSameGlobals (new replaceGotos new_start call_fun) file;
-          new_start.labels <- []
+          let start = List.hd fd.sbody.bstmts in
+          (* Replace every goto to the start of fd by a call to fd. *)
+          visitCilFileSameGlobals (new replaceGotos start call_fun) file;
+          assert(List.for_all is_label start.labels); (* No Case or Default *)
+          start.labels <- []
 
         method vstmt (s: stmt) : stmt visitAction =
           last_stmt <- s;
-          if s == start then acc <- true;
-          (if acc then match has_return s with
-          | None -> ()
-          | Some r when typeSig r = typeSig ret_type -> ()
-          | _ -> E.s (E.error "conflicting return types"));
+          if s == start then (assert(stack = []); acc <- true);
           ChangeDoChildrenPost(s,
           (fun s ->
             if acc then
               ( let copy = copyClearStmt s file stack in
                 stack <- copy :: stack;
-                if s == start then new_start <- copy;
                s)
             else s))
 
@@ -1547,10 +1539,11 @@ class functionalizeGoto start file =
               | {skind=CpcCut (Done, _)} :: _ , _, _ ->
                   self#unstack_block b; b
               | last_in_stack :: _, _, _ ->
-                  (* XXX this works only because we do not modify *any*
+                  (* XXX this works only because we do not change *any*
                    * statement while visiting the file --- otherwise
                    * the destination label is somehow deleted when
-                   * returning from vblock. *)
+                   * returning from vblock. Updating in place is OK of
+                   * course. *)
                   self#unstack_block b;
                   add_goto_after last_in_stack enclosing file stack;
                   b
