@@ -1443,12 +1443,78 @@ class hasReturn = object(self)
   | _ -> DoChildren
 end
 
-(* return the type of the first Return in a statement *)
-let has_return s =
-  try
-    ignore(visitCilStmt (new hasReturn) s);
-    None
-  with FoundType t -> Some t
+
+(***** From src/frontc/cabs2cil.ml ******)
+
+let rec stmtFallsThrough (s: stmt) : bool = 
+  match s.skind with
+    Instr _ -> true (* conservative, ignoring exit() etc. *)
+  | Return _ | Break _ | Continue _ -> false
+  | Goto _ -> false
+  | If (_, b1, b2, _) -> 
+      blockFallsThrough b1 || blockFallsThrough b2
+  | Switch (e, b, targets, _) -> 
+       (* See if there is a "default" case *)
+       if not 
+          (List.exists (fun s -> 
+             List.exists (function Default _ -> true | _ -> false)
+                          s.labels)
+                       targets) then begin
+          true (* We fall through because there is no default *)
+       end else begin
+          (* We must examine all cases. If any falls through, 
+           * then the switch falls through. *)
+          blockFallsThrough b || blockCanBreak b
+       end
+  | Loop (b, _, _, _) -> 
+      (* A loop falls through if it can break. *)
+      blockCanBreak b
+  | Block b -> blockFallsThrough b
+  | TryFinally (b, h, _) -> blockFallsThrough h
+  | TryExcept (b, _, h, _) -> true (* Conservative *)
+  | CpcCut (Done, _) -> false
+  | CpcCut _ | CpcSpawn _
+  (*| CpcFork _*) | CpcWait _ | CpcFun _
+  | CpcSleep _ | CpcIoWait _ -> true
+and blockFallsThrough b = 
+  let rec fall = function
+      [] -> true
+    | s :: rest -> 
+        if stmtFallsThrough s then begin
+            fall rest
+        end else begin
+          (* If we are not falling thorough then maybe there 
+          * are labels who are *)
+            labels rest
+        end
+  and labels = function
+      [] -> false
+        (* We have a label, perhaps we can jump here *)
+      | s :: rest when s.labels <> [] -> 
+         fall (s :: rest)
+      | _ :: rest -> labels rest
+  in
+  let res = fall b.bstmts in
+  res
+(* will we leave this statement or block with a break command? *)
+and stmtCanBreak (s: stmt) : bool = 
+  match s.skind with
+    Instr _ | Return _ | Continue _ | Goto _ -> false
+  | Break _ -> true
+  | If (_, b1, b2, _) -> 
+      blockCanBreak b1 || blockCanBreak b2
+  | Switch _ | Loop _ -> 
+      (* switches and loops catch any breaks in their bodies *)
+      false
+  | Block b -> blockCanBreak b
+  | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
+  | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
+  | CpcCut _ | CpcSpawn _
+  (*| CpcFork _*) | CpcWait _ | CpcFun _
+  | CpcSleep _ | CpcIoWait _ -> false
+and blockCanBreak b = 
+  List.exists stmtCanBreak b.bstmts
+(***** End of code from cabs2cil.ml *****)
 
 class functionalizeGoto start file =
       let enclosing_fun = enclosing_function start file in
@@ -1508,22 +1574,23 @@ class functionalizeGoto start file =
         method vstmt (s: stmt) : stmt visitAction =
           last_stmt <- s;
           if s == start then (assert(stack = []); acc <- true);
-          ChangeDoChildrenPost(s,
-          (fun s ->
-            if acc then
-              ( let copy = copyClearStmt s file stack in
-                stack <- copy :: stack;
-               s)
-            else s))
+          if acc then begin
+            let copy = copyClearStmt s file stack in
+            stack <- copy :: stack;
+            if not (stmtFallsThrough copy)
+            then acc <- false; (* stop accumulating on return, etc. *)
+            SkipChildren end
+          else
+            DoChildren
 
         method vblock (b: block) : block visitAction =
-          let old_acc = acc in
+          assert(acc = false);
           let enclosing = last_stmt in
           ChangeDoChildrenPost(
-            (acc <- false; b),
+            b,
             (fun b ->
               last_stmt <- enclosing;
-              if acc
+              if stack <> []
               (* Do NOT compactStmts the stack!
                  [i1;i2];[i3;i4] becomes [i3;i4];[i1;i2] on the stack,
                  and is compacted to [i3;i4;i1;i2] which messes with
@@ -1533,22 +1600,28 @@ class functionalizeGoto start file =
               (* Loops should have been trivialized first, and stack should
                * contain at least the <start> stmt *)
               | [], _, _ | _, _, Loop _ -> assert false
-              | _, [], _
               | _, _, CpcFun _
-              | {skind=Return _} :: _ , _, _
-              | {skind=CpcCut (Done, _)} :: _ , _, _ ->
-                  self#unstack_block b; b
+              | _, [], _ ->
+                  self#unstack_block b
+              | s :: _ , _, _ when not (stmtFallsThrough s) ->
+                  (* not falling through the end of stack, so adding a
+                  goto is useless. *)
+                  assert(acc = false);
+                  self#unstack_block b
               | last_in_stack :: _, _, _ ->
                   (* XXX this works only because we do not change *any*
                    * statement while visiting the file --- otherwise
                    * the destination label is somehow deleted when
                    * returning from vblock. Updating in place is OK of
                    * course. *)
+                  assert(acc = true);
                   self#unstack_block b;
                   add_goto_after last_in_stack enclosing file stack;
-                  b
-              end
-              else (acc <- old_acc ; b)))
+              end;
+              assert(acc = false && stack = []);
+              b
+            )
+         )
 end
 
 exception BreakContinue of stmt
