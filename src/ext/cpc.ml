@@ -1577,8 +1577,16 @@ class functionalizeGoto start file =
           if acc then begin
             let copy = copyClearStmt s file stack in
             stack <- copy :: stack;
-            if not (stmtFallsThrough copy)
-            then acc <- false; (* stop accumulating on return, etc. *)
+            (* Do NOT stop accumulating as early as possible: we want
+            bigger functions to maximize the odds to keep gotos and
+            labels in the same function, preventing live gotos which
+            would create still more functions.
+            So the following code is actually a BAD idea:
+              if not (stmtFallsThrough copy)
+              then acc <- false;
+            OTOH, we check below the fallsthroughness of the last
+            statement, just in case, to avoid useless gotos.
+            *)
             SkipChildren end
           else
             DoChildren
@@ -1606,7 +1614,6 @@ class functionalizeGoto start file =
               | s :: _ , _, _ when not (stmtFallsThrough s) ->
                   (* not falling through the end of stack, so adding a
                   goto is useless. *)
-                  assert(acc = false);
                   self#unstack_block b
               | last_in_stack :: _, _, _ ->
                   (* XXX this works only because we do not change *any*
@@ -1614,7 +1621,6 @@ class functionalizeGoto start file =
                    * the destination label is somehow deleted when
                    * returning from vblock. Updating in place is OK of
                    * course. *)
-                  assert(acc = true);
                   self#unstack_block b;
                   add_goto_after last_in_stack enclosing file stack;
               end;
