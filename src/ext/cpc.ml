@@ -774,7 +774,9 @@ class cpsConverter = fun file ->
          cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
         Call (
           Some(Var cc , NoOffset),
-          List.assoc f newarglist_map,
+          (try List.assoc f newarglist_map
+          with Not_found -> E.s (E.bug "newarglist for \
+          function %s not found" f.vname)),
           args@[Lval(Var cc, NoOffset)],
           locUnknown
         );
