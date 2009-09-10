@@ -1559,17 +1559,15 @@ class functionalizeGoto start file =
           acc <- false;
           fd.sbody <- mkBlock (List.rev stack);
           stack <- [];
-          (* Trick: split in two steps to make b.bstmts available as a
-          self reference for call_fun  --- DO NOT MERGE! *)
-          b.bstmts <- [ mkStmt (Block (mkBlock(b.bstmts)));
-              mkStmt (CpcFun (fd, locUnknown))];
+          start.skind <- Block (mkBlock (call_fun start));
           b.bstmts <- compactStmts
-            (b.bstmts @ call_fun (List.hd b.bstmts));
-          let start = List.hd fd.sbody.bstmts in
+             [mkStmt (Block (mkBlock(b.bstmts)));
+              mkStmt (CpcFun (fd, locUnknown))];
+          let start_copy = List.hd fd.sbody.bstmts in
           (* Replace every goto to the start of fd by a call to fd. *)
-          visitCilFileSameGlobals (new replaceGotos start call_fun) file;
-          assert(List.for_all is_label start.labels); (* No Case or Default *)
-          start.labels <- []
+          visitCilFileSameGlobals (new replaceGotos start_copy call_fun) file;
+          assert(List.for_all is_label start_copy.labels); (* No Case or Default *)
+          start_copy.labels <- []
 
         method vstmt (s: stmt) : stmt visitAction =
           last_stmt <- s;
