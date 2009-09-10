@@ -1516,6 +1516,13 @@ and blockCanBreak b =
   List.exists stmtCanBreak b.bstmts
 (***** End of code from cabs2cil.ml *****)
 
+(* goto_method:
+   0 = add gotos everywhere at the end functionalized blocks
+   1 = add gotos only when the last block can be fallen through (DEFAULT)
+   2 = make functionalized blocks as short as possible, stopping at the
+       first we can't be fallen through. *)
+let goto_method = ref 1
+
 class functionalizeGoto start file =
       let enclosing_fun = enclosing_function start file in
       let last_var = find_last_var start file in
@@ -1579,12 +1586,10 @@ class functionalizeGoto start file =
             bigger functions to maximize the odds to keep gotos and
             labels in the same function, preventing live gotos which
             would create still more functions.
-            So the following code is actually a BAD idea:
-              if not (stmtFallsThrough copy)
-              then acc <- false;
-            OTOH, we check below the fallsthroughness of the last
-            statement, just in case, to avoid useless gotos.
-            *)
+            So the following code is actually a BAD idea, and the user
+            should chose it explicitly with --goto: *)
+            if !goto_method = 2 && not (stmtFallsThrough copy)
+            then acc <- false;
             SkipChildren end
           else
             DoChildren
@@ -1608,10 +1613,15 @@ class functionalizeGoto start file =
               | [], _, _ | _, _, Loop _ -> assert false
               | _, _, CpcFun _
               | _, [], _ ->
+                  (* if we don't have any successor, or if we are at the
+                     end of a local function, adding a goto is
+                     impossible. *)
                   self#unstack_block b
-              | s :: _ , _, _ when not (stmtFallsThrough s) ->
+              | s :: _ , _, _ when (!goto_method = 1 || !goto_method = 2) &&
+                  not (stmtFallsThrough s) ->
                   (* not falling through the end of stack, so adding a
-                  goto is useless. *)
+                  goto is useless. --goto 0 disables this crucial
+                  optimization *)
                   self#unstack_block b
               | last_in_stack :: _, _, _ ->
                   (* XXX this works only because we do not change *any*
@@ -1704,6 +1714,7 @@ let rec functionalize start f =
 let pause = ref false
 let stage = ref max_int
 let set_stage x = stage := x
+let set_goto x = goto_method := min (max x 0) 2
 
 let rec cps_marking f =
   try
@@ -1803,6 +1814,7 @@ let feature : featureDescr =
     fd_extraopt =
       [("--stage",Arg.Int set_stage,"<n> how far you want to go");
        ("--pause",Arg.Set pause," step by step execution");
+       ("--goto", Arg.Int set_goto, "<n> how to convert gotos (0-2)");
        ("--external-patch",Arg.Set external_patch," call \
        cpc_continuation_patch from the runtime library")];
     fd_doit = doit;
