@@ -1172,17 +1172,31 @@ end
 
 (********************* Remove identity function ******************************)
 
-class removeIdentity = fun file ->
-  let replaceVar fd fd' = visitCilFileSameGlobals (
+let removeIdentity = fun file ->
+  let replaced = ref [] in
+  let replaceVar (fd,fd') = visitCilFile (
     object(self)
       inherit nopCilVisitor (* do not use mynopCilVisitor, variables can
       be hidden in types *)
 
       method vvrbl v =
         if v = fd then ChangeTo fd' else SkipChildren
+
+      (* Add the protoype of fd' whenever we meet fd, in case the former
+         is defined after the latter in the file. *)
+      method vglob = function
+      | GVarDecl (v,loc) when v = fd ->
+        ChangeTo [GVarDecl (v, loc); GVarDecl (fd', loc)];
+      | GFun (f, loc) when f.svar = fd ->
+        ChangeDoChildrenPost (
+          [GVarDecl (fd', loc);
+           GFun (f, loc)
+          ],
+          fun x -> x)
+      | _ -> DoChildren
     end)
     file in
-  object(self)
+  visitCilFileSameGlobals (object(self)
   inherit mynopCilVisitor
 
   method vfunc fd =
@@ -1191,17 +1205,21 @@ class removeIdentity = fun file ->
     | {skind=Instr [Call(None,Lval(Var fd',NoOffset),args,_)]} ::
       {skind=Return(None,_)} :: _ when fd'.vcps &&
       args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
-        replaceVar fd.svar fd';
+        replaced :=  (fd.svar,fd')::!replaced;
         (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | {skind=Instr [Call(Some(l),Lval(Var fd',NoOffset),args,_)]} ::
       {skind=Return(Some(Lval l'),_)} :: _ when fd'.vcps && l=l' &&
       args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
-        replaceVar fd.svar fd';
+        replaced :=  (fd.svar,fd')::!replaced;
         (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | _ -> SkipChildren
-end
+   end)
+   file;
+   (* Delaying the replacement is necessary, otherwise the globals are
+      not inserted properly. *)
+   List.iter replaceVar !replaced
 
 (********************* Cleaning **********************************************)
 
@@ -1787,7 +1805,7 @@ let stages = [
   ("Lambda-lifting\n", fun file ->
   visitCilFile (new lambdaLifter) file;
   visitCilFileSameGlobals (new uniqueVarinfo) file;
-  visitCilFile (new removeIdentity file) file);
+  removeIdentity file);
   ("Cps conversion\n", fun file ->
   visitCilFile (new cpsConverter file) file);
   ("Cleaning things a bit\n", fun file ->
