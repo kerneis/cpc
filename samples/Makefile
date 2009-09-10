@@ -75,5 +75,5 @@ clean:
 	$(CPP) -x c $(CFLAGS) -include cpc/cpc_runtime.h \
 	  -o $@ $<
 .cpi.c:
-	$(CPC) $< --out $@
+	$(CPC) $(CPCOPTS) $< --out $@
 
