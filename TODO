@@ -23,6 +23,8 @@
   => print a more informative error message (or check it before)
 * in avoidAmpersand
   => what about arrays?
+* static variables in cps functions are probably broken
+  => box them all? make them global?
 * OPT: There is an inefficiency with return values:
   x = f(); return x; is converted to
   x = f(); w(x); return; with w(x){return x;}
