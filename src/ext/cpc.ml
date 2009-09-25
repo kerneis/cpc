@@ -1791,8 +1791,6 @@ let rec cps_marking f =
 let stages = [
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
-  ("Cleaning things a bit\n", fun file ->
-  visitCilFileSameGlobals (new cleaner) file);
   ("Avoid ampersand\n", fun file ->
   visitCilFileSameGlobals (new avoidAmpersand file) file);
   ("Remove nasty expressions\n", fun file ->
@@ -1811,8 +1809,6 @@ let stages = [
   removeIdentity file);
   ("Cps conversion\n", fun file ->
   visitCilFile (new cpsConverter file) file);
-  ("Cleaning things a bit\n", fun file ->
-  visitCilFileSameGlobals (new cleaner) file);
   ("Alpha-conversion\n", fun file ->
   uniqueVarNames file);
   ("Removing unused variables\n", fun file ->
@@ -1826,6 +1822,8 @@ let rec doit (f: file) =
         if !stage < n then raise Exit;
         trace (dprintf "Stage %d: %s" n descr);
         Stats.time descr step f;
+        Stats.time "Cleaning things a bit\n"
+          (visitCilFileSameGlobals (new cleaner)) f;
         n+1) 0 stages);
     trace (dprintf "Finished\n")
   with Exit -> E.log "Exit\n"
