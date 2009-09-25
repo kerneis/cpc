@@ -1734,9 +1734,23 @@ let rec functionalize start f =
 
 (*****************************************************************************)
 
+class printCfg = object(self)
+  inherit mynopCilVisitor
+
+  method vfunc fd =
+  if fd.svar.vcps then begin
+    Cfg.clearCFGinfo fd;
+    ignore(Cfg.cfgFun fd);
+    Cfg.printCfgFilename ("cfg/"^fd.svar.vname^".dot") fd
+  end; DoChildren
+end
+
+(*****************************************************************************)
+
 let pause = ref false
 let stage = ref max_int
 let set_stage x = stage := x
+let dumpcfg = ref false
 let set_goto x = goto_method := min (max x 0) 2
 
 let rec cps_marking f =
@@ -1807,6 +1821,9 @@ let stages = [
   visitCilFile (new lambdaLifter) file;
   visitCilFileSameGlobals (new uniqueVarinfo) file;
   removeIdentity file);
+  ("Dumping Cfg\n", fun file -> if !dumpcfg then begin
+  (try Unix.mkdir "cfg" 0o750 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
+  visitCilFileSameGlobals (new printCfg) file end);
   ("Cps conversion\n", fun file ->
   visitCilFile (new cpsConverter file) file);
   ("Alpha-conversion\n", fun file ->
@@ -1835,6 +1852,7 @@ let feature : featureDescr =
     fd_extraopt =
       [("--stage",Arg.Int set_stage,"<n> how far you want to go");
        ("--pause",Arg.Set pause," step by step execution");
+       ("--dumpcfg",Arg.Set dumpcfg," dump the cfg of cps functions in cfg/");
        ("--goto", Arg.Int set_goto, "<n> how to convert gotos (0-2)");
        ("--external-patch",Arg.Set external_patch," call \
        cpc_continuation_patch from the runtime library")];
