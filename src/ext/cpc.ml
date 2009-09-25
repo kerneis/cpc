@@ -25,6 +25,7 @@ let external_patch = ref false
 let (=) x y = (compare x y) = 0
 
 let trace = Trace.trace "cpc"
+let stats = Trace.trace "cpc_stats"
 
 (* recursing into vtype is very expensive in terms of memory allocation,
    and thus time spent in the GC. We try as much as possible to use this
@@ -792,7 +793,9 @@ class cpsConverter = fun file ->
 
   method private do_convert return =
     (* convert cps calls to cpc_push *)
-    let convert l = List.flatten
+    let convert l =
+      stats (dprintf "tails:%d\n" (List.length l));
+      List.flatten
         (List.rev_map
             (function
             | {skind=Instr l} ->List.flatten (List.rev_map self#convert_instr l)
