@@ -58,6 +58,9 @@ bin/cpc.asm.exe has the following useful options:
 --stage n           perform transformations up to stage n
 --pause             step by step cps marking [*]
 --tr cpc            print (a lot of) debug messages
+--tr cpc_stats      print some (raw) statistics
+--dumpcfg           creates a cfg directory and dump the control flow
+                    graph of every cps function in it (in .dot files)
 --debug debug       include debug printf in the generated code
 --out file          output file
 --external-patch    cpc_patch from cpc_runtime.h instead of inlining it
