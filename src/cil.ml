@@ -1342,8 +1342,8 @@ let compactStmts (b: stmt list) : stmt list =
     | ({skind=Instr il} as s) :: rest ->
         let ils = Clist.fromList il in
         if lastinstrstmt != dummyStmt && s.labels == [] &&
-          (* do not mix cps and non-cps stmts *)
-          s.cps = lastinstrstmt.cps then
+          (* do not mix cps and non-cps stmts, except in the empty case *)
+          (il = [] || s.cps = lastinstrstmt.cps) then
           compress lastinstrstmt (Clist.append lastinstrs ils) rest
         else
           finishLast (compress s ils rest)
