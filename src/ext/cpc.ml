@@ -559,11 +559,13 @@ class markCps = fun file -> object(self)
     | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ ->
         raise (AddGoto c)
 
-    (* cpc_spawn and internal functions are special cases: they can appear anywhere *)
+    (* cpc_spawn must NOT appear in cps context *)
+    | CpcSpawn _ when c.cps_con ->
+        raise (AddGoto c)
     | CpcSpawn _ ->
-        s.cps <- c.cps_con;
         self#set_next s;
         SkipChildren
+    (* Internal functions can appear anywhere *)
     | CpcFun _ -> (* saving and restoring context is done in vfunc *)
         ChangeDoChildrenPost
           (s, fun s -> s.cps <- c.cps_con; self#set_next ~set_last:false s; s)
