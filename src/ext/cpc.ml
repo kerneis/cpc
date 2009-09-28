@@ -24,6 +24,8 @@ let external_patch = ref false
 (* Avoid stack-overflow on recursive structures *)
 let (=) x y = (compare x y) = 0
 
+let (=>) a b = (not a)||b
+
 let trace = Trace.trace "cpc"
 let stats = Trace.trace "cpc_stats"
 
@@ -1686,8 +1688,7 @@ class findEnclosing = fun start -> object(self)
   val mutable check_loops = false
 
   method vstmt s =
-    (* check that (check_loops => seen_start) holds *)
-    assert((not check_loops) || seen_start);
+    assert(check_loops =>  seen_start);
     if s == start then (seen_start <- true; check_loops <- true);
     match s.skind with
     | Break _ | Continue _ when check_loops ->
