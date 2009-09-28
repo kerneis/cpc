@@ -17,7 +17,6 @@
   => looks quite good, but who knows?
 
 [src/ext/cpc.ml]
-* Improve xform_switch_stmt (needless to eliminate inner loops)
 * in CPS conversion, if there is a typo in a cpc_spawn, building fails
   with a Not_found error message
   => print a more informative error message (or check it before)
