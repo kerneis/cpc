@@ -489,9 +489,7 @@ cpc_prim_attach(cpc_continuation *cont)
         cpc_invoke_continuation(cont);
         return;
     }
-    if(cont->state == STATE_DETACHED)
-        cont->state = STATE_UNKNOWN;
-    else
+    if(cont->state != STATE_DETACHED)
         /* cont must be freed, but we have to attach it first, so that
          * the event loop doesn't wait for it forever. */
         assert(cont->state == STATE_GARBAGE);
@@ -514,8 +512,14 @@ attach_cb(struct ev_loop *loop, ev_async *w, int revents)
             ev_unref(loop);
             continue;
         }
-        assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
-        ev_unref(loop);
+        assert((c->state == STATE_UNKNOWN || c->state == STATE_DETACHED)
+            && c->condvar == NULL);
+        /* If the state is UNKNOWN, then the continuation comes from a
+         * cpc_spawn, and ev_unref must not be called. */
+        if(c->state == STATE_DETACHED) {
+            c->state = STATE_UNKNOWN;
+            ev_unref(loop);
+        }
         exhaust_ready(c);
     }
     pthread_mutex_unlock (&attach_mutex);
@@ -592,12 +596,19 @@ cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
     assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
     /* If context is NULL, we have to perform a syscall to know if we
      * are detached or not */
-    if(context == NULL && IS_DETACHED)
-        cpc_prim_attach(cont);
+    if(context == NULL && IS_DETACHED) {
+        pthread_mutex_lock (&attach_mutex);
+        enqueue(&attach_queue, cont);
+        pthread_mutex_unlock (&attach_mutex);
+        ev_async_send(loop, &attach_sig);
+    }
     /* Otherwise, trust the context */
     else if (context && context->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        cpc_prim_attach(cont);
+        pthread_mutex_lock (&attach_mutex);
+        enqueue(&attach_queue, cont);
+        pthread_mutex_unlock (&attach_mutex);
+        ev_async_send(loop, &attach_sig);
     }
     else {
         assert(!IS_DETACHED);
