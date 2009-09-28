@@ -1591,6 +1591,7 @@ class functionalizeGoto start file =
 
           acc <- false;
           fd.sbody <- mkBlock (List.rev stack);
+          stats (dprintf "goto_stack:%d\n" (List.length stack));
           stack <- [];
           start.skind <- Block (mkBlock (call_fun start));
           b.bstmts <- compactStmts
