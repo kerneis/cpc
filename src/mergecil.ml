@@ -1158,14 +1158,14 @@ begin
         67 + 83*(stmtListSum b.bstmts) + 97*(stmtListSum h.bstmts)
     | TryFinally (b, h, _) -> 
         103 + 113*(stmtListSum b.bstmts) + 119*(stmtListSum h.bstmts)
-    | CpcCut (Yield, _) -> 127
-    | CpcCut (Done, _) -> 131
     | CpcSpawn (_, _, _) -> 137
-    | CpcCut (Attach _, _) -> 149
-    | CpcCut (Detach _, _) -> 151
-    | CpcWait _ -> 157
-    | CpcSleep _ -> 163
-    | CpcIoWait _ -> 167
+    | CpcCut (_, Yield, _) -> 127
+    | CpcCut (_, Done, _) -> 131
+    | CpcCut (_, Attach _, _) -> 149
+    | CpcCut (_, Detach _, _) -> 151
+    | CpcCut (_, Wait _, _) -> 157
+    | CpcCut (_, Sleep _, _) -> 163
+    | CpcCut (_, IoWait _, _) -> 167
     | CpcFun (f, _) -> 173*(functionChecksum f)
   in
   

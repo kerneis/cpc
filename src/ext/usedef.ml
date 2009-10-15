@@ -196,15 +196,20 @@ let computeUseDefStmtKind ?(acc_used=VS.empty)
         List.iter (fun i -> ignore (visitCilInstr useDefVisitor i)) il
     | TryExcept _ | TryFinally _ -> ()
     | Block _ -> ()
-    | CpcWait (e, _) -> ve e
-    | CpcIoWait (e, e', e'', _)
-    | CpcSleep (e, e', e'', _) ->
-        ve e; ve e'; ve e''
+    | CpcFun (_, _) -> ()
     | CpcSpawn (e, el, _) ->
         ve e;
         List.iter ve el
-    | CpcFun (_, _)
-    | CpcCut _ -> ()
+    | CpcCut (ret, cut, _) ->
+        (match ret with
+        | None -> ()
+        | Some v -> ignore(useDefVisitor#vvrbl v));
+        match cut with
+        | Yield | Done -> ()
+        | Attach e | Detach e | Wait e -> ve e
+        | IoWait (e, e', e'')
+        | Sleep (e, e', e'') ->
+            ve e; ve e'; ve e''
   in
   !varUsed, !varDefs
 
@@ -245,10 +250,6 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
       !varUsed, !varDefs
   | TryExcept _ | TryFinally _ -> !varUsed, !varDefs
   | Block b -> handle_block b
-  | CpcWait (e, _) -> let _ = ve e in !varUsed, !varDefs
-  | CpcIoWait (e, e', e'', _)
-  | CpcSleep (e, e', e'', _) ->
-      let _ = ve e; ve e'; ve e'' in !varUsed, !varDefs
   | CpcSpawn (e, el, _) ->
       ve e;
       List.iter ve el;
@@ -256,7 +257,15 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
   | CpcFun (fd, _) ->
       E.warn "usedef: shall we really dive into CpcFun?\n";
       handle_block fd.sbody
-  | CpcCut _ -> !varUsed, !varDefs
+  | CpcCut (ret, cut, _) ->
+      (match ret with
+      | None -> ()
+      | Some v -> ignore(useDefVisitor#vvrbl v));
+      match cut with
+      | Yield | Done -> !varUsed, !varDefs
+      | Attach e | Detach e | Wait e -> let _ = ve e in !varUsed, !varDefs
+      | IoWait (e, e', e'') | Sleep (e, e', e'') ->
+          let _ = ve e; ve e'; ve e'' in !varUsed, !varDefs
 
 let computeUseLocalTypes ?(acc_used=VS.empty)
                          (fd : fundec)

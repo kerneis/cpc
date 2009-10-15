@@ -774,19 +774,8 @@ and checkStmt (s: stmt) =
           checkBlock h
 
       | Instr il -> List.iter checkInstr il
-      | CpcCut _ -> ()
-      | CpcSpawn (e, el, l) (*| CpcFork (s, _)*) ->
+      | CpcSpawn (e, el, l) ->
           checkInstr(Call(None,e,el,l))
-      | CpcWait (e, _) -> ignore(checkExp false e)
-                          (* do not check the type of condition variables *)
-      | CpcSleep (e, e', e'', _) ->
-          checkExpType false e intType;
-          checkExpType false e' intType;
-          ignore(checkExp false e'')
-      | CpcIoWait (e, e', e'', _) ->
-          ignore(checkExp false e);
-          ignore(checkExp false e');
-          ignore(checkExp false e'')
       | CpcFun (f, l) ->
           if not f.svar.vcps then
             E.s (bug "Internal function %s without cps tag"
@@ -799,6 +788,21 @@ and checkStmt (s: stmt) =
             currentReturnType := ret;
             statements := stmts;
             gotoTargets := gotos
+      | CpcCut (Some v, _, _) ->
+          E.s (bug "Return values not handled yet for cpc constructs")
+      | CpcCut (None, cut, _) ->
+          match cut with
+          | Attach e | Detach e
+          (* do not check the type of condition variables *)
+          | Wait e -> ignore(checkExp false e)
+          | Sleep (e, e', e'') ->
+              checkExpType false e intType;
+              checkExpType false e' intType;
+              ignore(checkExp false e'')
+          | IoWait (e, e', e'') ->
+              ignore(checkExp false e);
+              ignore(checkExp false e');
+              ignore(checkExp false e'')
           )
     () (* argument of withContext *)
 

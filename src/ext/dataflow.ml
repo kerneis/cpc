@@ -223,8 +223,7 @@ module ForwardsDataFlow =
             | Goto _ | Break _ | Continue _ | If _ 
             | TryExcept _ | TryFinally _ 
             | Switch _ | Loop _ | Return _ | Block _ -> curr
-            |CpcFun (_, _)|CpcIoWait (_, _, _, _)|CpcSleep (_, _, _, _)
-            |CpcWait (_, _)|CpcSpawn (_, _, _) | CpcCut _ ->
+            |CpcFun (_, _) | CpcSpawn (_, _, _) | CpcCut _ ->
               (E.warn "dataflow: bindly modified code!\n";
               curr)
           in

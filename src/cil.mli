@@ -993,15 +993,16 @@ and stmtkind =
   
   (** CPC statements *)
 
-  | CpcCut of cpc_cut * location
+  | CpcCut of varinfo option * cpc_cut * location
   | CpcSpawn of exp * exp list * location
-  (*| CpcFork of stmt * location*)
-  | CpcWait of exp * location
-  | CpcSleep of exp * exp * exp * location
-  | CpcIoWait of exp * exp * exp * location
   | CpcFun of fundec * location
 
-and cpc_cut = Yield | Done | Attach of exp | Detach of exp
+and cpc_cut = 
+  | Yield | Done 
+  | Attach of exp | Detach of exp
+  | Wait of exp
+  | Sleep of exp * exp * exp
+  | IoWait of exp * exp * exp
 
 (** {b Instructions}. 
  An instruction {!Cil.instr} is a statement that has no local

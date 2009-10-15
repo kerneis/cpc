@@ -865,8 +865,9 @@ module BlockChunk =
     let returnChunk (e: exp option) (l: location) : chunk = 
       { stmts = (match !detachedState with
         | N -> [ mkStmt (Return(e, l)) ]
-        | A -> [ mkStmt (CpcCut(Detach null,l)); mkStmt (Return(e, l)) ]
-        | D -> [ mkStmt (CpcCut(Attach null,l)); mkStmt (Return(e, l)) ]
+        (* FIXME *)
+        | A -> [ mkStmt (CpcCut(None,Detach null,l)); mkStmt (Return(e, l)) ]
+        | D -> [ mkStmt (CpcCut(None,Attach null,l)); mkStmt (Return(e, l)) ]
         );
         postins = [];
         cases = []
@@ -930,9 +931,10 @@ module BlockChunk =
             (match !detachedState, loopState with
             | N, N | D, D | A, A -> mkEmptyStmt ()
             | D, N | D, A
-            | N, A -> mkStmt (CpcCut(Attach null, locUnknown))
+            (* FIXME *)
+            | N, A -> mkStmt (CpcCut(None, Attach null, locUnknown))
             | A, N | A, D
-            | N, D -> mkStmt (CpcCut(Detach null, locUnknown)));
+            | N, D -> mkStmt (CpcCut(None, Detach null, locUnknown)));
             mkStmt (Break l) ];
         postins = [];
         cases = [];
@@ -943,9 +945,10 @@ module BlockChunk =
             (match !detachedState, loopState with
             | N, N | D, D | A, A -> mkEmptyStmt ()
             | D, N | D, A
-            | N, A -> mkStmt (CpcCut(Attach null, locUnknown))
+            (* FIXME *)
+            | N, A -> mkStmt (CpcCut(None, Attach null, locUnknown))
             | A, N | A, D
-            | N, D -> mkStmt (CpcCut(Detach null, locUnknown)));
+            | N, D -> mkStmt (CpcCut(None, Detach null, locUnknown)));
             mkStmt (Continue l) ];
         postins = [];
         cases = []
@@ -980,9 +983,10 @@ module BlockChunk =
               gref := dest;
               match gotoState, labelState with
               | D, N | D, A
-              | N, A -> (!hole).skind <- CpcCut(Attach null, locUnknown)
+              (* FIXME *)
+              | N, A -> (!hole).skind <- CpcCut(None, Attach null, locUnknown)
               | A, N | A, D
-              | N, D -> (!hole).skind <- CpcCut(Detach null, locUnknown)
+              | N, D -> (!hole).skind <- CpcCut(None, Detach null, locUnknown)
               | N, N | D, D | A, A -> (!hole).skind <- Instr [];
               ) !gotos
           with Not_found -> begin
@@ -5929,10 +5933,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockFallsThrough b
               | TryFinally (b, h, _) -> blockFallsThrough h
               | TryExcept (b, _, h, _) -> true (* Conservative *)
-              | CpcCut (Done, _) -> false
-              | CpcCut _ | CpcSpawn _
-              (*| CpcFork _*) | CpcWait _ | CpcFun _
-              | CpcSleep _ | CpcIoWait _ -> true
+              | CpcCut (_, Done, _) -> false
+              | CpcCut _ | CpcSpawn _ | CpcFun _ -> true
             and blockFallsThrough b = 
               let rec fall = function
                   [] -> true
@@ -5980,9 +5982,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockCanBreak b
               | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
               | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
-              | CpcCut _ | CpcSpawn _
-              (*| CpcFork _*) | CpcWait _ | CpcFun _
-              | CpcSleep _ | CpcIoWait _ -> false
+              | CpcCut _ | CpcSpawn _ | CpcFun _ -> false
             and blockCanBreak b = 
               List.exists stmtCanBreak b.bstmts
             in
@@ -6501,30 +6501,30 @@ and doStatement (s : A.statement) : chunk =
      | CPC_YIELD loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        s2c (mkStmt (CpcCut (Yield, loc')))
+        s2c (mkStmt (CpcCut (None, Yield, loc')))
      | CPC_DONE loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        s2c (mkStmt (CpcCut (Done, loc')))
+        s2c (mkStmt (CpcCut (None, Done, loc')))
      | CPC_ATTACH (A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        s2c (mkStmt (CpcCut (Attach null, loc')))
+        s2c (mkStmt (CpcCut (None, Attach null, loc')))
      | CPC_ATTACH (e, loc) ->
         E.s (error "cpc_attach(scheduler) is disabled");
         (*let loc' = convLoc loc in
         currentLoc := loc';
         let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcCut (Attach e', loc')))*)
+        c @@ s2c (mkStmt (CpcCut (None, Attach e', loc')))*)
      | CPC_DETACH (A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
-        s2c (mkStmt (CpcCut (Detach null, loc')))
+        s2c (mkStmt (CpcCut (None, Detach null, loc')))
      | CPC_DETACH (e, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcCut (Detach e', loc')))
+        c @@ s2c (mkStmt (CpcCut (None, Detach e', loc')))
      | CPC_SPAWN (s, loc) ->
         (* The body of a cpc_spawn should always be converted as if it
            were outside of every detached/attached block *)
@@ -6567,47 +6567,42 @@ and doStatement (s : A.statement) : chunk =
           let c = doStatement (A.SEQUENCE (CPC_ATTACH (NOTHING, loc),
             A.SEQUENCE (s, CPC_DETACH (NOTHING, loc), loc), loc)) in
           detachedState := ds; c
-     (*| CPC_FORK (s, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        let s' = doStatement s in
-        s2c (mkStmt (CpcFork (mkStmt (Block (c2block s')), loc')))*)
      | CPC_WAIT (e, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcWait (e', loc')))
+        c @@ s2c (mkStmt (CpcCut(None, Wait e', loc')))
      | CPC_SLEEP (e, A.NOTHING, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcSleep (e', integer 0, null, loc')))
+        c @@ s2c (mkStmt (CpcCut (None, Sleep (e', integer 0, null), loc')))
      | CPC_SLEEP (e1, e2, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c1, e1', _) = doExp false e1 (AExp None) in
         let (c2, e2', _) = doExp false e2 (AExp None) in
-        c1 @@ c2 @@ s2c (mkStmt (CpcSleep (e1', e2', null, loc')))
+        c1 @@ c2 @@ s2c (mkStmt (CpcCut (None, Sleep (e1', e2', null), loc')))
      | CPC_SLEEP (e1, e2, e3, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c1, e1', _) = doExp false e1 (AExp None) in
         let (c2, e2', _) = doExp false e2 (AExp None) in
         let (c3, e3', _) = doExp false e3 (AExp None) in
-        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcSleep (e1', e2', e3', loc')))
+        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcCut (None, Sleep (e1', e2', e3'), loc')))
      | CPC_IO_WAIT (e1, e2, A.NOTHING, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c1, e1', _) = doExp false e1 (AExp None) in
         let (c2, e2', _) = doExp false e2 (AExp None) in
-        c1 @@ c2 @@ s2c (mkStmt (CpcIoWait (e1', e2', null, loc')))
+        c1 @@ c2 @@ s2c (mkStmt (CpcCut (None, IoWait (e1', e2', null), loc')))
      | CPC_IO_WAIT (e1, e2, e3, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c1, e1', _) = doExp false e1 (AExp None) in
         let (c2, e2', _) = doExp false e2 (AExp None) in
         let (c3, e3', _) = doExp false e3 (AExp None) in
-        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcIoWait (e1', e2', e3', loc')))
+        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcCut (None, IoWait (e1', e2', e3'), loc')))
      | CPC_FUN d -> doDecl false d
 
 

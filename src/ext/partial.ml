@@ -704,8 +704,7 @@ struct
                                 stmt_fun
                                 (visit_block stmt_fun y block1)
                                 block2
-                          | CpcCut _ | CpcWait _
-                          | CpcSleep _ | CpcIoWait _ -> y
+                          | CpcCut _ -> y
                           | CpcSpawn _ | CpcFun _ ->
                               Errormsg.warn "partial: blindly assuming \
                               cpc_spawn and cpc_fun do not have live \

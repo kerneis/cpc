@@ -94,8 +94,7 @@ let rec xform_switch_stmt s = begin
 
   | TryExcept _ | TryFinally _ ->
       failwith "xform_switch_statement: structured exception handling not implemented"
-  | CpcCut _ | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcFun _
-  | CpcSpawn _ -> ()
+  | CpcCut _ | CpcFun _ | CpcSpawn _ -> ()
 
 end and xform_switch_block b =
   try
@@ -545,18 +544,18 @@ class markCps = fun file -> object(self)
     (* Cpc constructs *)
 
     (* In a regular function *)
-    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ when not c.cps_fun ->
+    | CpcCut _ when not c.cps_fun ->
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
     (* In a cps function: *)
     (* 1. with no cps instruction before *)
-    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ when not c.cps_con ->
+    | CpcCut _ when not c.cps_con ->
         s.cps <- true;
         c.cps_con <- true;
         self#set_next s;
         SkipChildren
     (* 2. with cps instructions before: this can't be done directly, we
           have to split it. *)
-    | CpcWait _ | CpcSleep _ | CpcIoWait _ | CpcCut _ ->
+    | CpcCut _ ->
         raise (AddGoto c)
 
     (* cpc_spawn must NOT appear in cps context *)
@@ -832,23 +831,23 @@ class cpsConverter = fun file ->
     (* The stack should be a list of cps calls and might end with a
        cpc_construct. *)
     match List.rev stack with
-    | {skind=CpcCut (Yield, _)} :: l ->
+    | {skind=CpcCut (_, Yield, _)} :: l ->
         convert l @ debug "cpc_yield" @ yield current_continuation
-    | {skind=CpcCut (Attach e, _)} :: l ->
-        convert l @ attach e current_continuation
-    | {skind=CpcCut (Detach e, _)} :: l ->
-        convert l @ detach e current_continuation
-    | {skind=CpcWait (condvar, _)} :: l ->
-        convert l @ wait condvar current_continuation
-    | {skind=CpcSleep (x, y, condvar, _)} :: l ->
-        convert l @ sleep x y condvar current_continuation
-    | {skind=CpcCut (Done, _)} :: l ->
+    | {skind=CpcCut (_, Done, _)} :: l ->
         if (l <> []) then
           E.s (E.bug "cpc_done must be followed by a return.\n");
         (* XXX DEBUGING *)
         debug "cpc_done: discarding continuation" @
         continuation_free current_continuation
-    | {skind=CpcIoWait (x, y, condvar, _)} :: l ->
+    | {skind=CpcCut (_, Attach e, _)} :: l ->
+        convert l @ attach e current_continuation
+    | {skind=CpcCut (_, Detach e, _)} :: l ->
+        convert l @ detach e current_continuation
+    | {skind=CpcCut (_, Wait condvar, _)} :: l ->
+        convert l @ wait condvar current_continuation
+    | {skind=CpcCut (_, Sleep (x, y, condvar), _)} :: l ->
+        convert l @ sleep x y condvar current_continuation
+    | {skind=CpcCut (_, IoWait (x, y, condvar), _)} :: l ->
         convert l @ io_wait x y condvar current_continuation
     | l ->
         convert l @
@@ -859,9 +858,7 @@ class cpsConverter = fun file ->
   ))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
-  | CpcCut _
-  | CpcWait _ | CpcSleep _
-  | CpcIoWait _ | Instr _ when s.cps ->
+  | CpcCut _ | Instr _ when s.cps ->
       (* If the labels are not empty, this must be first cps statement,
          so the stack has to be empty. *)
       assert(s.labels = [] || stack = []);
@@ -878,9 +875,7 @@ class cpsConverter = fun file ->
           mkStmt (Return (None, loc))]);
       stack <- [];
       SkipChildren
-  | CpcCut _
-  | CpcWait _ | CpcSleep _
-  | CpcIoWait _ -> assert false
+  | CpcCut _ -> assert false
   | CpcSpawn (f, args, _) ->
       s.skind <- Instr (self#convert_instr ~apply_later:true
         (Call(None,f,args,locUnknown)));
@@ -1168,7 +1163,7 @@ class insertGotos = object(self)
   | Instr il ->
       s.skind <- Block (mkBlock (compactStmts (insert_gotos il)));
       SkipChildren
-  | CpcCut (Done, loc) ->
+  | CpcCut (_, Done, loc) ->
       (* copyClearStmt is needlessly expensive here, just copy *)
       let copy = mkStmt s.skind in
       let return = mkStmt (Return (None, loc)) in
@@ -1500,10 +1495,8 @@ let rec stmtFallsThrough (s: stmt) : bool =
   | Block b -> blockFallsThrough b
   | TryFinally (b, h, _) -> blockFallsThrough h
   | TryExcept (b, _, h, _) -> true (* Conservative *)
-  | CpcCut (Done, _) -> false
-  | CpcCut _ | CpcSpawn _
-  (*| CpcFork _*) | CpcWait _ | CpcFun _
-  | CpcSleep _ | CpcIoWait _ -> true
+  | CpcCut (_, Done, _) -> false
+  | CpcCut _ | CpcSpawn _ | CpcFun _ -> true
 and blockFallsThrough b = 
   let rec fall = function
       [] -> true
@@ -1537,9 +1530,7 @@ and stmtCanBreak (s: stmt) : bool =
   | Block b -> blockCanBreak b
   | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
   | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
-  | CpcCut _ | CpcSpawn _
-  (*| CpcFork _*) | CpcWait _ | CpcFun _
-  | CpcSleep _ | CpcIoWait _ -> false
+  | CpcCut _ | CpcSpawn _ | CpcFun _ -> false
 and blockCanBreak b = 
   List.exists stmtCanBreak b.bstmts
 (***** End of code from cabs2cil.ml *****)
