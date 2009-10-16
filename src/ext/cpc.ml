@@ -265,8 +265,8 @@ let rec find_var = function
   | hd::tl -> find_var tl
 
 (* find the following pattern:
-  <cps call>; goto l; label l: <start>;
-and extract the last var of <cps call>.
+  <cps call/cut>; goto l; label l: <start>;
+and extract the last var assigned in <cps call/cut>.
 *)
 class lastVar = fun start -> object(self)
   inherit mynopCilVisitor
@@ -276,6 +276,8 @@ class lastVar = fun start -> object(self)
       match s.preds with
       | [{skind=Instr l} as p] when p.cps ->
           raise (find_var l)
+      | [{skind=CpcCut (Some v, _, _)}] ->
+          raise (FoundVar v)
       | _ -> raise Not_found
   end
   | _ -> DoChildren
@@ -831,24 +833,26 @@ class cpsConverter = fun file ->
     (* The stack should be a list of cps calls and might end with a
        cpc_construct. *)
     match List.rev stack with
-    | {skind=CpcCut (_, Yield, _)} :: l ->
+    | {skind=CpcCut (None, Yield, _)} :: l ->
         convert l @ debug "cpc_yield" @ yield current_continuation
-    | {skind=CpcCut (_, Done, _)} :: l ->
+    | {skind=CpcCut (None, Done, _)} :: l ->
         if (l <> []) then
           E.s (E.bug "cpc_done must be followed by a return.\n");
         (* XXX DEBUGING *)
         debug "cpc_done: discarding continuation" @
         continuation_free current_continuation
-    | {skind=CpcCut (_, Attach e, _)} :: l ->
+    | {skind=CpcCut (None, Attach e, _)} :: l ->
         convert l @ attach e current_continuation
-    | {skind=CpcCut (_, Detach e, _)} :: l ->
+    | {skind=CpcCut (None, Detach e, _)} :: l ->
         convert l @ detach e current_continuation
-    | {skind=CpcCut (_, Wait condvar, _)} :: l ->
+    | {skind=CpcCut (None, Wait condvar, _)} :: l ->
         convert l @ wait condvar current_continuation
-    | {skind=CpcCut (_, Sleep (x, y, condvar), _)} :: l ->
+    | {skind=CpcCut (None, Sleep (x, y, condvar), _)} :: l ->
         convert l @ sleep x y condvar current_continuation
-    | {skind=CpcCut (_, IoWait (x, y, condvar), _)} :: l ->
+    | {skind=CpcCut (None, IoWait (x, y, condvar), _)} :: l ->
         convert l @ io_wait x y condvar current_continuation
+    | {skind=CpcCut (Some _, _, _)} as s :: _ ->
+        E.s (E.bug "This cpc construct should not return anything: %a\n" d_stmt s)
     | l ->
         convert l @
         patch_instr @
@@ -1151,7 +1155,7 @@ let rec insert_gotos il =
   | s, rem, false -> assert(rem=[]); [s]
   | s, rem, true ->
     let dst, tl = match insert_gotos rem with
-    | [] -> mkStmt (Instr []), []
+    | [] -> mkEmptyStmt(), []
     | hd :: tl ->  hd, tl in
     add_goto s dst;
     s :: dst :: tl
@@ -1162,6 +1166,16 @@ class insertGotos = object(self)
   method vstmt s = match s.skind with
   | Instr il ->
       s.skind <- Block (mkBlock (compactStmts (insert_gotos il)));
+      SkipChildren
+  | CpcCut (Some v, cut, loc) ->
+      let dst = {(mkEmptyStmt()) with labels = [Label (make_label(), loc, false)]} in
+      (* XXX DO NOT USE copyClearStmt HERE --- we want to keep the labels *)
+      let s' = {(mkEmptyStmt()) with skind=s.skind; cps = s.cps} in
+      s.skind <- Block (mkBlock ([
+        s';
+        mkStmt (Goto (ref dst, loc));
+        dst
+      ]));
       SkipChildren
   | CpcCut (_, Done, loc) ->
       (* copyClearStmt is needlessly expensive here, just copy *)
