@@ -57,6 +57,12 @@ bin/cpc.asm.exe has the following useful options:
 
 --stage n           perform transformations up to stage n
 --pause             step by step cps marking [*]
+--goto n            choose the goto elimination method (0 <= n <= 2)
+                    0 is the "safe" one (no optimisation), 1 is the "smart"
+                    one and 2 is the "too smart" one (trying to build smaller
+                    functions, thus ending with some unnecessary ones).
+                    1 is the default and recommanded method. Other methods
+                    produce generally bigger and slower code.
 --tr cpc            print (a lot of) debug messages
 --tr cpc_stats      print some (raw) statistics
 --dumpcfg           creates a cfg directory and dump the control flow
