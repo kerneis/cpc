@@ -1054,6 +1054,7 @@ class avoidAmpersand f =
     Lval(Var v', NoOffset), locUnknown)) formals new_formals)) in
     let l = locals @ formals in
     if l <> [] then begin
+      trace (dprintf "avoidAmpersand: %d\n" (List.length l));
       setFormals fd full_formals;
       List.iter (fun v -> v.vtype <- TPtr(v.vtype,[])) l;
       fd.slocals <- fd.slocals @ formals;
