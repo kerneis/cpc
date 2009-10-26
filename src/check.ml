@@ -792,6 +792,7 @@ and checkStmt (s: stmt) =
           E.s (bug "Return values not handled yet for cpc constructs")
       | CpcCut (None, cut, _) ->
           match cut with
+          | Done | Yield -> ()
           | Attach e | Detach e
           (* do not check the type of condition variables *)
           | Wait e -> ignore(checkExp false e)
