@@ -12,6 +12,7 @@ Experimental; do not redistribute.
 #include <assert.h>
 #include <pthread.h>
 
+#define NO_CPS_PROTO
 #include "cpc_runtime.h"
 #include "ev.c"
 
@@ -253,10 +254,12 @@ cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
 static void
 dequeue_other(cpc_continuation *cont)
 {
+    int rc = -1; /* TODO define return values for cpc_io_wait */
     if(cont->state == STATE_SLEEPING)
         ev_timer_stop(loop, &cont->watcher.timer);
     else if(cont->state >= 0) {
         ev_io_stop(loop, &cont->watcher.io);
+        cpc_continuation_patch(cont, sizeof(int), &rc);
     } else
         assert(cont->state == STATE_UNKNOWN);
     cont->state = STATE_UNKNOWN;
@@ -474,9 +477,59 @@ io_cb(struct ev_loop *loop, ev_io *w, int revents)
         cond_dequeue_1(&c->condvar->queue, c);
     }
     c->condvar = NULL;
+
+    /* TODO define return values for cpc_io_wait */
+    cpc_continuation_patch(c, sizeof(int), &revents);
+
     enqueue(&ready, c);
     if(loop)
         ev_idle_start(loop, &run);
+}
+
+struct cpc_io_wait_arglist {
+   int fd ;
+   int direction ;
+   cpc_condvar *cond ;
+} __attribute__((__packed__)) ;
+
+/* CPS converted version of:
+int cps cpc_io_wait(int fd, int direction, cpc_condvar *c) */
+void cpc_io_wait(struct cpc_continuation *cont)
+{
+    int fd, direction, rc;
+    cpc_condvar *cond;
+    struct cpc_io_wait_arglist *cpc_arguments ;
+
+    cpc_arguments = (struct cpc_io_wait_arglist *) cpc_dealloc(cont,
+                    (int )sizeof(struct cpc_io_wait_arglist ));
+    fd = cpc_arguments->fd;
+    direction = cpc_arguments->direction;
+    cond = cpc_arguments->cond;
+
+
+    if(cont->state == STATE_DETACHED) {
+        assert(IS_DETACHED && cond == NULL);
+	/* TODO define return values for cpc_io_wait */
+        rc = cpc_d_io_wait(fd, direction);
+        cpc_continuation_patch(cont, sizeof(int), &rc);
+        cpc_invoke_continuation(cont);
+        return;
+    }
+
+    if(cont == NULL)
+        return;
+
+    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
+
+    if(cond) {
+        cont->condvar = cond;
+        cond_enqueue(&cond->queue, cont);
+    }
+
+    cont->state = fd /*| ((direction & 3) << 29)*/;
+    ev_io_init(&cont->watcher.io, io_cb, fd, direction);
+    ev_io_start(loop, &cont->watcher.io);
+    return;
 }
 
 /*** cpc_attach ****/
