@@ -254,12 +254,10 @@ cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
 static void
 dequeue_other(cpc_continuation *cont)
 {
-    int rc = -1; /* TODO define return values for cpc_io_wait */
-    if(cont->state == STATE_SLEEPING)
+    if(cont->state == STATE_SLEEPING) {
         ev_timer_stop(loop, &cont->watcher.timer);
-    else if(cont->state >= 0) {
+    } else if(cont->state >= 0) {
         ev_io_stop(loop, &cont->watcher.io);
-        cpc_continuation_patch(cont, sizeof(int), &rc);
     } else
         assert(cont->state == STATE_UNKNOWN);
     cont->state = STATE_UNKNOWN;
@@ -313,9 +311,31 @@ cpc_condvar_count(cpc_condvar *cond)
     return i;
 }
 
+/*
 void
 cpc_prim_wait(cpc_condvar *cond, cpc_continuation *cont)
 {
+    assert(!IS_DETACHED && cont->condvar == NULL && cont->state == STATE_UNKNOWN);
+    cont->condvar = cond;
+    cond_enqueue(&cond->queue, cont);
+}
+*/
+
+struct cpc_wait_arglist {
+   cpc_condvar *cond ;
+} __attribute__((__packed__)) ;
+
+/* CPS converted version of:
+int cps cpc_wait(cpc_condvar *c) */
+void cpc_wait(struct cpc_continuation *cont)
+{
+    cpc_condvar *cond;
+    struct cpc_wait_arglist *cpc_arguments ;
+
+    cpc_arguments = (struct cpc_wait_arglist *) cpc_dealloc(cont,
+                    (int )sizeof(struct cpc_wait_arglist ));
+    cond = cpc_arguments->cond;
+
     assert(!IS_DETACHED && cont->condvar == NULL && cont->state == STATE_UNKNOWN);
     cont->condvar = cond;
     cond_enqueue(&cond->queue, cont);
@@ -324,6 +344,7 @@ cpc_prim_wait(cpc_condvar *cond, cpc_continuation *cont)
 void
 cpc_signal(cpc_condvar *cond)
 {
+    int rc = -1; /* TODO define return values for cpc_wait */
     assert(!IS_DETACHED);
     cpc_continuation *cont;
     cont = cond_dequeue(&cond->queue);
@@ -331,6 +352,7 @@ cpc_signal(cpc_condvar *cond)
         return;
     assert(cont->condvar == cond);
     cont->condvar = NULL;
+    cpc_continuation_patch(cont, sizeof(int), &rc);
     dequeue_other(cont);
     enqueue(&ready, cont);
     if(loop)
@@ -340,6 +362,7 @@ cpc_signal(cpc_condvar *cond)
 void
 cpc_signal_all(cpc_condvar *cond)
 {
+    int rc = -1; /* TODO define return values for cpc_wait */
     cpc_continuation *cont;
 
     assert(!IS_DETACHED);
@@ -349,6 +372,7 @@ cpc_signal_all(cpc_condvar *cond)
             break;
         assert(cont->condvar == cond);
         cont->condvar = NULL;
+        cpc_continuation_patch(cont, sizeof(int), &rc);
         dequeue_other(cont);
         enqueue(&ready, cont);
         if(loop)
@@ -358,6 +382,7 @@ cpc_signal_all(cpc_condvar *cond)
 
 /*** cpc_sleep ***/
 
+/*
 void
 cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
 {
@@ -365,7 +390,7 @@ cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
 
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED && cond == NULL);
-        ev_sleep(timeout); /* Uses nanosleep or select */
+        ev_sleep(timeout); // Uses nanosleep or select
         cpc_invoke_continuation(cont);
         return;
     }
@@ -383,7 +408,50 @@ cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
     ev_timer_start(loop, &cont->watcher.timer);
     return;
 }
+*/
 
+struct cpc_sleep_arglist {
+   int sec ;
+   int usec ;
+   cpc_condvar *cond ;
+} __attribute__((__packed__)) ;
+
+/* CPS converted version of:
+int cps cpc_sleep(int sec, int usec, cpc_condvar *c) */
+void cpc_sleep(struct cpc_continuation *cont)
+{
+    int sec, usec, rc;
+    cpc_condvar *cond;
+    struct cpc_sleep_arglist *cpc_arguments ;
+
+    cpc_arguments = (struct cpc_sleep_arglist *) cpc_dealloc(cont,
+                    (int )sizeof(struct cpc_sleep_arglist ));
+    sec = cpc_arguments->sec;
+    usec = cpc_arguments->usec;
+    cond = cpc_arguments->cond;
+
+    ev_tstamp timeout = sec + ((ev_tstamp) usec) / 1e6;
+
+    if(cont->state == STATE_DETACHED) {
+        assert(IS_DETACHED && cond == NULL);
+        ev_sleep(timeout); // Uses nanosleep or select
+        cpc_invoke_continuation(cont);
+        return;
+    }
+
+    if(cont == NULL)
+        cont = cpc_continuation_expand(NULL, 0);
+
+    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
+    if(cond) {
+        cont->condvar = cond;
+        cond_enqueue(&cond->queue, cont);
+    }
+    cont->state = STATE_SLEEPING;
+    ev_timer_init(&cont->watcher.timer, timer_cb, timeout, 0.);
+    ev_timer_start(loop, &cont->watcher.timer);
+    return;
+}
 static void
 timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 {
@@ -400,6 +468,10 @@ timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
         cond_dequeue_1(&c->condvar->queue, c);
     }
     c->condvar = NULL;
+
+    /* TODO define return values for cpc_sleep */
+    cpc_continuation_patch(c, sizeof(int), &revents);
+
     enqueue(&ready, c);
     if(loop)
         ev_idle_start(loop, &run);
@@ -434,6 +506,7 @@ cpc_d_io_wait(int fd, int direction)
     return 0;
 }
 
+/*
 void
 cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
                  cpc_continuation *cont)
@@ -455,11 +528,12 @@ cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
         cond_enqueue(&cond->queue, cont);
     }
 
-    cont->state = fd /*| ((direction & 3) << 29)*/;
+    cont->state = fd; // formerly: fd | ((direction & 3) << 29);
     ev_io_init(&cont->watcher.io, io_cb, fd, direction);
     ev_io_start(loop, &cont->watcher.io);
     return;
 }
+*/
 
 static void
 io_cb(struct ev_loop *loop, ev_io *w, int revents)

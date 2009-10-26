@@ -115,20 +115,23 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
   return;
 }
 
-extern void cpc_prim_spawn(struct cpc_continuation*, struct cpc_continuation*);
-extern void cpc_prim_yield(struct cpc_continuation *cont);
 extern void cpc_main_loop(void);
-extern void cpc_prim_sleep(int, int, cpc_condvar*, cpc_continuation*);
 extern void print_continuation(struct cpc_continuation *c, char *s);
+
 extern cpc_condvar *cpc_condvar_get(void);
 extern cpc_condvar *cpc_condvar_retain(cpc_condvar*);
 extern void cpc_condvar_release(cpc_condvar*);
-extern void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
 extern void cpc_signal_fd(int, int);
 extern void cpc_signal(cpc_condvar*);
 extern void cpc_signal_all(cpc_condvar*);
 extern int cpc_condvar_count(cpc_condvar*);
-extern void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*);
+
+extern void cpc_prim_spawn(struct cpc_continuation*, struct cpc_continuation*);
+extern void cpc_prim_yield(struct cpc_continuation *cont);
+
+/* extern void cpc_prim_sleep(int, int, cpc_condvar*, cpc_continuation*);
+extern void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
+extern void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*); */
 
 extern void cpc_prim_attach(cpc_continuation*);
 extern void cpc_prim_detach(struct nft_pool*, cpc_continuation*);
@@ -174,12 +177,32 @@ extern double cpc_now(void);
 
 #ifndef NO_CPS_PROTO
 extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
+extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
+extern cps int cpc_wait(cpc_condvar *cond);
 
-#define CPC_IO_WAIT_2(fd, direction) cpc_io_wait(fd, direction, 0)
+#define CPC_IO_WAIT_2(fd, direction) cpc_io_wait(fd, direction, NULL)
 #define CPC_IO_WAIT_3(fd, direction, c)   cpc_io_wait(fd, direction, c)
 
 #define cpc_io_wait(...) \
     OVERLOAD(CPC_IO_WAIT_, __VA_ARGS__)(__VA_ARGS__) \
+    /**/
+
+
+#define CPC_SLEEP_1(sec) cpc_sleep(sec, 0, NULL)
+#define CPC_SLEEP_2(sec, usec) cpc_sleep(sec, usec, NULL)
+#define CPC_SLEEP_3(sec, usec, c)   cpc_sleep(sec, usec, c)
+
+#define cpc_sleep(...) \
+    OVERLOAD(CPC_SLEEP_, __VA_ARGS__)(__VA_ARGS__) \
+    /**/
+
+/* cpc_wait with timeout is handled via cpc_sleep */
+#define CPC_WAIT_1(c) cpc_wait(c)
+#define CPC_WAIT_2(c, s) cpc_sleep(s, 0, c)
+#define CPC_WAIT_3(c, s, ms)   cpc_sleep(s, ms, c)
+
+#define cpc_wait(...) \
+    OVERLOAD(CPC_WAIT_, __VA_ARGS__)(__VA_ARGS__) \
     /**/
 #endif
 

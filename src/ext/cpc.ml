@@ -706,7 +706,7 @@ class cpsConverter = fun file ->
     (* cpc_continuation_free(cc); *)
     [Call(None,Lval(Var cpc_continuation_free, NoOffset),
       [Lval(Var cc, NoOffset)],locUnknown)] in
-  let cpc_sleep = find_function "cpc_prim_sleep" file in
+  (* let cpc_sleep = find_function "cpc_prim_sleep" file in
   let sleep x y condvar cc =
     (* cpc_prim_sleep(x, y, condvar, cc); *)
     [Call(None,Lval(Var cpc_sleep, NoOffset), [
@@ -726,7 +726,10 @@ class cpsConverter = fun file ->
     [Call(None,Lval(Var cpc_io_wait, NoOffset), [
       x; y; check_null condvar;
       Lval(Var cc, NoOffset)],
-      locUnknown)] in
+      locUnknown)] in *)
+  let sleep _ _ _ _ = E.s (E.bug "cpc_prim_sleep is deprecated.") in
+  let wait _ _ = E.s (E.bug "cpc_prim_wait is deprecated.") in
+  let io_wait _ _ _ _ = E.s (E.bug "cpc_prim_io_wait is deprecated.") in
   let cpc_attach = find_function "cpc_prim_attach" file in
   let attach scheduler cc =
     (* cpc_prim_attach(cc) *)
