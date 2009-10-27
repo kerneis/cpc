@@ -473,8 +473,8 @@ timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
     cpc_continuation_patch(c, sizeof(int), &revents);
 
     enqueue(&ready, c);
-    if(loop)
-        ev_idle_start(loop, &run);
+    assert(loop)
+    ev_idle_start(loop, &run);
 }
 
 /*** cpc_io_wait ***/
@@ -482,7 +482,8 @@ timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 void
 cpc_signal_fd(int fd, int direction)
 {
-    ev_feed_fd_event (loop, fd, direction);
+    if(loop)
+        ev_feed_fd_event (loop, fd, direction);
 }
 
 static inline int
@@ -556,8 +557,8 @@ io_cb(struct ev_loop *loop, ev_io *w, int revents)
     cpc_continuation_patch(c, sizeof(int), &revents);
 
     enqueue(&ready, c);
-    if(loop)
-        ev_idle_start(loop, &run);
+    assert(loop);
+    ev_idle_start(loop, &run);
 }
 
 struct cpc_io_wait_arglist {
@@ -712,8 +713,8 @@ cpc_prim_yield(struct cpc_continuation *cont)
         assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
                 cont->condvar == NULL);
         enqueue(&ready, cont);
-        if(loop)
-            ev_idle_start(loop, &run);
+        assert(loop);
+        ev_idle_start(loop, &run);
     }
 }
 
