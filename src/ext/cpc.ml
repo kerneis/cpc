@@ -1087,7 +1087,7 @@ class cpsReturnValues = object(self)
           ]
       | None when  (typeSig typ <> typeSig voidType) -> (* Missing assignment *)
           let v = makeTempVar ef typ in
-          E.warn "Ignoring a cps return value: %a" d_instr i;
+          trace (dprintf "Ignoring a cps return value: %a" d_instr i);
           ChangeTo [
           Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc)]
       | None -> SkipChildren (* No assignement (void function) *)
