@@ -473,7 +473,7 @@ timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
     cpc_continuation_patch(c, sizeof(int), &revents);
 
     enqueue(&ready, c);
-    assert(loop)
+    assert(loop);
     ev_idle_start(loop, &run);
 }
 
