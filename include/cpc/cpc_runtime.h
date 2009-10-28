@@ -93,6 +93,8 @@ cpc_invoke_continuation(struct cpc_continuation *c)
 
 #define CPC_IO_IN EV_READ
 #define CPC_IO_OUT EV_WRITE
+#define CPC_TIMEOUT EV_TIMEOUT
+#define CPC_CONDVAR EV_CUSTOM
 
 static inline struct cpc_continuation *
 cpc_continuation_push(cpc_continuation *c, cpc_function *f)

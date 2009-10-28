@@ -344,7 +344,7 @@ void cpc_wait(struct cpc_continuation *cont)
 void
 cpc_signal(cpc_condvar *cond)
 {
-    int rc = -1; /* TODO define return values for cpc_wait */
+    int rc = CPC_CONDVAR; /* TODO define return values for cpc_wait */
     assert(!IS_DETACHED);
     cpc_continuation *cont;
     cont = cond_dequeue(&cond->queue);
@@ -362,7 +362,7 @@ cpc_signal(cpc_condvar *cond)
 void
 cpc_signal_all(cpc_condvar *cond)
 {
-    int rc = -1; /* TODO define return values for cpc_wait */
+    int rc = CPC_CONDVAR; /* TODO define return values for cpc_wait */
     cpc_continuation *cont;
 
     assert(!IS_DETACHED);
