@@ -55,7 +55,7 @@ test_gotos ()
     }
 
     printf("Back in normal (attached) mode.\n");
-    cpc_detach;
+    cpc_set_sched(cpc_default_pool);
 
     cpc_attached {
         printf("test_gotos: attached and quit.\n");
@@ -89,7 +89,7 @@ main()
         cpc_detach; cpc_detach;
         printf("D2.\n");
         cpc_sleep(1,500);
-        cpc_attach; cpc_attach; cpc_attach;
+        cpc_attach; cpc_attach; cpc_set_sched(cpc_default_sched);
         printf("D3.\n");
     }
     cpc_spawn test_gotos();

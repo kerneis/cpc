@@ -13,7 +13,9 @@ Experimental; do not redistribute.
 #define EV_ATOMIC_T int volatile
 #include "ev.h"
 
-#define cpc_threadpool struct nft_pool
+typedef struct nft_pool cpc_threadpool;
+extern cpc_threadpool *cpc_default_pool;
+const cpc_threadpool *cpc_default_sched = NULL;
 
 extern void *memcpy (void *dest, const void *src, size_t n);
 
@@ -28,8 +30,6 @@ typedef struct cpc_continuation {
     unsigned short size;
     char c[1];
 } cpc_continuation;
-
-struct nft_pool;
 
 typedef void cpc_function(void*);
 typedef struct cpc_condvar cpc_condvar;
@@ -136,7 +136,7 @@ extern void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
 extern void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*); */
 
 extern void cpc_prim_attach(cpc_continuation*);
-extern void cpc_prim_detach(struct nft_pool*, cpc_continuation*);
+extern void cpc_prim_detach(cpc_threadpool*, cpc_continuation*);
 extern cpc_threadpool *cpc_threadpool_get(int);
 extern void cpc_threadpool_release(cpc_threadpool *);
 
@@ -182,6 +182,7 @@ extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_prim_yield(void);
+extern cps cpc_set_sched(cpc_threadpool *pool);
 
 #define cpc_yield cpc_prim_yield()/**/
 

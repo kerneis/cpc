@@ -28,7 +28,7 @@ static pthread_t main_loop_id;
 #define IS_DETACHED (loop && !pthread_equal(main_loop_id,pthread_self()))
 
 #define MAX_THREADS 20
-static nft_pool_t *thread_pool;
+nft_pool_t *cpc_default_pool;
 
 static ev_async attach_sig;
 static pthread_mutex_t attach_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -675,7 +675,7 @@ cpc_prim_detach(struct nft_pool *pool, cpc_continuation *cont)
     assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
     ev_ref(loop);
     if(pool == NULL)
-        pool = thread_pool;
+        pool = cpc_default_pool;
     nft_pool_add(pool, (void(*)(void*)) perform_detach, cont);
     return;
 }
@@ -699,6 +699,27 @@ cpc_threadpool_release(struct nft_pool *pool)
      pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
      pthread_create(&t, &attr, (void(*)(void*)) nft_pool_destroy, (void *)pool);
      pthread_attr_destroy(&attr);
+}
+
+/*** cpc_set_sched EXPERIMENTAL ***/
+
+struct cpc_set_sched_arglist {
+   cpc_threadpool *pool;
+} __attribute__((__packed__)) ;
+
+void cpc_set_sched(struct cpc_continuation *cont)
+{
+    cpc_threadpool *pool;
+    struct cpc_set_sched_arglist *cpc_arguments ;
+
+    cpc_arguments = (struct cpc_set_sched_arglist *) cpc_dealloc(cont,
+                    (int )sizeof(struct cpc_set_sched_arglist ));
+    pool = cpc_arguments->pool;
+
+    if(pool == NULL)
+        cpc_prim_attach(cont);
+    else
+        cpc_prim_detach(pool, cont);
 }
 
 /*** cpc_yield and cpc_spawn ***/
@@ -793,11 +814,11 @@ cpc_main_loop(void)
     ev_set_priority(&run, EV_MAXPRI);
     ev_idle_start(loop, &run);
 
-    thread_pool = nft_pool_create(MAX_THREADS, 0);
+    cpc_default_pool = nft_pool_create(MAX_THREADS, 0);
 
     ev_loop(loop, 0);
 
-    nft_pool_destroy(thread_pool);
+    nft_pool_destroy(cpc_default_pool);
 }
 
 double
