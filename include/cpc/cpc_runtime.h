@@ -129,7 +129,7 @@ extern void cpc_signal_all(cpc_condvar*);
 extern int cpc_condvar_count(cpc_condvar*);
 
 extern void cpc_prim_spawn(struct cpc_continuation*, struct cpc_continuation*);
-extern void cpc_prim_yield(struct cpc_continuation *cont);
+/* extern void cpc_prim_yield(struct cpc_continuation *cont); */
 
 /* extern void cpc_prim_sleep(int, int, cpc_condvar*, cpc_continuation*);
 extern void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
@@ -181,6 +181,9 @@ extern double cpc_now(void);
 extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
+extern cps void cpc_prim_yield(void);
+
+#define cpc_yield cpc_prim_yield()/**/
 
 #define CPC_IO_WAIT_2(fd, direction) cpc_io_wait(fd, direction, NULL)
 #define CPC_IO_WAIT_3(fd, direction, c)   cpc_io_wait(fd, direction, c)
