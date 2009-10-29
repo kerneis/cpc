@@ -13,9 +13,9 @@ Experimental; do not redistribute.
 #define EV_ATOMIC_T int volatile
 #include "ev.h"
 
-typedef struct nft_pool cpc_threadpool;
-extern cpc_threadpool *cpc_default_pool;
-const cpc_threadpool *cpc_default_sched = NULL;
+typedef struct nft_pool cpc_sched;
+extern cpc_sched *cpc_default_pool;
+#define cpc_default_sched NULL
 
 extern void *memcpy (void *dest, const void *src, size_t n);
 
@@ -24,6 +24,7 @@ typedef struct cpc_continuation {
     struct cpc_condvar *condvar;
     struct cpc_continuation *cond_next;
     struct cpc_continuation **ready;
+    cpc_sched *sched;
     union ev_any_watcher watcher;
     int state;
     unsigned short length;
@@ -136,9 +137,9 @@ extern void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
 extern void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*); */
 
 extern void cpc_prim_attach(cpc_continuation*);
-extern void cpc_prim_detach(cpc_threadpool*, cpc_continuation*);
-extern cpc_threadpool *cpc_threadpool_get(int);
-extern void cpc_threadpool_release(cpc_threadpool *);
+extern void cpc_prim_detach(cpc_sched*, cpc_continuation*);
+extern cpc_sched *cpc_threadpool_get(int);
+extern void cpc_threadpool_release(cpc_sched *);
 
 extern double cpc_now(void);
 
@@ -182,7 +183,7 @@ extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_prim_yield(void);
-extern cps cpc_set_sched(cpc_threadpool *pool);
+extern cps cpc_sched *cpc_set_sched(cpc_sched *pool);
 
 #define cpc_yield cpc_prim_yield()/**/
 

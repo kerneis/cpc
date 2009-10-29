@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <assert.h>
 
 cps void
 g(char c)
@@ -70,7 +71,7 @@ test_gotos ()
 int
 main()
 {
-    cpc_threadpool *pool = cpc_threadpool_get(5);
+    cpc_sched *pool = cpc_threadpool_get(5);
     cpc_spawn { g('a'); printf("A a fini, B devrait bientot.\n"); }
     cpc_spawn
     {
@@ -89,7 +90,8 @@ main()
         cpc_detach; cpc_detach;
         printf("D2.\n");
         cpc_sleep(1,500);
-        cpc_attach; cpc_attach; cpc_set_sched(cpc_default_sched);
+        cpc_attach; cpc_attach;
+        assert(cpc_default_sched == cpc_set_sched(cpc_default_sched));
         printf("D3.\n");
     }
     cpc_spawn test_gotos();

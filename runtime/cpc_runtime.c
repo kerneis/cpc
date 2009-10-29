@@ -121,6 +121,7 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
         d->length = 0;
         d->condvar = NULL;
         d->cond_next = NULL;
+        d->sched = cpc_default_sched;
         d->state = STATE_UNKNOWN;
         d->ready = NULL;
         return d;
@@ -131,6 +132,7 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->length = c->length;
     d->condvar = c->condvar;
     d->cond_next = c->cond_next;
+    d->sched = c->sched;
     d->state = c->state;
     d->ready = c->ready;
     /* The ev_watcher struct is stored directly in the continuation. But
@@ -162,6 +164,7 @@ cpc_continuation_copy(struct cpc_continuation *c)
         d->c[i] = c->c[i];
     d->length = c->length;
     d->condvar = c->condvar;
+    d->sched = c->sched;
     d->state = c->state;
     d->ready = c->ready;
     assert(("This is a bug, please report it.", /* See above for more details. */
@@ -420,7 +423,7 @@ struct cpc_sleep_arglist {
 int cps cpc_sleep(int sec, int usec, cpc_condvar *c) */
 void cpc_sleep(struct cpc_continuation *cont)
 {
-    int sec, usec, rc;
+    int sec, usec;
     cpc_condvar *cond;
     struct cpc_sleep_arglist *cpc_arguments ;
 
@@ -614,6 +617,7 @@ cpc_prim_attach(cpc_continuation *cont)
 {
     if(cont->state == STATE_UNKNOWN) {
         assert(!IS_DETACHED && cont->condvar == NULL);
+        assert(cont->sched == cpc_default_sched);
         cpc_invoke_continuation(cont);
         return;
     }
@@ -648,6 +652,7 @@ attach_cb(struct ev_loop *loop, ev_async *w, int revents)
             c->state = STATE_UNKNOWN;
             ev_unref(loop);
         }
+        c->sched = cpc_default_sched;
         exhaust_ready(c);
     }
     pthread_mutex_unlock (&attach_mutex);
@@ -669,13 +674,18 @@ cpc_prim_detach(struct nft_pool *pool, cpc_continuation *cont)
 {
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        cpc_invoke_continuation(cont);
-        return;
+        /* Already in the good threadpool */
+        if(cont->sched == pool) {
+            cpc_invoke_continuation(cont);
+            return;
+        }
+    } else {
+        assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+        ev_ref(loop);
+        if(pool == NULL)
+            pool = cpc_default_pool;
     }
-    assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
-    ev_ref(loop);
-    if(pool == NULL)
-        pool = cpc_default_pool;
+    cont->sched = pool;
     nft_pool_add(pool, (void(*)(void*)) perform_detach, cont);
     return;
 }
@@ -697,29 +707,33 @@ cpc_threadpool_release(struct nft_pool *pool)
      pthread_attr_t attr;
      pthread_attr_init(&attr);
      pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-     pthread_create(&t, &attr, (void(*)(void*)) nft_pool_destroy, (void *)pool);
+     pthread_create(&t, &attr, (void*(*)(void*)) nft_pool_destroy, (void *)pool);
      pthread_attr_destroy(&attr);
 }
 
 /*** cpc_set_sched EXPERIMENTAL ***/
 
 struct cpc_set_sched_arglist {
-   cpc_threadpool *pool;
+   cpc_sched *sched;
 } __attribute__((__packed__)) ;
 
-void cpc_set_sched(struct cpc_continuation *cont)
+void
+cpc_set_sched(struct cpc_continuation *cont)
 {
-    cpc_threadpool *pool;
+    cpc_sched *sched;
     struct cpc_set_sched_arglist *cpc_arguments ;
 
     cpc_arguments = (struct cpc_set_sched_arglist *) cpc_dealloc(cont,
                     (int )sizeof(struct cpc_set_sched_arglist ));
-    pool = cpc_arguments->pool;
+    sched = cpc_arguments->sched;
 
-    if(pool == NULL)
+    /* Return the previous scheduler */
+    cpc_continuation_patch(cont, sizeof(cpc_sched *), &cont->sched);
+
+    if(sched == cpc_default_sched)
         cpc_prim_attach(cont);
     else
-        cpc_prim_detach(pool, cont);
+        cpc_prim_detach(sched, cont);
 }
 
 /*** cpc_yield and cpc_spawn ***/
