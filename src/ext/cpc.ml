@@ -645,11 +645,11 @@ class cpsConverter = fun file ->
   let cpc_cont_ptr =
     TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
   let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
-  let cpc_condvar_ptr = TPtr(find_type "cpc_condvar" file,[]) in
+  (*let cpc_condvar_ptr = TPtr(find_type "cpc_condvar" file,[]) in
   let check_null condvar =
     if condvar = mkCast (integer 0) voidPtrType
     then mkCast (integer 0) cpc_condvar_ptr
-    else condvar in
+    else condvar in*)
   let size_t = find_type "size_t" file in
   let cpc_alloc = find_function "cpc_alloc" file in
   let cpc_dealloc =  find_function "cpc_dealloc" file in
@@ -696,11 +696,11 @@ class cpsConverter = fun file ->
       Lval(Var cc, NoOffset);
       context
       ],locUnknown)] in
-  let cpc_yield = find_function "cpc_prim_yield" file in
+  (*let cpc_yield = find_function "cpc_prim_yield" file in
   let yield cc =
     (* cpc_prim_yield(cc); *)
     [Call(None,Lval(Var cpc_yield, NoOffset),
-      [Lval(Var cc, NoOffset)],locUnknown)] in
+      [Lval(Var cc, NoOffset)],locUnknown)] in*)
   let cpc_continuation_free = find_function "cpc_continuation_free" file in
   let continuation_free cc =
     (* cpc_continuation_free(cc); *)
@@ -727,6 +727,7 @@ class cpsConverter = fun file ->
       x; y; check_null condvar;
       Lval(Var cc, NoOffset)],
       locUnknown)] in *)
+  let yield _ = E.s (E.bug "cpc_prim_yield is deprecated.") in
   let sleep _ _ _ _ = E.s (E.bug "cpc_prim_sleep is deprecated.") in
   let wait _ _ = E.s (E.bug "cpc_prim_wait is deprecated.") in
   let io_wait _ _ _ _ = E.s (E.bug "cpc_prim_io_wait is deprecated.") in

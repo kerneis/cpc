@@ -739,7 +739,7 @@ cpc_set_sched(struct cpc_continuation *cont)
 /*** cpc_yield and cpc_spawn ***/
 
 void
-cpc_prim_yield(struct cpc_continuation *cont)
+cpc_yield(struct cpc_continuation *cont)
 {
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED);

@@ -89,7 +89,7 @@ accept_connection(int fd)
                 continue;
             } else {
                 perror("accept");
-                cpc_yield;
+                cpc_yield();
                 continue;
             }
         }
@@ -209,7 +209,7 @@ handle_connection(int fd)
             n = read(ffd, buf, 4096);
             if(n <= 0) break;
             rc = cpc_write_timeout(fd, buf, 4096, 60, 0);
-            cpc_yield;
+            cpc_yield();
         }
     }
 

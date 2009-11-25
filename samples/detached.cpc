@@ -45,7 +45,7 @@ test_gotos ()
 {
     
     cpc_spawn clock ();
-    cpc_yield;
+    cpc_yield();
 
     cpc_detached {
         printf("test_gotos: detached.\n");
