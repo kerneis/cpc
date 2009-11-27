@@ -295,9 +295,9 @@ let transformOffsetOf (speclist, dtype) member =
 
 /* CPC */
 /* %token<Cabs.cabsloc> CPC_FORK
-%token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_ATTACH CPC_DETACH
+%token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_ATTACH CPC_DETACH CPC_DETACHED
 %token<Cabs.cabsloc> CPC_WAIT CPC_SLEEP CPC_IO_WAIT */
-%token<Cabs.cabsloc> CPC_DETACHED CPC_ATTACHED
+%token<Cabs.cabsloc> CPC_ATTACHED
 %token<Cabs.cabsloc> CPC_FUN CPC_SPAWN
 
 %token<Cabs.cabsloc> ATTRIBUTE INLINE ASM TYPEOF FUNCTION__ PRETTY_FUNCTION__
@@ -933,10 +933,11 @@ Attach to a specific scheduler --- disabled in the current runtime
 Detach to a specific thread pool
 |   CPC_DETACH LPAREN expression RPAREN SEMICOLON
                         { CPC_DETACH (fst $3, (*handleLoc*) $1) }
+|   CPC_DETACHED statement   { CPC_DETACHED ($2, (*handleLoc*) $1) }
 */
 |   CPC_SPAWN statement   { CPC_SPAWN ($2, (*handleLoc*) $1) }
-|   CPC_DETACHED statement   { CPC_DETACHED ($2, (*handleLoc*) $1) }
-|   CPC_ATTACHED statement   { CPC_ATTACHED ($2, (*handleLoc*) $1) }
+|   CPC_ATTACHED LPAREN expression RPAREN statement
+                        { CPC_ATTACHED (fst $3, $5, (*handleLoc*) $1) }
 /*|   CPC_FORK statement   { CPC_FORK ($2, (*handleLoc*) $1)}
 |   CPC_WAIT LPAREN expression RPAREN SEMICOLON
                         { CPC_WAIT(fst $3, (*handleLoc*) $1) }

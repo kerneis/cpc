@@ -744,17 +744,18 @@ and print_statement stat =
         print_expression exp;
         print ");"
       end;
-      new_line ()*)
+      new_line ()
   | CPC_DETACHED (stat, loc) ->
       setLoc loc;
       print "cpc_detached";
       new_line () ;
       indent () ;
-      print_substatement stat;
-  | CPC_ATTACHED (stat, loc) ->
+      print_substatement stat;*)
+  | CPC_ATTACHED (exp, stat, loc) ->
       setLoc loc;
-      print "cpc_attached";
-      new_line () ;
+      printl ["cpc_attached";"("];
+      print_expression exp;
+      print ");"; new_line ();
       indent () ;
       print_substatement stat;
   | CPC_SPAWN (stat, loc) ->

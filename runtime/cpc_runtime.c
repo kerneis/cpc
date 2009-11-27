@@ -610,7 +610,43 @@ void cpc_io_wait(struct cpc_continuation *cont)
     return;
 }
 
+
+/*** cpc_get_sched ***/
+
+void
+cpc_get_sched(struct cpc_continuation *cont)
+{
+    /* Return the current scheduler */
+    cpc_continuation_patch(cont, sizeof(cpc_sched *), &cont->sched);
+    cpc_invoke_continuation(cont);
+}
+
+
+
 /*** cpc_attach ****/
+
+struct cpc_attach_arglist {
+   cpc_sched *sched;
+} __attribute__((__packed__)) ;
+
+void
+cpc_attach(struct cpc_continuation *cont)
+{
+    cpc_sched *sched;
+    struct cpc_attach_arglist *cpc_arguments ;
+
+    cpc_arguments = (struct cpc_attach_arglist *) cpc_dealloc(cont,
+                    (int )sizeof(struct cpc_attach_arglist ));
+    sched = cpc_arguments->sched;
+
+    /* Return the previous scheduler */
+    cpc_continuation_patch(cont, sizeof(cpc_sched *), &cont->sched);
+
+    if(sched == cpc_default_sched)
+        cpc_prim_attach(cont);
+    else
+        cpc_prim_detach(sched, cont);
+}
 
 void
 cpc_prim_attach(cpc_continuation *cont)
@@ -709,31 +745,6 @@ cpc_threadpool_release(struct nft_pool *pool)
      pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
      pthread_create(&t, &attr, (void*(*)(void*)) nft_pool_destroy, (void *)pool);
      pthread_attr_destroy(&attr);
-}
-
-/*** cpc_set_sched EXPERIMENTAL ***/
-
-struct cpc_set_sched_arglist {
-   cpc_sched *sched;
-} __attribute__((__packed__)) ;
-
-void
-cpc_set_sched(struct cpc_continuation *cont)
-{
-    cpc_sched *sched;
-    struct cpc_set_sched_arglist *cpc_arguments ;
-
-    cpc_arguments = (struct cpc_set_sched_arglist *) cpc_dealloc(cont,
-                    (int )sizeof(struct cpc_set_sched_arglist ));
-    sched = cpc_arguments->sched;
-
-    /* Return the previous scheduler */
-    cpc_continuation_patch(cont, sizeof(cpc_sched *), &cont->sched);
-
-    if(sched == cpc_default_sched)
-        cpc_prim_attach(cont);
-    else
-        cpc_prim_detach(sched, cont);
 }
 
 /*** cpc_yield and cpc_spawn ***/

@@ -95,9 +95,9 @@ begin
   | CPC_ATTACH (_, loc) -> loc
   | CPC_DETACH (_, loc) -> loc *)
   | CPC_SPAWN (_,loc) -> loc
-  | CPC_DETACHED (_,loc) -> loc
-  | CPC_ATTACHED (_,loc) -> loc
-  (*| CPC_FORK (_,loc) -> loc*)
+  | CPC_ATTACHED (_,_,loc) -> loc
+  (*| CPC_DETACHED (_,loc) -> loc
+  | CPC_FORK (_,loc) -> loc*)
   (*| CPC_WAIT (_,loc) -> loc
   | CPC_SLEEP (_,_,_,loc) -> loc
   | CPC_IO_WAIT (_,_,_,loc) -> loc*)

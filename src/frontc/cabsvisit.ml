@@ -468,13 +468,14 @@ and childrenStatement vis s =
   (*| CPC_YIELD _ -> s
   | CPC_DONE _ -> s
   | CPC_ATTACH _ -> s
-  | CPC_DETACH _ -> s *)
+  | CPC_DETACH _ -> s
   | CPC_DETACHED (stmt, l) ->
       let s' = vs l stmt in
-      if s' != stmt then CPC_DETACHED (s', l) else s
-  | CPC_ATTACHED (stmt, l) ->
+      if s' != stmt then CPC_DETACHED (s', l) else s *)
+  | CPC_ATTACHED (e, stmt, l) ->
+      let e' = ve e in
       let s' = vs l stmt in
-      if s' != stmt then CPC_ATTACHED (s', l) else s
+      if e' != e || s' != stmt then CPC_ATTACHED (e', s', l) else s
   | CPC_SPAWN (stmt, l) ->
       let s' = vs l stmt in
       if s' != stmt then CPC_SPAWN (s', l) else s

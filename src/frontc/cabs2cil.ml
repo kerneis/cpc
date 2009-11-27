@@ -699,16 +699,13 @@ let mkStartOfAndMark ((b, off) as lval) : exp =
  * and cpc_detached *)
 let detachedVars = ref []
 let cpc_set_sched () =
-    try fst(lookupGlobalVar "cpc_set_sched")
-    with Not_found -> E.s (error "cpc_set_sched not found")
+    try fst(lookupGlobalVar "cpc_attach")
+    with Not_found -> E.s (error "cpc_attach not found")
 let cpc_default_pool () =
     try fst(lookupGlobalVar "cpc_default_pool")
     with Not_found -> E.s (error "cpc_default_pool not found")
 
-let setSched attached =
-    let new_sched =
-      if attached then null (* NULL == cpc_default_sched *)
-      else Lval(Var (cpc_default_pool()), NoOffset) in
+let setSched new_sched =
     let sched_type = (cpc_default_pool()).vtype in
     let rv = newTempVar nil true sched_type in
     detachedVars := rv :: !detachedVars;
@@ -6557,17 +6554,18 @@ and doStatement (s : A.statement) : chunk =
           mkSpawn (Lval (Var f.svar,NoOffset)) []
           ])))
         end
-      | CPC_DETACHED (s, loc) ->
+      | CPC_ATTACHED (e, s, loc) ->
+          (* setSched and resetSched update detachedVars *)
+          let (c, e', _) = doExp false e (AExp None) in
+          let attach = s2c (setSched e') in
+          let stmt = doStatement s in
+          c @@ attach @@ stmt @@ s2c (resetSched ())
+      (*| CPC_DETACHED (s, loc) ->
           (* setSched and resetSched update detachedVars *)
           let detach = s2c (setSched false) in
           let c = doStatement s in
           detach @@ c @@ s2c (resetSched ())
-      | CPC_ATTACHED (s, loc) ->
-          (* setSched and resetSched update detachedVars *)
-          let attach = s2c (setSched true) in
-          let c = doStatement s in
-          attach @@ c @@ s2c (resetSched ())
-     (*| CPC_WAIT (e, loc) ->
+     | CPC_WAIT (e, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c, e', _) = doExp false e (AExp None) in

@@ -227,9 +227,9 @@ let init_lexicon _ =
       ("cpc_yield", fun loc -> CPC_YIELD loc);
       ("cpc_done", fun loc -> CPC_DONE loc);
       ("cpc_attach", fun loc -> CPC_ATTACH loc);
-      ("cpc_detach", fun loc -> CPC_DETACH loc);*)
+      ("cpc_detach", fun loc -> CPC_DETACH loc);
+      ("cpc_detached", fun loc -> CPC_DETACHED loc);*)
       ("cpc_spawn", fun loc -> CPC_SPAWN loc);
-      ("cpc_detached", fun loc -> CPC_DETACHED loc);
       ("cpc_attached", fun loc -> CPC_ATTACHED loc);
     ]
 

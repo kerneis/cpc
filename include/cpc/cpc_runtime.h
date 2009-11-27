@@ -184,10 +184,11 @@ extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_yield(void);
 extern cps void cpc_done(void);
-extern cps cpc_sched *cpc_set_sched(cpc_sched *pool);
+extern cps cpc_sched *cpc_attach(cpc_sched *pool);
+extern cps cpc_sched *cpc_get_sched(void);
 
-#define cpc_attach() cpc_set_sched(NULL)
-#define cpc_detach() cpc_set_sched(cpc_default_sched)
+#define cpc_detach() cpc_attach(cpc_get_sched() == cpc_default_sched ? cpc_default_pool : cpc_get_sched())
+#define cpc_detached cpc_attached(cpc_get_sched() == cpc_default_sched ? cpc_default_pool : cpc_get_sched())
 
 #define CPC_IO_WAIT_2(fd, direction) cpc_io_wait(fd, direction, NULL)
 #define CPC_IO_WAIT_3(fd, direction, c)   cpc_io_wait(fd, direction, c)
