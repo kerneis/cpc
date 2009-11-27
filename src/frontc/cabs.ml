@@ -229,17 +229,17 @@ and statement =
  | TRY_FINALLY of block * block * cabsloc
 
    (** CPC **)
- | CPC_YIELD of cabsloc
+ (*| CPC_YIELD of cabsloc
  | CPC_DONE of cabsloc
  | CPC_ATTACH of expression * cabsloc
- | CPC_DETACH of expression * cabsloc
+ | CPC_DETACH of expression * cabsloc *)
  | CPC_SPAWN of statement * cabsloc
  | CPC_DETACHED of statement * cabsloc
  | CPC_ATTACHED of statement * cabsloc
- (*| CPC_FORK of statement * cabsloc*)
+ (*| CPC_FORK of statement * cabsloc
  | CPC_WAIT of expression * cabsloc
  | CPC_SLEEP of expression * expression * expression * cabsloc
- | CPC_IO_WAIT of expression * expression * expression * cabsloc
+ | CPC_IO_WAIT of expression * expression * expression * cabsloc *)
  | CPC_FUN of definition
  
 and for_clause = 

@@ -331,7 +331,7 @@ let rec analyze_stmt (s : stmt ) : unit =
         analyze_block h
     | Break l -> ()
     | Continue l -> ()
-    | CpcCut _ | CpcSpawn _ -> ()
+    (*| CpcCut _*) | CpcSpawn _ -> ()
     | CpcFun (fd, _) ->
         Errormsg.warn "ptranal: blindly diving into CpcFun (hoping \
         it's correct)\n";

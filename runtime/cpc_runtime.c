@@ -754,6 +754,12 @@ cpc_yield(struct cpc_continuation *cont)
 }
 
 void
+cpc_done(struct cpc_continuation *cont)
+{
+    cpc_continuation_free(cont);
+}
+
+void
 cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
 {
     assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);

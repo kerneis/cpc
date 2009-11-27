@@ -715,7 +715,7 @@ and print_statement stat =
       print_block h
 
   (*** CPC ***)
-  | CPC_YIELD (loc) ->
+  (*| CPC_YIELD (loc) ->
       setLoc(loc);
       print "cpc_yield ;" ;
       new_line ()
@@ -744,7 +744,7 @@ and print_statement stat =
         print_expression exp;
         print ");"
       end;
-      new_line ()
+      new_line ()*)
   | CPC_DETACHED (stat, loc) ->
       setLoc loc;
       print "cpc_detached";
@@ -768,7 +768,7 @@ and print_statement stat =
       print "cpc_fork";
       new_line () ;
       indent () ;
-      print_substatement stat;*)
+      print_substatement stat;
   | CPC_WAIT (exp, loc) ->
       printl ["cpc_wait";"("];
       print_expression exp;
@@ -796,7 +796,7 @@ and print_statement stat =
         print ", ";
         print_expression exp3;
       end;
-      print ");"; new_line ()
+      print ");"; new_line ()*)
   | CPC_FUN d -> print_def d
       
 and print_block blk = 

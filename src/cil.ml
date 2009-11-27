@@ -789,16 +789,17 @@ and stmtkind =
     
   (** CPC statements *)
 
-  | CpcCut of varinfo option * cpc_cut * location
+(*  | CpcCut of varinfo option * cpc_cut * location *)
   | CpcSpawn of exp * exp list * location
   | CpcFun of fundec * location
 
-and cpc_cut = 
+(* and cpc_cut = 
   | Yield | Done 
   | Attach of exp | Detach of exp
   | Wait of exp
   | Sleep of exp * exp * exp
   | IoWait of exp * exp * exp
+*)
 
 (** Instructions. They may cause effects directly but may not have control
     flow.*)
@@ -1126,7 +1127,7 @@ let rec get_stmtLoc (statement : stmtkind) =
                  else get_stmtLoc ((List.hd b.bstmts).skind)
     | TryFinally (_, _, l) -> l
     | TryExcept (_, _, _, l) -> l
-    | CpcCut (_, _, l) -> l
+(*    | CpcCut (_, _, l) -> l *)
     | CpcSpawn (_, _, l) -> l
     | CpcFun (_, l) -> l
 
@@ -3868,7 +3869,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
           ++ text ") " ++ unalign
           ++ self#pBlock () h
 
-    | CpcCut (ret, cut, l) ->
+(*    | CpcCut (ret, cut, l) ->
         self#pLineDirective l ++
         (match ret with
         | None -> nil
@@ -3918,7 +3919,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
             ++ self#pExp () e3
             ++ text ");")
         )
-
+*)
     | CpcSpawn (f, args, l) ->
         self#pLineDirective l
           ++ text "cpc_spawn "
@@ -5357,7 +5358,7 @@ and childrenStmt (toPrepend: instr list ref) : cilVisitor -> stmt -> stmt =
         if e' != e || el' != el then
           CpcSpawn (e', el', l)
         else s.skind
-    | CpcCut (ret, cut, l) ->
+(*    | CpcCut (ret, cut, l) ->
         let ret' =
           (match ret with
           | None -> ret
@@ -5401,7 +5402,7 @@ and childrenStmt (toPrepend: instr list ref) : cilVisitor -> stmt -> stmt =
               else cut) in
         if ret' != ret || cut' != cut then
           CpcCut( ret', cut', l)
-        else s.skind
+        else s.skind *)
     | CpcFun (f, l) ->
         let f' = visitCilFunction vis f in
         if f' != f then
@@ -5900,7 +5901,7 @@ let rec peepHole1 (* Process one instruction and possibly replace it *)
           peepHole1 doone h.bstmts;
           s.skind <- TryExcept(b, (doInstrList il, e), h, l);
       | Return _ | Goto _ | Break _ | Continue _ -> ()
-      | CpcCut _ | CpcSpawn _ -> ()
+      (*| CpcCut _*) | CpcSpawn _ -> ()
       | CpcFun _ -> ())
     ss
 
@@ -5936,7 +5937,7 @@ let rec peepHole2  (* Process two instructions and possibly replace them both *)
           s.skind <- TryExcept (b, (doInstrList il, e), h, l)
 
       | Return _ | Goto _ | Break _ | Continue _ -> ()
-      | CpcCut _ | CpcSpawn _ -> ()
+      (*| CpcCut _*) | CpcSpawn _ -> ()
       (*| CpcFork (s, _) -> peepHole2 dotwo [s]*)
       | CpcFun _ -> ())
     ss
@@ -6580,7 +6581,7 @@ and succpred_stmt s fallthrough =
                 end
   | TryExcept _ | TryFinally _ -> 
       failwith "computeCFGInfo: structured exception handling not implemented"
-  | CpcCut _ | CpcFun _ | CpcSpawn _ ->
+  (*| CpcCut _*) | CpcFun _ | CpcSpawn _ ->
       failwith "computeCFGInfo: CPC constructs handling not implemented"
 
 (* [weimer] Sun May  5 12:25:24 PDT 2002
@@ -6727,7 +6728,7 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
 
   | TryExcept _ | TryFinally _ -> 
       failwith "xform_switch_statement: structured exception handling not implemented"
-  | CpcCut _ | CpcFun _ | CpcSpawn _ -> ()
+  (*| CpcCut _*) | CpcFun _ | CpcSpawn _ -> ()
 
 end and xform_switch_block b break_dest cont_dest label_index = 
   try 

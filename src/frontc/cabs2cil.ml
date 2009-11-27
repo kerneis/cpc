@@ -98,11 +98,6 @@ let doCollapseCallCast: bool ref = ref true
   * to parse additional source files without hearing about confclits. *)
 let cacheGlobals: bool ref = ref true
 
-(** This indicates whether we are in a cpc_detached or cpc_attached
-  * block (or none of them) *)
-type detached_state = A | D | N
-let detachedState = ref N
-
 (** A hook into the code for processing typeof. *)
 let typeForTypeof: (Cil.typ -> Cil.typ) ref = ref (fun t -> t)
 
@@ -515,7 +510,6 @@ let docEnv () =
   docList ~sep:line (fun (k, d) -> dprintf "  %s -> %a" k doone d) () !acc
 
 
-
 (* Add a new variable. Do alpha-conversion if necessary *)
 let alphaConvertVarAndAddToEnv (addtoenv: bool) (vi: varinfo) : varinfo = 
 (*
@@ -701,6 +695,42 @@ let mkStartOfAndMark ((b, off) as lval) : exp =
   res
   
 
+(** Stack of variables storing the states returned by successive cpc_attached
+ * and cpc_detached *)
+let detachedVars = ref []
+let cpc_set_sched () =
+    try fst(lookupGlobalVar "cpc_set_sched")
+    with Not_found -> E.s (error "cpc_set_sched not found")
+let cpc_default_pool () =
+    try fst(lookupGlobalVar "cpc_default_pool")
+    with Not_found -> E.s (error "cpc_default_pool not found")
+
+let setSched attached =
+    let new_sched =
+      if attached then null (* NULL == cpc_default_sched *)
+      else Lval(Var (cpc_default_pool()), NoOffset) in
+    let sched_type = (cpc_default_pool()).vtype in
+    let rv = newTempVar nil true sched_type in
+    detachedVars := rv :: !detachedVars;
+    mkStmt (Instr [Call(Some (Var rv, NoOffset), Lval(Var (cpc_set_sched ()), NoOffset),
+      [new_sched], locUnknown)])
+
+let resetSched () =
+    try
+      let c = mkStmt (Instr [Call(None, Lval(Var (cpc_set_sched ()), NoOffset),
+            [Lval(Var (List.hd !detachedVars), NoOffset)], locUnknown)]) in
+      detachedVars := List.tl !detachedVars;
+      c
+    with Failure _ ->
+      E.s (bug "No attached or detached block found. Please report this bug.")
+
+let setTopSched () =
+    try
+        mkStmt (Instr [Call(None, Lval(Var (cpc_set_sched ()), NoOffset),
+          [Lval(Var (List.hd (List.rev !detachedVars)), NoOffset)], locUnknown)])
+    with Failure _ -> mkEmptyStmt () (* outside of a detached/attached block *)
+
+
 
    (* Keep a set of self compinfo for composite types *)
 let compInfoNameEnv : (string, compinfo) H.t = H.create 113
@@ -863,12 +893,7 @@ module BlockChunk =
     let skipChunk = empty
         
     let returnChunk (e: exp option) (l: location) : chunk = 
-      { stmts = (match !detachedState with
-        | N -> [ mkStmt (Return(e, l)) ]
-        (* FIXME *)
-        | A -> [ mkStmt (CpcCut(None,Detach null,l)); mkStmt (Return(e, l)) ]
-        | D -> [ mkStmt (CpcCut(None,Attach null,l)); mkStmt (Return(e, l)) ]
-        );
+      { stmts = [ setTopSched (); mkStmt (Return(e, l)) ];
         postins = [];
         cases = []
       }
@@ -923,40 +948,21 @@ module BlockChunk =
         cases = body.cases;
       } 
       
-    (* loopState will be different from N for the loops we introduce
-    ourselves. break statements are forbidden in detached/attached state
-    in the general case, because we can't distinguish switch statements. *)
-    let breakChunk (l: location) (loopState: detached_state) : chunk = 
-      { stmts = [
-            (match !detachedState, loopState with
-            | N, N | D, D | A, A -> mkEmptyStmt ()
-            | D, N | D, A
-            (* FIXME *)
-            | N, A -> mkStmt (CpcCut(None, Attach null, locUnknown))
-            | A, N | A, D
-            | N, D -> mkStmt (CpcCut(None, Detach null, locUnknown)));
-            mkStmt (Break l) ];
+    let breakChunk (l: location) : chunk = 
+      { stmts = [ mkStmt (Break l) ];
         postins = [];
         cases = [];
       } 
       
-    let continueChunk (l: location) (loopState: detached_state) : chunk = 
-      { stmts = [
-            (match !detachedState, loopState with
-            | N, N | D, D | A, A -> mkEmptyStmt ()
-            | D, N | D, A
-            (* FIXME *)
-            | N, A -> mkStmt (CpcCut(None, Attach null, locUnknown))
-            | A, N | A, D
-            | N, D -> mkStmt (CpcCut(None, Detach null, locUnknown)));
-            mkStmt (Continue l) ];
+    let continueChunk (l: location) : chunk = 
+      { stmts = [ mkStmt (Continue l) ];
         postins = [];
         cases = []
       } 
 
         (* Keep track of the gotos *)
-    let backPatchGotos : (string, (stmt ref * stmt ref * detached_state) list ref) H.t = H.create 17
-    let addGoto (lname: string) (bref: stmt ref * stmt ref * detached_state) : unit =
+    let backPatchGotos : (string, stmt ref list ref) H.t = H.create 17
+    let addGoto (lname: string) (bref: stmt ref) : unit =
       let gotos = 
         try
           H.find backPatchGotos lname
@@ -969,7 +975,7 @@ module BlockChunk =
       gotos := bref :: !gotos
 
         (* Keep track of the labels *)
-    let labelStmt : (string, (stmt * detached_state)) H.t = H.create 17
+    let labelStmt : (string, stmt) H.t = H.create 17
     let initLabels () = 
       H.clear backPatchGotos;
       H.clear labelStmt
@@ -978,17 +984,8 @@ module BlockChunk =
       H.iter
         (fun lname gotos ->
           try
-            let dest, labelState = H.find labelStmt lname in
-            List.iter (fun (gref, hole, gotoState) ->
-              gref := dest;
-              match gotoState, labelState with
-              | D, N | D, A
-              (* FIXME *)
-              | N, A -> (!hole).skind <- CpcCut(None, Attach null, locUnknown)
-              | A, N | A, D
-              | N, D -> (!hole).skind <- CpcCut(None, Detach null, locUnknown)
-              | N, N | D, D | A, A -> (!hole).skind <- Instr [];
-              ) !gotos
+            let dest = H.find labelStmt lname in
+            List.iter (fun gref -> gref := dest) !gotos
           with Not_found -> begin
             E.s (error "Label %s not found" lname)
           end)
@@ -1011,7 +1008,7 @@ module BlockChunk =
       (* Add the label *)
       labstmt.labels <- Label (l, loc, in_original_program_text) :: 
 				labstmt.labels;
-      H.add labelStmt l (labstmt, !detachedState);
+      H.add labelStmt l labstmt;
       if c.stmts == stmts' then c else {c with stmts = stmts'}
 
     let s2c (s:stmt) : chunk = 
@@ -1021,16 +1018,9 @@ module BlockChunk =
       } 
 
     let gotoChunk (ln: string) (l: location) : chunk = 
-      (* The hole will hold cpc_attach or cpc_detach if necessary.
-         It will be filled in resolveGotos. It must not be an Instr,
-         otherwise compactStmts might modify it, and it must not be
-         duplicated by duplicateChunk. An empty loop seems to be a good
-         choice.
-         *)
-      let hole = mkStmt (Loop (mkBlock [], locUnknown, None, None)) in
       let gref = ref dummyStmt in
-      addGoto ln (gref, ref hole, !detachedState);
-      { stmts = [ hole ; mkStmt (Goto(gref, l)) ];
+      addGoto ln gref;
+      { stmts = [ mkStmt (Goto(gref, l)) ];
         postins = [];
         cases = [];
       }
@@ -1096,14 +1086,14 @@ open BlockChunk
  * marker in a list saying what kinds of loop it is. When we see a continue 
  * for a Non-while loop we must generate a label for the continue *)
 type loopstate = 
-    While of detached_state
-  | NotWhile of string ref * detached_state
+    While
+  | NotWhile of string ref
 
 let continues : loopstate list ref = ref []
 
 let startLoop iswhile = 
-  continues := (if iswhile then While !detachedState
-  else NotWhile (ref "", !detachedState)) :: !continues
+  continues := (if iswhile then While
+  else NotWhile (ref "")) :: !continues
 
 (* Sometimes we need to create new label names *)
 let newLabelName (base: string) = fst (newAlphaName false "label" base)
@@ -1111,8 +1101,8 @@ let newLabelName (base: string) = fst (newAlphaName false "label" base)
 let continueOrLabelChunk (l: location) : chunk = 
   match !continues with
     [] -> E.s (error "continue not in a loop")
-  | While s :: _ -> continueChunk l s
-  | NotWhile (lr, _) :: _ -> 
+  | While :: _ -> continueChunk l
+  | NotWhile lr :: _ -> 
       if !lr = "" then begin
         lr := newLabelName "__Cont"
       end;
@@ -1121,8 +1111,8 @@ let continueOrLabelChunk (l: location) : chunk =
 let consLabContinue (c: chunk) = 
   match !continues with
     [] -> E.s (error "labContinue not in a loop")
-  | While _ :: rest -> c
-  | NotWhile (lr, _) :: rest -> if !lr = "" then c else consLabel !lr c !currentLoc false
+  | While :: rest -> c
+  | NotWhile lr :: rest -> if !lr = "" then c else consLabel !lr c !currentLoc false
 
 let exitLoop () = 
   match !continues with
@@ -5580,9 +5570,9 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
       (*let oldenv = H.copy env in
       let oldgenv = H.copy genv in*)
       let targethash = H.copy gotoTargetHash in
-      if !detachedState <> N then (
-      detachedState := N;
-      E.s (error "Internal function %s forbidden inside an attached or detached block (at %a)" n d_loc funloc));
+      if !detachedVars <> [] then (
+      E.s (error "Internal function %s forbidden inside an attached or detached \
+      block (at %a)." n d_loc funloc));
 (*      ignore (E.log "Definition of %s at %a\n" n d_loc funloc); *)
       currentLoc := funloc;
       E.withContext
@@ -5933,8 +5923,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockFallsThrough b
               | TryFinally (b, h, _) -> blockFallsThrough h
               | TryExcept (b, _, h, _) -> true (* Conservative *)
-              | CpcCut (_, Done, _) -> false
-              | CpcCut _ | CpcSpawn _ | CpcFun _ -> true
+              (*| CpcCut (_, Done, _) -> false | CpcCut _ *)
+              | CpcSpawn _ | CpcFun _ -> true
             and blockFallsThrough b = 
               let rec fall = function
                   [] -> true
@@ -5982,13 +5972,14 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               | Block b -> blockCanBreak b
               | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
               | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
-              | CpcCut _ | CpcSpawn _ | CpcFun _ -> false
+              (*| CpcCut _ *) | CpcSpawn _ | CpcFun _ -> false
             and blockCanBreak b = 
               List.exists stmtCanBreak b.bstmts
             in
             if blockFallsThrough !currentFunctionFDEC.sbody then begin
-              if !detachedState <> N then
-              E.s (bug "detachedState is different from N. This should not happen. Please, report the bug with the body of function %s" !currentFunctionFDEC.svar.vname);
+              if !detachedVars <> [] then
+              E.s (bug "Detached block detected. This should not happen. \
+              Please, report the bug with the body of function %s" !currentFunctionFDEC.svar.vname);
               let retval = 
                 match unrollType !currentReturnType with
                   TVoid _ -> None
@@ -6237,7 +6228,7 @@ and doStatement (s : A.statement) : chunk =
         let loc' = convLoc loc in
         currentLoc := loc';
         loopChunk ((doCondition false e skipChunk
-                      (breakChunk loc' !detachedState))
+                      (breakChunk loc'))
                    @@ s')
           
     | A.DOWHILE(e,s,loc) -> 
@@ -6246,8 +6237,7 @@ and doStatement (s : A.statement) : chunk =
         let loc' = convLoc loc in
         currentLoc := loc';
         let s'' = 
-          consLabContinue (doCondition false e skipChunk (breakChunk
-          loc' !detachedState))
+          consLabContinue (doCondition false e skipChunk (breakChunk loc'))
         in
         exitLoop ();
         loopChunk (s' @@ s'')
@@ -6273,7 +6263,7 @@ and doStatement (s : A.statement) : chunk =
               se1 @@ loopChunk (s' @@ s'')
           | _ -> 
               se1 @@ loopChunk ((doCondition false e2 skipChunk
-              (breakChunk loc' !detachedState))
+              (breakChunk loc'))
                                 @@ s' @@ s'')
         in
         exitScope ();
@@ -6282,14 +6272,17 @@ and doStatement (s : A.statement) : chunk =
     | A.BREAK loc -> 
         let loc' = convLoc loc in
         currentLoc := loc';
-        if !detachedState <> N then
+        if !detachedVars <> [] then
           E.s (error "break is forbidden in attached and
-          detached mode (at %a). Use a goto instead." d_loc loc');
-        breakChunk loc' N
+          detached blocks (at %a)." d_loc loc');
+        breakChunk loc'
 
     | A.CONTINUE loc -> 
         let loc' = convLoc loc in
         currentLoc := loc';
+        if !detachedVars <> [] then
+          E.s (error "continue is forbidden in attached and
+          detached blocks (at %a)." d_loc loc');
         continueOrLabelChunk loc'
 
     | A.RETURN (A.NOTHING, loc) -> 
@@ -6362,20 +6355,26 @@ and doStatement (s : A.statement) : chunk =
     | A.LABEL (l, s, loc) -> 
         let loc' = convLoc loc in
         currentLoc := loc';
+        if !detachedVars <> [] then (
+        E.s (E.error "Labels forbidden inside detached and attached \
+        block (at %a)." d_loc loc'));
         (* Lookup the label because it might have been locally defined *)
         consLabel (lookupLabel l) (doStatement s) loc' true
                      
     | A.GOTO (l, loc) -> 
         let loc' = convLoc loc in
         currentLoc := loc';
+        if !detachedVars <> [] then (
+        E.s (E.error "Goto forbidden inside detached and attached \
+        block (at %a)." d_loc loc'));
         (* Maybe we need to rename this label *)
         gotoChunk (lookupLabel l) loc'
 
     | A.COMPGOTO (e, loc) -> begin
         let loc' = convLoc loc in
-        if !detachedState <> N then (
-        detachedState := N;
-        E.s (E.error "Computed gotos forbidden inside detached and attached block (at %a)" d_loc loc'));
+        if !detachedVars <> [] then (
+        E.s (E.error "Computed gotos forbidden inside detached and attached \
+        block (at %a)." d_loc loc'));
         currentLoc := loc';
         (* Do the expression *)
         let se, e', t' = doExp false e (AExp (Some voidPtrType)) in
@@ -6498,7 +6497,7 @@ and doStatement (s : A.statement) : chunk =
         s2c (mkStmt (TryExcept (c2block b', (il', e'), c2block h', loc')))
 
     (*** CPC ***)
-     | CPC_YIELD loc ->
+     (*| CPC_YIELD loc ->
         let loc' = convLoc loc in
         currentLoc := loc';
         s2c (mkStmt (CpcCut (None, Yield, loc')))
@@ -6524,50 +6523,51 @@ and doStatement (s : A.statement) : chunk =
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcCut (None, Detach e', loc')))
+        c @@ s2c (mkStmt (CpcCut (None, Detach e', loc')))*)
      | CPC_SPAWN (s, loc) ->
+        let loc' = convLoc loc in
         (* The body of a cpc_spawn should always be converted as if it
            were outside of every detached/attached block *)
-        let ds = !detachedState in
-        detachedState := N;
-        let loc' = convLoc loc in
+        let dv = !detachedVars in
+        detachedVars := [];
+        if dv <> [] then
+          ignore(E.warn "cpc_spawn in a detached or attached block will attach \
+          the spawned thread to the default scheduler anyway (at %a)." d_loc loc'); 
         let mkSpawn f args = mkStmt (CpcSpawn (f, args, loc')) in
         let returns_void f = match splitFunctionTypeVI f with
           (t,_,_,_) -> typeSig t = typeSig voidType in
         currentLoc := loc';
         begin match compactStmts (pushPostIns (doStatement s)) with
         | [] ->
-            ignore(E.warn "empty cpc_spawn in %a" d_loc loc');
-            detachedState := ds;
+            ignore(E.warn "empty cpc_spawn (at %a)." d_loc loc');
+            detachedVars := dv;
             skipChunk
         | [{skind=Instr[Call(None,Lval(Var f, NoOffset),args,_)]}]
             when f.vcps && returns_void f ->
-	      detachedState := ds;
+	      detachedVars := dv;
               s2c (mkSpawn (Lval (Var f, NoOffset)) args)
         | body ->
           let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
           let f = {(emptyFunction name) with sbody = mkBlock (body @
             [mkStmt (Return (None,locUnknown))])} in
           f.svar.vcps <- true;
-          detachedState := ds;
+          detachedVars := dv;
           s2c (mkStmt (Block (mkBlock [
           mkStmt(CpcFun(f, loc'));
           mkSpawn (Lval (Var f.svar,NoOffset)) []
           ])))
         end
       | CPC_DETACHED (s, loc) ->
-          let ds = !detachedState in
-          detachedState := D;
-          let c = doStatement (A.SEQUENCE (CPC_DETACH (NOTHING, loc), A.SEQUENCE (
-            s, CPC_ATTACH (NOTHING, loc), loc), loc)) in
-          detachedState := ds; c
+          (* setSched and resetSched update detachedVars *)
+          let detach = s2c (setSched false) in
+          let c = doStatement s in
+          detach @@ c @@ s2c (resetSched ())
       | CPC_ATTACHED (s, loc) ->
-          let ds = !detachedState in
-          detachedState := A;
-          let c = doStatement (A.SEQUENCE (CPC_ATTACH (NOTHING, loc),
-            A.SEQUENCE (s, CPC_DETACH (NOTHING, loc), loc), loc)) in
-          detachedState := ds; c
-     | CPC_WAIT (e, loc) ->
+          (* setSched and resetSched update detachedVars *)
+          let attach = s2c (setSched true) in
+          let c = doStatement s in
+          attach @@ c @@ s2c (resetSched ())
+     (*| CPC_WAIT (e, loc) ->
         let loc' = convLoc loc in
         currentLoc := loc';
         let (c, e', _) = doExp false e (AExp None) in
@@ -6602,7 +6602,7 @@ and doStatement (s : A.statement) : chunk =
         let (c1, e1', _) = doExp false e1 (AExp None) in
         let (c2, e2', _) = doExp false e2 (AExp None) in
         let (c3, e3', _) = doExp false e3 (AExp None) in
-        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcCut (None, IoWait (e1', e2', e3'), loc')))
+        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcCut (None, IoWait (e1', e2', e3'), loc'))) *)
      | CPC_FUN d -> doDecl false d
 
 

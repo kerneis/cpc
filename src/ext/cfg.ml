@@ -209,7 +209,7 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option)
   | TryExcept _ | TryFinally _ -> 
       E.s (E.unimp "try/except/finally")
   (* We also MUST compute the successor of cpc_done, which must be a return. *)
-  | CpcCut _ | CpcSpawn _ ->
+  (*| CpcCut _*) | CpcSpawn _ ->
       addOptionSucc next
   | CpcFun (fd, _) ->
       addOptionSucc next;
@@ -237,7 +237,7 @@ and fasStmt (todo) (s : stmt) =
       | If (_, tb, fb, _) -> (fasBlock todo tb; fasBlock todo fb)
       | Switch (_, b, _, _) -> fasBlock todo b
       | Loop (b, _, _, _) -> fasBlock todo b
-      | CpcCut _ | CpcSpawn _
+      (*| CpcCut _*) | CpcSpawn _
       | (Return _ | Break _ | Continue _ | Goto _ | Instr _) -> ()
       | TryExcept _ | TryFinally _ -> E.s (E.unimp "try/except/finally")
       | CpcFun (fd, _) -> forallStmts todo fd
@@ -265,13 +265,13 @@ let d_cfgnodelabel () (s : stmt) =
       | Return _ -> "return"
       | TryExcept _ -> "try-except"
       | TryFinally _ -> "try-finally"
-      | CpcCut (_, Yield, _) -> "cpc-yield"
+      (*| CpcCut (_, Yield, _) -> "cpc-yield"
       | CpcCut (_, Done, _) -> "cpc-done"
       | CpcCut (_, Attach _, _) -> "cpc-attach"
       | CpcCut (_, Detach _, _) -> "cpc-detach"
       | CpcCut (_, Wait _, _) -> "cpc-wait"
       | CpcCut (_, Sleep _, _) -> "cpc-sleep"
-      | CpcCut (_, IoWait _, _) -> "cpc-io-wait"
+      | CpcCut (_, IoWait _, _) -> "cpc-io-wait"*)
       | CpcSpawn _ -> "cpc-spawn"
       | CpcFun _ -> "cpc-fun"
   end in

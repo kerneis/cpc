@@ -788,7 +788,7 @@ and checkStmt (s: stmt) =
             currentReturnType := ret;
             statements := stmts;
             gotoTargets := gotos
-      | CpcCut (Some v, _, _) ->
+      (*| CpcCut (Some v, _, _) ->
           E.s (bug "Return values not handled yet for cpc constructs")
       | CpcCut (None, cut, _) ->
           match cut with
@@ -804,6 +804,7 @@ and checkStmt (s: stmt) =
               ignore(checkExp false e);
               ignore(checkExp false e');
               ignore(checkExp false e'')
+    *)
           )
     () (* argument of withContext *)
 

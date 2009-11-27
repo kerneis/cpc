@@ -9,7 +9,7 @@ LDLIBS=-L../runtime -lm -pthread -lcpcfull
 
 .PHONY: all clean
 
-all: barrier conditions detached done loops patch sleep sleep_cond \
+all: barrier conditions done loops patch sleep sleep_cond \
     tcat tcat_fd trivial-httpd
 
 servers: trivial-httpd trivial-httpd-fork trivial-httpd-nptl \
@@ -19,8 +19,6 @@ servers: trivial-httpd trivial-httpd-fork trivial-httpd-nptl \
 barrier: barrier.o
 
 conditions: conditions.o
-
-detached: detached.o
 
 done: done.o
 

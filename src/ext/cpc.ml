@@ -94,7 +94,7 @@ let rec xform_switch_stmt s = begin
 
   | TryExcept _ | TryFinally _ ->
       failwith "xform_switch_statement: structured exception handling not implemented"
-  | CpcCut _ | CpcFun _ | CpcSpawn _ -> ()
+  (*| CpcCut _*) | CpcFun _ | CpcSpawn _ -> ()
 
 end and xform_switch_block b =
   try
@@ -265,8 +265,8 @@ let rec find_var = function
   | hd::tl -> find_var tl
 
 (* find the following pattern:
-  <cps call/cut>; goto l; label l: <start>;
-and extract the last var assigned in <cps call/cut>.
+  <cps call>; goto l; label l: <start>;
+and extract the last var assigned in <cps call>.
 *)
 class lastVar = fun start -> object(self)
   inherit mynopCilVisitor
@@ -276,8 +276,8 @@ class lastVar = fun start -> object(self)
       match s.preds with
       | [{skind=Instr l} as p] when p.cps ->
           raise (find_var l)
-      | [{skind=CpcCut (Some v, _, _)}] ->
-          raise (FoundVar v)
+      (*| [{skind=CpcCut (Some v, _, _)}] ->
+          raise (FoundVar v)*)
       | _ -> raise Not_found
   end
   | _ -> DoChildren
@@ -546,7 +546,7 @@ class markCps = fun file -> object(self)
     (* Cpc constructs *)
 
     (* In a regular function *)
-    | CpcCut _ when not c.cps_fun ->
+    (*| CpcCut _ when not c.cps_fun ->
         E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
     (* In a cps function: *)
     (* 1. with no cps instruction before *)
@@ -559,7 +559,7 @@ class markCps = fun file -> object(self)
           have to split it. *)
     | CpcCut _ ->
         raise (AddGoto c)
-
+    *)
     (* cpc_spawn must NOT appear in cps context *)
     | CpcSpawn _ when c.cps_con ->
         raise (AddGoto c)
@@ -700,13 +700,13 @@ class cpsConverter = fun file ->
   let yield cc =
     (* cpc_prim_yield(cc); *)
     [Call(None,Lval(Var cpc_yield, NoOffset),
-      [Lval(Var cc, NoOffset)],locUnknown)] in*)
+      [Lval(Var cc, NoOffset)],locUnknown)] in
   let cpc_continuation_free = find_function "cpc_continuation_free" file in
   let continuation_free cc =
     (* cpc_continuation_free(cc); *)
     [Call(None,Lval(Var cpc_continuation_free, NoOffset),
       [Lval(Var cc, NoOffset)],locUnknown)] in
-  (* let cpc_sleep = find_function "cpc_prim_sleep" file in
+  let cpc_sleep = find_function "cpc_prim_sleep" file in
   let sleep x y condvar cc =
     (* cpc_prim_sleep(x, y, condvar, cc); *)
     [Call(None,Lval(Var cpc_sleep, NoOffset), [
@@ -726,11 +726,7 @@ class cpsConverter = fun file ->
     [Call(None,Lval(Var cpc_io_wait, NoOffset), [
       x; y; check_null condvar;
       Lval(Var cc, NoOffset)],
-      locUnknown)] in *)
-  let yield _ = E.s (E.bug "cpc_prim_yield is deprecated.") in
-  let sleep _ _ _ _ = E.s (E.bug "cpc_prim_sleep is deprecated.") in
-  let wait _ _ = E.s (E.bug "cpc_prim_wait is deprecated.") in
-  let io_wait _ _ _ _ = E.s (E.bug "cpc_prim_io_wait is deprecated.") in
+      locUnknown)] in
   let cpc_attach = find_function "cpc_prim_attach" file in
   let attach scheduler cc =
     (* cpc_prim_attach(cc) *)
@@ -743,7 +739,7 @@ class cpsConverter = fun file ->
     [Call(None,Lval(Var cpc_detach, NoOffset), [
       pool;
       Lval(Var cc, NoOffset)],
-      locUnknown)] in
+      locUnknown)] in*)
   (* XXX DEBUGING *)
   let debug =
     if !E.debugFlag then
@@ -836,7 +832,7 @@ class cpsConverter = fun file ->
     mkStmt (Instr (
     (* The stack should be a list of cps calls and might end with a
        cpc_construct. *)
-    match List.rev stack with
+    (*match List.rev stack with
     | {skind=CpcCut (None, Yield, _)} :: l ->
         convert l @ debug "cpc_yield" @ yield current_continuation
     | {skind=CpcCut (None, Done, _)} :: l ->
@@ -856,17 +852,17 @@ class cpsConverter = fun file ->
     | {skind=CpcCut (None, IoWait (x, y, condvar), _)} :: l ->
         convert l @ io_wait x y condvar current_continuation
     | {skind=CpcCut (Some _, _, _)} as s :: _ ->
-        E.s (E.bug "This cpc construct should not return anything: %a\n" d_stmt s)
-    | l ->
-        convert l @
-        patch_instr @
-        (* cpc_invoke(current_continuation); *)
-        [Call(None, Lval(Var cpc_invoke, NoOffset),
-        [Lval(Var current_continuation, NoOffset)], locUnknown)]
+        E.s (E.bug "This cpc construct should not return anything: %a\n" d_stmt
+        s)*)
+    convert (List.rev stack) @
+    patch_instr @
+    (* cpc_invoke(current_continuation); *)
+    [Call(None, Lval(Var cpc_invoke, NoOffset),
+    [Lval(Var current_continuation, NoOffset)], locUnknown)]
   ))
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
-  | CpcCut _ | Instr _ when s.cps ->
+  (*| CpcCut _ *)| Instr _ when s.cps ->
       (* If the labels are not empty, this must be first cps statement,
          so the stack has to be empty. *)
       assert(s.labels = [] || stack = []);
@@ -883,7 +879,7 @@ class cpsConverter = fun file ->
           mkStmt (Return (None, loc))]);
       stack <- [];
       SkipChildren
-  | CpcCut _ -> assert false
+  (* | CpcCut _ -> assert false *)
   | CpcSpawn (f, args, _) ->
       s.skind <- Instr (self#convert_instr ~apply_later:true
         (Call(None,f,args,locUnknown)));
@@ -1172,7 +1168,7 @@ class insertGotos = object(self)
   | Instr il ->
       s.skind <- Block (mkBlock (compactStmts (insert_gotos il)));
       SkipChildren
-  | CpcCut (Some v, cut, loc) ->
+  (*  | CpcCut (Some v, cut, loc) ->
       let dst = {(mkEmptyStmt()) with labels = [Label (make_label(), loc, false)]} in
       (* XXX DO NOT USE copyClearStmt HERE --- we want to keep the labels *)
       let s' = {(mkEmptyStmt()) with skind=s.skind; cps = s.cps} in
@@ -1187,7 +1183,7 @@ class insertGotos = object(self)
       let copy = mkStmt s.skind in
       let return = mkStmt (Return (None, loc)) in
       s.skind <- Block (mkBlock [copy; return]);
-      SkipChildren
+      SkipChildren *)
   | _ -> DoChildren
 
 end
@@ -1514,8 +1510,8 @@ let rec stmtFallsThrough (s: stmt) : bool =
   | Block b -> blockFallsThrough b
   | TryFinally (b, h, _) -> blockFallsThrough h
   | TryExcept (b, _, h, _) -> true (* Conservative *)
-  | CpcCut (_, Done, _) -> false
-  | CpcCut _ | CpcSpawn _ | CpcFun _ -> true
+  (*| CpcCut (_, Done, _) -> false
+  | CpcCut _*) | CpcSpawn _ | CpcFun _ -> true
 and blockFallsThrough b = 
   let rec fall = function
       [] -> true
@@ -1549,7 +1545,7 @@ and stmtCanBreak (s: stmt) : bool =
   | Block b -> blockCanBreak b
   | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
   | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
-  | CpcCut _ | CpcSpawn _ | CpcFun _ -> false
+  (*| CpcCut _*) | CpcSpawn _ | CpcFun _ -> false
 and blockCanBreak b = 
   List.exists stmtCanBreak b.bstmts
 (***** End of code from cabs2cil.ml *****)
