@@ -772,7 +772,7 @@ class cpsConverter = fun file ->
           var
           (if cps_function
           then Lval(Var current_continuation, NoOffset)
-          else mkCast (integer 0) voidPtrType)
+          else mkCast (mkCast (integer 0) voidPtrType) cpc_cont_ptr)
       else (current_continuation,[],[]) in
     match i with
     (* Cps call with or without assignment (we don't care at this level) *)
