@@ -1,7 +1,8 @@
 #include <stdio.h>
+#include <assert.h>
 
 cps void
-g(char c)
+g(char c, int mode)
 {
     int i,j;
 
@@ -9,13 +10,13 @@ g(char c)
 
     for(i = 0; i < 5; i++) {
       for (j = 0; j < 2; j++) {
-        cpc_yield();
+        cpc_yield(mode);
         f();
         switch(i % 2) {
           case 0:
             f();
             /* This loop is not converted to gotos */
-            do printf("BIP!\n");
+            do assert(1 != 2);
             while(0);
           default:
             break;
@@ -29,8 +30,9 @@ g(char c)
 int
 main()
 {
-    cpc_spawn { g('a'); printf("A a fini, B devrait bientot.\n"); }
-    cpc_spawn { g('b'); }
+    cpc_spawn { g('a', CPC_NEXT); printf("A a fini, B devrait bientot.\n"); }
+    cpc_spawn { g('b', CPC_NEXT); }
+    cpc_spawn { g('c', CPC_IDLE); }
     cpc_main_loop();
     return 0;
 }

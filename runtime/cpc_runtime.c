@@ -21,7 +21,7 @@ Experimental; do not redistribute.
 #include "nft_pool.h"
 
 static struct ev_loop *loop = NULL;
-static ev_idle run;
+static ev_idle run, idle_run;
 
 static pthread_t main_loop_id;
 
@@ -50,6 +50,7 @@ struct cpc_condvar {
 #define STATE_GARBAGE -4
 
 static cpc_continuation_queue ready = {NULL, NULL};
+static cpc_continuation_queue idle_ready = {NULL, NULL};
 static cpc_continuation_queue attach_queue = {NULL, NULL};
 
 static void io_cb (struct ev_loop *, ev_io *, int);
@@ -749,18 +750,30 @@ cpc_threadpool_release(struct nft_pool *pool)
 
 /*** cpc_yield and cpc_spawn ***/
 
-void
-cpc_yield(struct cpc_continuation *cont)
+struct cpc_yield_arglist {
+   int mode;
+} __attribute__((__packed__)) ;
+
+void cpc_yield(struct cpc_continuation *cont)
 {
+    int mode;
+    cpc_condvar *cond;
+    struct cpc_yield_arglist *cpc_arguments ;
+
+    cpc_arguments = (struct cpc_yield_arglist *) cpc_dealloc(cont,
+                    (int )sizeof(struct cpc_yield_arglist ));
+    mode = cpc_arguments->mode;
+
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED);
         cpc_invoke_continuation(cont);
-    } else {
+    } else if (mode == CPC_NEXT || mode == CPC_IDLE) {
         assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
                 cont->condvar == NULL);
-        enqueue(&ready, cont);
         assert(loop);
-        ev_idle_start(loop, &run);
+
+        enqueue(mode == CPC_NEXT ? &ready : &idle_ready, cont);
+        ev_idle_start(loop, mode == CPC_NEXT ? &run : &idle_run);
     }
 }
 
@@ -818,11 +831,17 @@ static void
 idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
 {
     struct cpc_continuation *c;
-    struct cpc_continuation_queue q;
+    struct cpc_continuation_queue q, *p;
 
     ev_idle_stop(loop, w);
-    q = ready;
-    ready.head = ready.tail = NULL;
+    if(w == &run) {
+        p = &ready;
+    } else {
+        assert(w == &idle_run);
+        p = &idle_ready;
+    }
+    q = *p;
+    p->head = p->tail = NULL;
     while((c = dequeue(&q))) {
         assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
         exhaust_ready(c);
@@ -844,6 +863,10 @@ cpc_main_loop(void)
     /* Executing continuations must be the task of highest priority. */
     ev_set_priority(&run, EV_MAXPRI);
     ev_idle_start(loop, &run);
+
+    ev_idle_init(&idle_run, idle_cb);
+    /* Executing idle continuations must be the task of lowest priority. */
+    ev_set_priority(&idle_run, EV_MINPRI);
 
     cpc_default_pool = nft_pool_create(MAX_THREADS, 0);
 

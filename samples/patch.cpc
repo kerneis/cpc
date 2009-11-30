@@ -19,7 +19,7 @@ g(char c)
     }
 
     for(i = 0; i < 10; i++) {
-        cpc_yield();
+        cpc_yield(CPC_NEXT);
         f();
         if(i % 2 == 0)
             f();
