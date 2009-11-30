@@ -22,6 +22,7 @@ Experimental; do not redistribute.
 
 static struct ev_loop *loop = NULL;
 static ev_idle run, idle_run;
+static ev_check check;
 
 static pthread_t main_loop_id;
 
@@ -767,13 +768,20 @@ void cpc_yield(struct cpc_continuation *cont)
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED);
         cpc_invoke_continuation(cont);
-    } else if (mode == CPC_NEXT || mode == CPC_IDLE) {
-        assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
-                cont->condvar == NULL);
-        assert(loop);
+        return;
+    }
 
+    assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
+        cont->condvar == NULL);
+    assert(loop);
+    assert(mode == CPC_NEXT || mode == CPC_IDLE || mode == CPC_LAZY);
+
+    if (mode == CPC_NEXT || mode == CPC_IDLE) {
         enqueue(mode == CPC_NEXT ? &ready : &idle_ready, cont);
         ev_idle_start(loop, mode == CPC_NEXT ? &run : &idle_run);
+    } else if (mode == CPC_LAZY) {
+        enqueue(&ready, cont);
+        ev_check_start(loop, &check);
     }
 }
 
@@ -848,6 +856,16 @@ idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
     }
 }
 
+static void
+check_cb(struct ev_loop *loop, ev_check *w, int revents)
+{
+    ev_check_stop(loop, w);
+
+    if(ready.head && !ev_is_active(&run)) {
+        ev_idle_start(loop, &run);
+    }
+}
+
 void
 cpc_main_loop(void)
 {
@@ -867,6 +885,11 @@ cpc_main_loop(void)
     ev_idle_init(&idle_run, idle_cb);
     /* Executing idle continuations must be the task of lowest priority. */
     ev_set_priority(&idle_run, EV_MINPRI);
+
+    ev_check_init(&check, check_cb);
+    /* Check watchers must always be the task of highest priority. */
+    ev_set_priority(&check, EV_MAXPRI);
+    ev_check_start(loop, &check);
 
     cpc_default_pool = nft_pool_create(MAX_THREADS, 0);
 

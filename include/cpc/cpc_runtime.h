@@ -99,6 +99,7 @@ cpc_invoke_continuation(struct cpc_continuation *c)
 
 #define CPC_NEXT 0
 #define CPC_IDLE 1
+#define CPC_LAZY 2
 
 static inline struct cpc_continuation *
 cpc_continuation_push(cpc_continuation *c, cpc_function *f)

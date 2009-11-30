@@ -33,6 +33,7 @@ main()
     cpc_spawn { g('a', CPC_NEXT); printf("A a fini, B devrait bientot.\n"); }
     cpc_spawn { g('b', CPC_NEXT); }
     cpc_spawn { g('c', CPC_IDLE); }
+    cpc_spawn { g('d', CPC_LAZY); }
     cpc_main_loop();
     return 0;
 }
