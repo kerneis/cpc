@@ -861,6 +861,13 @@ class cpsConverter = fun file ->
     [Lval(Var current_continuation, NoOffset)], locUnknown)]
   ))
 
+  method vinst = function
+  (* Special case: some functions need to be given the current continuation *)
+  | Call(r, Lval (Var ({vname = "cpc_get_sched" } as v), NoOffset), [], loc) ->
+      ChangeTo [Call(r, Lval (Var v, NoOffset),
+        [Lval(Var current_continuation, NoOffset)], loc)]
+  | _ -> DoChildren
+
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   (*| CpcCut _ *)| Instr _ when s.cps ->
       (* If the labels are not empty, this must be first cps statement,

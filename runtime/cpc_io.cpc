@@ -15,7 +15,6 @@ cpc_setup_descriptor(int fd, int nonagle)
 {
     int rc;
     int one = 1;
-
     rc = fcntl(fd, F_GETFL, 0);
     if(rc < 0) return -1;
     rc = fcntl(fd, F_SETFL, rc | O_NONBLOCK);

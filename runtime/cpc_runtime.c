@@ -615,12 +615,11 @@ void cpc_io_wait(struct cpc_continuation *cont)
 
 /*** cpc_get_sched ***/
 
-void
+cpc_sched *
 cpc_get_sched(struct cpc_continuation *cont)
 {
     /* Return the current scheduler */
-    cpc_continuation_patch(cont, sizeof(cpc_sched *), &cont->sched);
-    cpc_invoke_continuation(cont);
+    return cont->sched;
 }
 
 
