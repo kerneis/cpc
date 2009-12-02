@@ -9,7 +9,7 @@ g(char c)
 
     for(i = 0; i < 5; i++) {
       for (j = 0; j < 2; j++) {
-        cpc_yield(CPC_NEXT);
+        cpc_yield();
         f();
         switch(i % 2) {
           case 0:

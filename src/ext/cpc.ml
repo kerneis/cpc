@@ -1170,6 +1170,9 @@ class addDefaultArgs file =
   | Call(ret, Lval(Var ({vname = "cpc_sleep"} as v), NoOffset), [s; ms], loc) ->
       ChangeTo [Call(ret, Lval(Var v, NoOffset),
       [s; ms; condvar_null_ptr], loc)]
+  | Call(ret, Lval(Var ({vname = "cpc_yield"} as v), NoOffset), [], loc) ->
+      ChangeTo [Call(ret, Lval(Var v, NoOffset),
+      [zero], loc)]
   (* cpc_wait is handled via cpc_sleep when it has several arguments *)
   | Call(ret, Lval(Var {vname = "cpc_wait"}, NoOffset), [c; s], loc) ->
       ChangeTo [Call(ret, Lval(Var cpc_sleep, NoOffset),
