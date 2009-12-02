@@ -151,41 +151,6 @@ extern cpc_sched *cpc_get_sched(struct cpc_continuation *);
 
 extern double cpc_now(void);
 
-
-/* Macro hacks to handle variadic cps functions */
-
-/* The PP_NARG macro returns the number of arguments that have been
-  * passed to it.
-  */
-
-#define PP_NARG(...) \
-         PP_NARG_(__VA_ARGS__,PP_RSEQ_N())
-#define PP_NARG_(...) \
-         PP_ARG_N(__VA_ARGS__)
-#define PP_ARG_N( \
-          _1, _2, _3, _4, _5, _6, _7, _8, _9,_10, \
-         _11,_12,_13,_14,_15,_16,_17,_18,_19,_20, \
-         _21,_22,_23,_24,_25,_26,_27,_28,_29,_30, \
-         _31,_32,_33,_34,_35,_36,_37,_38,_39,_40, \
-         _41,_42,_43,_44,_45,_46,_47,_48,_49,_50, \
-         _51,_52,_53,_54,_55,_56,_57,_58,_59,_60, \
-         _61,_62,_63,N,...) N
-#define PP_RSEQ_N() \
-         63,62,61,60,                   \
-         59,58,57,56,55,54,53,52,51,50, \
-         49,48,47,46,45,44,43,42,41,40, \
-         39,38,37,36,35,34,33,32,31,30, \
-         29,28,27,26,25,24,23,22,21,20, \
-         19,18,17,16,15,14,13,12,11,10, \
-         9,8,7,6,5,4,3,2,1,0
-
-#define CAT(a, ...) PRIMITIVE_CAT(a, __VA_ARGS__)
-#define PRIMITIVE_CAT(a, ...) a ## __VA_ARGS__
-
-#define OVERLOAD(prefix, ...) \
-    CAT(prefix, PP_NARG(__VA_ARGS__)) \
-    /**/
-
 #ifndef NO_CPS_PROTO
 extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
@@ -197,30 +162,6 @@ extern cps cpc_sched *cpc_attach(cpc_sched *pool);
 #define cpc_detach() cpc_attach(cpc_get_sched() == cpc_default_sched ? cpc_default_pool : cpc_get_sched())
 #define cpc_detached cpc_attached(cpc_get_sched() == cpc_default_sched ? cpc_default_pool : cpc_get_sched())
 
-#define CPC_IO_WAIT_2(fd, direction) cpc_io_wait(fd, direction, NULL)
-#define CPC_IO_WAIT_3(fd, direction, c)   cpc_io_wait(fd, direction, c)
-
-#define cpc_io_wait(...) \
-    OVERLOAD(CPC_IO_WAIT_, __VA_ARGS__)(__VA_ARGS__) \
-    /**/
-
-
-#define CPC_SLEEP_1(sec) cpc_sleep(sec, 0, NULL)
-#define CPC_SLEEP_2(sec, usec) cpc_sleep(sec, usec, NULL)
-#define CPC_SLEEP_3(sec, usec, c)   cpc_sleep(sec, usec, c)
-
-#define cpc_sleep(...) \
-    OVERLOAD(CPC_SLEEP_, __VA_ARGS__)(__VA_ARGS__) \
-    /**/
-
-/* cpc_wait with timeout is handled via cpc_sleep */
-#define CPC_WAIT_1(c) cpc_wait(c)
-#define CPC_WAIT_2(c, s) cpc_sleep(s, 0, c)
-#define CPC_WAIT_3(c, s, ms)   cpc_sleep(s, ms, c)
-
-#define cpc_wait(...) \
-    OVERLOAD(CPC_WAIT_, __VA_ARGS__)(__VA_ARGS__) \
-    /**/
 #endif
 
 

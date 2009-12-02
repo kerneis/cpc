@@ -1150,6 +1150,36 @@ class removeNastyExpressions = object(self)
   | _ -> SkipChildren
 end
 
+(********** Add defaults arguments to cpc primitives *************************)
+
+class addDefaultArgs file =
+  let condvar_null_ptr =
+    mkCast (mkCast (integer 0) voidPtrType)
+    (TPtr(find_type "cpc_condvar" file,[])) in
+  let cpc_sleep = find_function "cpc_sleep" file in
+  object(self)
+  inherit mynopCilVisitor
+
+  method vinst = function
+  | Call(ret, Lval(Var ({vname = "cpc_io_wait"} as v), NoOffset), [fd; dir], loc) ->
+      ChangeTo [Call(ret, Lval(Var v, NoOffset),
+      [fd; dir; condvar_null_ptr], loc)]
+  | Call(ret, Lval(Var ({vname = "cpc_sleep"} as v), NoOffset), [s], loc) ->
+      ChangeTo [Call(ret, Lval(Var v, NoOffset),
+      [s; zero; condvar_null_ptr], loc)]
+  | Call(ret, Lval(Var ({vname = "cpc_sleep"} as v), NoOffset), [s; ms], loc) ->
+      ChangeTo [Call(ret, Lval(Var v, NoOffset),
+      [s; ms; condvar_null_ptr], loc)]
+  (* cpc_wait is handled via cpc_sleep when it has several arguments *)
+  | Call(ret, Lval(Var {vname = "cpc_wait"}, NoOffset), [c; s], loc) ->
+      ChangeTo [Call(ret, Lval(Var cpc_sleep, NoOffset),
+      [s; zero; c], loc)]
+  | Call(ret, Lval(Var {vname = "cpc_wait"}, NoOffset), [c; s; ms], loc) ->
+      ChangeTo [Call(ret, Lval(Var cpc_sleep, NoOffset),
+      [s; ms; c], loc)]
+  | _ -> SkipChildren
+end
+
 (******** Insert goto after cps assignment and returns before cpc_done *******)
 
 let rec insert_gotos il =
@@ -1823,6 +1853,8 @@ let rec cps_marking f =
 let stages = [
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
+  ("Add defaults arguments\n", fun file ->
+  visitCilFileSameGlobals (new addDefaultArgs file) file);
   ("Avoid ampersand\n", fun file ->
   visitCilFileSameGlobals (new avoidAmpersand file) file);
   ("Remove nasty expressions\n", fun file ->
