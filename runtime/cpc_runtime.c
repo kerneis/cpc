@@ -773,15 +773,13 @@ void cpc_yield(struct cpc_continuation *cont)
     assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
         cont->condvar == NULL);
     assert(loop);
-    assert(mode == CPC_NEXT || mode == CPC_IDLE || mode == CPC_LAZY);
 
-    if (mode == CPC_NEXT || mode == CPC_IDLE) {
-        enqueue(mode == CPC_NEXT ? &ready : &idle_ready, cont);
-        ev_idle_start(loop, mode == CPC_NEXT ? &run : &idle_run);
-    } else if (mode == CPC_LAZY) {
-        enqueue(&ready, cont);
+    enqueue(mode & CPC_BACKGROUND ? &idle_ready : &ready, cont);
+    if(mode & CPC_OPPORTUNISTIC)
+        /* Opportunistic equivalent of ev_idle_start(loop, &run); */
         ev_check_start(loop, &check);
-    }
+    else
+        ev_idle_start(loop, mode & CPC_BACKGROUND ? &idle_run : &run);
 }
 
 void
@@ -860,8 +858,14 @@ check_cb(struct ev_loop *loop, ev_check *w, int revents)
 {
     ev_check_stop(loop, w);
 
-    if(ready.head && !ev_is_active(&run)) {
-        ev_idle_start(loop, &run);
+    /* XXX: Opportunistic foreground yield will trigger even on
+       background threads waking up.  If you want to avoid this, use the
+       following condition instead:
+    if(ready.head && !ev_is_pending(&idle_run))
+    */
+    if(ready.head) {
+        /* Execute the idle callback as if the run watcher had triggered. */
+        idle_cb(loop, &run, EV_CUSTOM);
     }
 }
 
