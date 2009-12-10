@@ -145,9 +145,7 @@ extern void cpc_prim_detach(cpc_sched*, cpc_continuation*);
 extern cpc_sched *cpc_threadpool_get(int);
 extern void cpc_threadpool_release(cpc_sched *);
 
-/* Of course, the continuation is not to be provided by the user. CPC
- * adds it automatically */
-extern cpc_sched *cpc_get_sched(struct cpc_continuation *);
+extern cpc_sched *cpc_get_sched();
 
 extern double cpc_now(void);
 

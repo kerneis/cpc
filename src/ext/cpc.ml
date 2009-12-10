@@ -341,6 +341,25 @@ let find_struct name file =
     E.s (E.bug "compinfo not found for: %s\n" name)
   with FoundCompinfo c -> c
 
+exception FoundField of fieldinfo
+
+let find_field struct_name field_name file =
+  let visitor = object(self)
+    inherit mynopCilVisitor
+
+    method vglob = function
+      | GCompTag ({cname = n} as c,_) when n = struct_name ->
+          raise (FoundField (getCompField c field_name))
+      | _ -> DoChildren
+  end in
+  try
+    visitCilFileSameGlobals visitor file;
+    E.s (E.bug "compinfo not found for: %s\n" struct_name)
+  with
+  | FoundField f -> f
+  | Not_found ->
+      E.s (E.bug "fieldinfo not found for: %s in %s\n" field_name struct_name)
+
 exception FoundType of typ
 
 let find_type name file =
@@ -645,6 +664,7 @@ class cpsConverter = fun file ->
   let cpc_cont_ptr =
     TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
   let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
+  let sched_field = find_field "cpc_continuation" "sched" file in
   (*let cpc_condvar_ptr = TPtr(find_type "cpc_condvar" file,[]) in
   let check_null condvar =
     if condvar = mkCast (integer 0) voidPtrType
@@ -863,9 +883,12 @@ class cpsConverter = fun file ->
 
   method vinst = function
   (* Special case: some functions need to be given the current continuation *)
-  | Call(r, Lval (Var ({vname = "cpc_get_sched" } as v), NoOffset), [], loc) ->
-      ChangeTo [Call(r, Lval (Var v, NoOffset),
-        [Lval(Var current_continuation, NoOffset)], loc)]
+  | Call(r, Lval (Var {vname = "cpc_get_sched" }, NoOffset), [], loc) ->
+      (match r with
+      | None -> ChangeTo []
+      | Some v -> ChangeTo [Set(v, Lval(Mem (Lval (Var current_continuation,
+      NoOffset)),
+        Field(sched_field, NoOffset)), loc)])
   | _ -> DoChildren
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with

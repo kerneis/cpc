@@ -613,17 +613,6 @@ void cpc_io_wait(struct cpc_continuation *cont)
 }
 
 
-/*** cpc_get_sched ***/
-
-cpc_sched *
-cpc_get_sched(struct cpc_continuation *cont)
-{
-    /* Return the current scheduler */
-    return cont->sched;
-}
-
-
-
 /*** cpc_attach ****/
 
 struct cpc_attach_arglist {

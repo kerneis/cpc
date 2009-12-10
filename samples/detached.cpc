@@ -23,6 +23,7 @@ g(char c)
       }
       f();
     }
+    printf("%c was running on scheduler %p\n", c, cpc_get_sched());
 }
 
 
