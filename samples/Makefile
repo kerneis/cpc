@@ -65,7 +65,8 @@ static-httpd-pth.o: trivial-httpd-pth.c
 	$(CC) $(CFLAGS) -c -DSTATIC $< -o $@
 
 clean:
-	rm -f *.o *~ *.cpi trivial-httpd.c
+	rm -f *.o *~ *.cpi
+	for x in *.cpc; do rm -f $${x%.cpc}.c; done;
 	rm -f barrier conditions detached done loops patch sleep sleep_cond tcat tcat_fd\
 	 trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
 	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
