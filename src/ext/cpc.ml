@@ -1052,7 +1052,7 @@ class avoidAmpersand f =
               Some (Lval (Var r, NoOffset)), [Set((Var r, NoOffset), rval, loc)] in
           s.skind <- Block (mkBlock [
           mkStmt (Instr (assign @ List.map (fun v ->
-          Call(None,free,[Lval(Var v, NoOffset)],locUnknown)) l));
+          Call(None,free,[mkCast (Lval(Var v, NoOffset)) voidPtrType],locUnknown)) l));
           mkStmt (Return (rv,loc))]);
           SkipChildren
        | _ -> DoChildren
