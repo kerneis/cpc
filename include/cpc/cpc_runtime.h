@@ -17,7 +17,7 @@ typedef struct nft_pool cpc_sched;
 extern cpc_sched *cpc_default_pool;
 #define cpc_default_sched NULL
 
-extern void *memcpy (void *dest, const void *src, size_t n);
+extern void *memcpy (void * __restrict dest, const void * __restrict src, size_t n);
 
 typedef struct cpc_continuation {
     struct cpc_continuation *next;
