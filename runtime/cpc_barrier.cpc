@@ -65,7 +65,7 @@ cpc_barrier_await(cpc_barrier *barrier)
         cpc_signal_all(barrier->condition);
         cpc_condvar_release(barrier->condition);
         free(barrier);
-        cpc_yield;
+        cpc_yield();
         return;
     }
 }
