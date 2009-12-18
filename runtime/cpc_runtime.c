@@ -487,6 +487,7 @@ timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 void
 cpc_signal_fd(int fd, int direction)
 {
+    assert(!IS_DETACHED);
     if(loop)
         ev_feed_fd_event (loop, fd, direction);
 }
