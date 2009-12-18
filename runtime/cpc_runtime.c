@@ -735,6 +735,8 @@ cpc_threadpool_release(struct nft_pool *pool)
      pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
      pthread_create(&t, &attr, (void*(*)(void*)) nft_pool_destroy, (void *)pool);
      pthread_attr_destroy(&attr);
+     /* FIXME: race condition */
+     sched_yield(); // Mitigating the race?
 }
 
 /*** cpc_yield and cpc_spawn ***/
