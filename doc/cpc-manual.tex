@@ -1,4 +1,6 @@
 \documentclass[a4paper]{report}
+\usepackage{stmaryrd} % \llbracket, \rrbracket
+\usepackage{url}
 
 \title{The CPC manual}
 \author{Juliusz Chroboczek, Gabriel Kerneis\\
@@ -67,10 +69,7 @@ language; thus, the syntax of CPC is defined as a set of productions to be
 added to the grammar defined in the ISO C99 standard \cite{iso:c99}.
 
 In addition to the reserved words in C99, CPC reserves the words
-{\tt cps}, {\tt cpc\_yield}, {\tt cpc\_done}, {\tt cpc\_spawn}, 
-{\tt cpc\_wait}, {\tt cpc\_sleep},
-{\tt cpc\_io\_wait}, {\tt cpc\_attach}, {\tt cpc\_detach} and
-{\tt cpc\_detached}.
+{\tt cps}, {\tt cpc\_spawn} and {\tt cpc\_attached}.
 
 \subsection{CPS contexts} \label{sec:contexts}
 
@@ -82,8 +81,8 @@ defined as follows:
   (Sec.~\ref{sec:cpc-functions};
 \item the body of a {\tt cpc\_spawn} statement is in cps context
   (Sec.~\ref{sec:cooperating});
-\item the body of a {\tt cpc\_detached} or {\tt cpc\_attached} statement is
-  in cps context (Sec.~\ref{sec:native-threads}).
+\item the body of a {\tt cpc\_attached} statement is in cps context
+  (Sec.~\ref{sec:native-threads}).
 \end{itemize}
 Any construct that is not in cps context is said to be in native context.
 
@@ -105,7 +104,10 @@ be within other cps functions.
 
 Free variables of inner functions are copies of the variables of the
 enclosing function; thus, a change to the value of the free variable
-is not visible in the enclosing function.
+is not visible in the enclosing function\footnote{Except if the variable
+is declared {\tt static}.}.  The free variables are initialized whenever
+the inner function is called; thus, their initial value does not depend
+on the location of the inner function within the outer one.
 
 \subsection{Bootstrapping} \label{sec:bootstrapping}
 
@@ -119,81 +121,161 @@ function \verb|cpc_main_loop| invokes the CPC scheduler; it returns
 when all threads have been exhausted (i.e.\ where there is
 nothing more to do).
 
-\subsection{CPC statements}
+\subsection{CPC statements and primitive cps functions}
 
 \[ \mbox{statement} ::= \mbox{cpc-statement} \]
 
-CPC has a number of statements not present in the C language.
+CPC has a number\footnote{Three, to be precise.} of statements not
+present in the C language.  Moreover, it provides a set of primitive cps
+functions, allowing the programmer to schedule threads and wait for some
+events.
+
+It is important to understand that those primitive functions could not
+be defined outside the CPC runtime: they must have access to the
+internals of the scheduler to operate.  Since they are cps functions,
+they are valid only in cps context.
 
 \subsection{Detaching and reattaching} \label{sec:native-threads}
-\begin{eqnarray*}
-\mbox{cpc-statement} ::= &|& \mathtt{cpc\_detach} \mathtt{;} \\ &|&
-\mathtt{cpc\_attach} \mathtt{;} \\ &|&
-\mathtt{cpc\_detached}\ \mbox{statement} \\ &|&
-\mathtt{cpc\_attached}\ \mbox{statement}
-\end{eqnarray*}
 
-A thread can be {\em detached\/} from the CPC scheduler and scheduled to be
-run by a native operating-system thread; intuitively, the thread
-``becomes'' a native thread.
+A continuation can be scheduled to be run by a native thread; intuitively,
+the continuation ``becomes'' a native thread.  When this happens, we say
+that the continuation has been {\em detached\/} from the CPC scheduler,
+and {\em attached\/} to some thread pool.  The opposite operation is
+known as {\em attaching\/} a detached continuation back to the CPC
+scheduler.  It is of course possible to migrate a detached continuation
+directly from one thread pool to another.
 
-\paragraph{cpc\_detach, cpc\_attach} The {\tt cpc\_detach} statement
-detaches the current thread; the following statements are executed in a
-dedicated native thread.  The opposite operation is performed by {\tt
-  cpc\_attach}, which causes the current continuation to be scheduled by
-the CPC scheduler.
+\begin{verbatim}
+    typedef cpc_sched;
+    cpc_sched *cpc_default_scheduler, *cpc_default_pool;
 
-The {\tt cpc\_detach} and {\tt cpc\_attach} statements can only appear in
-cps context.
+    cpc_sched *cpc_threadpool_get(int);
+    void cpc_threadpool_release(cpc_sched *);
 
-\paragraph{cpc\_detached, cpc\_attached} The body of a {\tt cpc\_detached}
-statement is run detached : an implicit {\tt cpc\_detach} is executed upon
-entering the body, and a {\tt cpc\_attach} is executed upon exiting.  The
-{\tt cpc\_attached} construct is dual : a {\tt cpc\_attach} is executed
-upon entry, and a {\tt cpc\_detach} is executed upon exit.
+    cps cpc_sched *cpc_attach(cpc_sched *pool);
+    cpc_sched *cpc_get_sched();
+\end{verbatim}
 
+
+\paragraph{\tt cpc\_attach} The {\tt cpc\_attach} statement
+attaches the current continuation to the given scheduler.  If the
+scheduler is a thread pool, the following statements are executed in a
+dedicated native thread, within the thread pool.  If the scheduler is
+the special {\tt cpc\_default\_scheduler}, the current continuation is
+scheduled by the CPC scheduler.\\
+{\bf Warning:\/} currently, {\tt cpc\_default\_scheduler} is a {\tt
+NULL} pointer, but this is {\em not} guaranteed to hold in the future.
+Always use the {\tt cpc\_default\_scheduler} variable.
+
+\paragraph{\tt cpc\_threadpool\_get} The function {\tt cpc\_threadpool\_get}
+returns a pointer to a new thread pool.  It takes one argument: the
+maximum number of threads in the pool (thread are created dynamically).
+This argument is cropped to {\tt MAX\_THREADS}\footnote{{\tt
+MAX\_THREADS} is an internal constant of the CPC runtime, currently set
+to 20.} if it is outside the $\llbracket 1; \mbox{\tt
+MAX\_THREADS}\rrbracket$ interval.
+
+\paragraph{\tt cpc\_threadpool\_release} Conversely, {\tt
+cpc\_threadpool\_release} releases a given thread pool {\em in an
+asynchronous manner\/}: once this function has returned, it is
+impossible to attach new continuations to the thread pool anymore, but
+the ressources will effectively be released only once every attached
+continuation is either finished or attached back to another scheduler.\\
+{\bf Bug:} the current implementation suffers from a race condition.
+You have the guarantee that the pool will eventually be released, but
+some continuations might manage to attach to it after the function has
+returned.
+
+\paragraph{\tt cpc\_default\_pool} A pointer to the default thread pool,
+initialised during the call to {\tt cpc\_main\_loop}.
+
+\paragraph{\tt cpc\_get\_sched} The function {\tt cpc\_get\_sched} returns
+the current scheduler.  Although this is not a cps function, it should
+be treated as such: this function is valid in cps context only, and no
+pointer to it should be taken.
+
+\subsubsection*{Syntactic sugar}
+\paragraph{\tt cpc\_attached}
+\[ \mbox{cpc-statement} ::=
+   \mathtt{cpc\_attached}\ (\mbox{expression})\ \mbox{statement} \]
+
+The body of a {\tt cpc\_attached} statement is run attached to the
+scheduler given as its argument: an implicit {\tt s =
+cpc\_attach(expression)} is executed upon entering the body, and a {\tt
+cpc\_attach(s)} is executed when the end of the statement is reached,
+and before any {\tt return} statement inside the body.  Some constructs
+are forbidden in the body of a {\tt cpc\_attached} statement because
+they disrupt the flow of control: {\tt goto}, {\tt break}, {\tt
+continue} and labels.\\
+{\em Note:\/} it would be possible to allow the forbidden constructs,
+with a smart detection of when one jumps in or out of the body; CPC used
+to do this in the past.  But I believe this is ``too much of magic''
+with a potentially unhealthy semantics.  Therefore, the programmer has
+to take care of such tricky cases by himself.
+
+\paragraph{\tt cpc\_detach, cpc\_detached} Attach to the default thread
+pool, if not already detached.
+\begin{verbatim}
+    #define cpc_detach() \
+      cpc_attach(cpc_get_sched() == cpc_default_sched ? \
+      cpc_default_pool : cpc_get_sched())
+    #define cpc_detached \
+      cpc_attached(cpc_get_sched() == cpc_default_sched ? \
+      cpc_default_pool : cpc_get_sched())
+\end{verbatim}
 \subsection{Cooperating: yielding, spawning} \label{sec:cooperating}
 
-\begin{eqnarray*}
-\mbox{cpc-statement} & ::= & 
-     \mathtt{cpc\_yield} \mathtt{;} \\
- &|& \mathtt{cpc\_done} \mathtt{;} \\
- &|& \mathtt{cpc\_spawn}\ \mbox{statement}
-\end{eqnarray*}
+\[ \mbox{cpc-statement} ::=
+   \mathtt{cpc\_spawn}\ \mbox{statement} \]
+\begin{verbatim}
+    cps void cpc_yield();
+    cps void cpc_done();
+\end{verbatim}
 
-\paragraph{\tt cpc\_yield} The {\tt cpc\_yield} statement causes the
-current continuation to be suspended, and placed at the end of the queue of
-runnable continuations.  Control is passed back to the CPC main loop.  This
-statement is only allowed in cps context, and has no effect in detached
-state.
+\paragraph{\tt cpc\_yield} The function {\tt cpc\_yield} causes the
+current continuation to be suspended, and placed at the end of the
+queue of runnable continuations.  Control is passed back to the CPC
+main loop.  This statement has no effect in detached state.\\
+{\bf Experimental:} this function accepts an optionnal {\tt int mode}
+argument but this is likely to change in a near future.  You shall not
+rely on it.
 
-\paragraph{\tt cpc\_done} The {\tt cpc\_done} statement causes the
+\paragraph{\tt cpc\_done} The function {\tt cpc\_done} causes the
 current continuation to be discarded, and control to be passed back to
-the main CPC loop.  This statement is only allowed in cps context.
+the main CPC loop.
 
 \paragraph{\tt cpc\_spawn} The {\tt cpc\_spawn} statement creates a new
-attached thread that executes the argument to {\tt cpc\_spawn} and places
-it at the end of the queue of runnable continuations.  Execution then
+attached thread that executes the argument to {\tt cpc\_spawn} and
+places it at the end of the queue of runnable continuations.  If this
+argument contains free variables, they are handled like free variables
+in CPS functions (Section~\ref{sec:cpc-functions}). Execution then
 proceeds after the {\tt cpc\_spawn} statement (control is {\em not\/}
 passed back to the main CPC loop).  This statement is valid in arbitrary
 context.
 
 \subsection{Synchronisation: condition variables}
 
-\[ \mbox{cpc-statement} ::=
-   \mathtt{cpc\_wait} \mathtt{(} \mbox{expression} \mathtt{)} \mathtt{;} \]
-
 \begin{verbatim}
     typedef struct cpc_condvar cpc_condvar;
+
+    cpc_condvar *cpc_condvar_get(void);
+    cpc_condvar *cpc_condvar_retain(cpc_condvar*);
+    void cpc_condvar_release(cpc_condvar*);
+    int cpc_condvar_count(cpc_condvar*);
+
+    cps int cpc_wait(cpc_condvar *cond);
     void cpc_signal(cpc_condvar *);
     void cpc_signal_all(cpc_condvar *);
 \end{verbatim}
 
-\paragraph{\tt cpc\_wait} The {\tt cpc\_wait} statement places the
+\paragraph{\tt cpc\_wait} The function {\tt cpc\_wait} places the
 current continuation on the list of continuations waiting on the
 condition variable passed as argument to {\tt cpc\_wait}.  Control is
-passed back to the CPC loop.  This statement is only valid in cps
-context and attached state.
+passed back to the CPC loop.  This function accepts two additionnal
+optionnal arguments, specifying a timeout in seconds and microseconds.  
+See {\tt cpc\_sleep} below for more details.  This function returns {\tt
+CPC\_CONDVAR} or {\tt CPC\_TIMEOUT}, depending on the event which woke
+it up.  This function is only valid in attached state.
 
 \paragraph{\tt cpc\_signal} The function {\tt cpc\_signal} causes the
 first of the continuations waiting on the condition variable passed as
@@ -211,45 +293,59 @@ but only in attached state.
 
 \subsection{Sleeping}
 
-\[ \mbox{cpc-statement} ::=
-     \mathtt{cpc\_sleep} \mathtt{(} \mbox{expression}
-                                   [ \mathtt{,}\ \mbox{expression}
-                                     [ \mathtt{,}\
-                                         \mbox{expression} ]]
-                         \mathtt{)} \mathtt{;} \]
+\begin{verbatim}
+    cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
+\end{verbatim}
 
-\paragraph{cpc\_sleep} The statement {\tt cpc\_sleep} takes three
+\paragraph{\tt cpc\_sleep} The function {\tt cpc\_sleep} takes three
 arguments: a time in seconds, a time in microseconds, and a condition
-variable.  It causes the current thread to be suspended until either the
-specified amount of time has passed, or the condition variable is
-signalled, whichever happens first.
+variable.  It causes the current thread to be suspended until
+either the specified amount of time has passed, or the condition
+variable is signalled, whichever happens first.  It returns,
+respectively, {\tt CPC\_TIMEOUT} or {\tt CPC\_CONDVAR}.
 
 The third argument can be omitted if no interruption is necessary.
 The second argument can be omitted if sub-second accuracy is not
 needed.
 
-This statement is only valid in cps context.  The form with an expression
-is only valid in attached state.
+The form with a third argument is only valid in attached state.
+
+The following calls:
+\begin{verbatim}
+    cpc_wait(cond, sec);
+    cpc_wait(cond, sec, usec);
+\end{verbatim}
+are syntactic sugar for, respectively,
+\begin{verbatim}
+    cpc_sleep(sec, 0, cond);
+    cpc_sleep(sec, usec, cond);
+\end{verbatim}
 
 \subsection{Waiting for I/O}
-\[ \mbox{cpc-statement} ::=
-   \mathtt{cpc\_io\_wait} \mathtt{(} \mbox{expression}
-                                   \mathtt{,}\ \mbox{expression}
-                                   [ \mathtt{,}\ \mbox{expression} ]
-                         \mathtt{)} \mathtt{;}\]
 
-\paragraph{cpc\_io\_wait} The statement {\tt cpc\_io\_wait} takes three
+\begin{verbatim}
+    cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
+    void cpc_signal_fd(int fd, int direction);
+\end{verbatim}
+
+\paragraph{\tt cpc\_io\_wait} The function {\tt cpc\_io\_wait} takes three
 arguments: a file descriptor, a direction, and a condition variable.
 The direction can be one of {\tt CPC\_IO\_IN}, meaning input, or {\tt
   CPC\_IO\_OUT}, meaning output.
 
-This statement causes the current continuation to be suspended until
+This function causes the current continuation to be suspended until
 either the given file descriptor is available for I/O in the given
 direction, or the given condition variable is signalled, whichever
-happens first.
+happens first.  It returns {\tt CPC\_IO\_IN}, {\tt CPC\_IO\_OUT} or {\tt
+CPC\_CONDVAR}, depending on what happened.
 
-This statement is only valid in cps contex, and the form with a second
-expression is only valid in attached state.
+The form with a third argument is only valid in attached state.
+
+\paragraph{\tt cpc\_signal\_fd} The function {\tt cpc\_signal\_fd} wakes
+up the continuations waiting for an event {\tt direction} on the {\tt
+fd} file descriptor.  It shall only be called in the same thread as the
+CPC scheduler (but not necessarily in cps context) and will only wake up
+attached threads.
 
 \section{Limitations and implementation notes}
 
@@ -265,12 +361,36 @@ not allowed in CPC code.
 
 \subsection{Current limitations}
 
-Old-style (``K\&R'') function definitions are not supported.
+The current implementation is based on CIL.  The CIL limitations
+therefore apply:
+\begin{quote}
+There are several implementation details of CIL that might make it
+unusable or less than ideal for certain tasks:
+\begin{itemize}
+\item CIL operates after preprocessing. If you need to see comments, for
+example, you cannot use CIL. But you can use attributes and pragmas
+instead. And there is some support to help you patch the include
+files before they are seen by the preprocessor. For example, this is
+how we turn some {\tt \#define}s that we don’t like into function calls.
+\item CIL does transform the code in a non-trivial way. This is done
+in order to make most analyses easier. But if you want to see
+the code {\tt e1, e2++} exactly as it appears in the code, then you
+should not use CIL.
+\item CIL removes all local scopes and moves all variables to
+function scope. It also separates a declaration with an
+initializer into a declaration plus an assignment. The
+unfortunate effect of this transformation is that local
+variables cannot have the {\tt const} qualifier.
+\end{itemize}
+From \url{http://hal.cs.berkeley.edu/cil/cil011.html}.
+\end{quote}
 
 \subsection{Time complexity of CPC operations}
 
 The current implementation of CPC implements all the CPS operations in
-constant time, with the following exceptions:
+constant time, with the following exceptions:\marginpar{\small This
+might not be true anymore, but the old behaviour will eventually be
+restored.}
 \begin{itemize} 
 \item when a continuation is queued on two structures simultaneously
   (because of {\tt cpc\_sleep} or {\tt cpc\_io\_wait} with a non-null
