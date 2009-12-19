@@ -162,9 +162,10 @@ attaches the current continuation to the given scheduler.  If the
 scheduler is a thread pool, the following statements are executed in a
 dedicated native thread, within the thread pool.  If the scheduler is
 the special {\tt cpc\_default\_scheduler}, the current continuation is
-scheduled by the CPC scheduler.\\
+scheduled by the CPC scheduler.  This function returns a pointer to the
+scheduler you are coming from.\\
 {\bf Warning:\/} currently, {\tt cpc\_default\_scheduler} is a {\tt
-NULL} pointer, but this is {\em not} guaranteed to hold in the future.
+NULL} pointer, but this is {\em not\/} guaranteed to hold in the future.
 Always use the {\tt cpc\_default\_scheduler} variable.
 
 \paragraph{\tt cpc\_threadpool\_get} The function {\tt cpc\_threadpool\_get}
