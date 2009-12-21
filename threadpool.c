@@ -206,16 +206,14 @@ thread_main(void *pool)
     if(threadpool->scheduled.first == NULL) {
         struct timespec ts;
 
-        /* Under Linux with NPTL, thread creation is faster than waiting on
-           a condition variable.  So don't bother keeping idle threads. */
-#if defined(__linux__) && defined(__GLIBC__) && (__GLIBC__ >= 2)
-        goto die;
-#endif
-
         if(threadpool->dying)
             goto die;
 
-        /* For non-Linux systems, this constant may need to be tweaked. */
+        /* Beware when benchmarking.  Under Linux with NPTL, idle threads
+           are slightly counter-productive in some benchmarks, but
+           extremely productive in others. */
+
+        /* This constant may need to be tweaked. */
         if(threadpool->idle >= 2)
             goto die;
 
