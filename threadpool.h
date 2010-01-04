@@ -40,7 +40,7 @@ threadpool_t *threadpool_create(int maxthreads,
 
 /* Cause a thread pool to die.  Returns whenever there is new stuff in the
    callback queue, or immediately if canblock is false.  Returns true when
-   the thread pull is dead. */
+   the thread pool is dead. */
 int threadpool_die(threadpool_t *threadpool, int canblock);
 
 /* Destroy a thread pool.  Does nothing and returns -1 if the pool is not
