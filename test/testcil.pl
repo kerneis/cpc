@@ -676,6 +676,8 @@ addTest("testrun/extinline2");
 addTest("test/extinline3");
 addTest("testrun/bool");
 addTest("test/va_arg_pack");
+addBadComment("testrun/compound1", "Notbug. Undefined behavior (probably).");
+addTest("testrun/compound2");
 
 
 # ---------------- c-torture -------------
