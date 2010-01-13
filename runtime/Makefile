@@ -15,6 +15,9 @@ all: libcpc.a libcpcfull.a
 cpc_runtime.o: cpc_runtime.c
 	$(CC) $(CFLAGS) -c $<
 
+threadpool/threadpool.o: threadpool/threadpool.c
+	cd threadpool && $(MAKE) threadpool.o
+
 libcpc.a: cpc_runtime.o threadpool/threadpool.o
 	rm -f $@
 	ar rc $@ $^
