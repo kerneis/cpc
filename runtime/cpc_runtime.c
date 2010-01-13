@@ -364,7 +364,7 @@ timed_enqueue(cpc_timed_continuation_queue *queue, cpc_continuation *c,
         while(timeval_cmp(time, &other->next->time) >= 0)
             other = other->next;
         tc->next = other->next;
-        other->next = tc->next;
+        other->next = tc;
     }
 }
 
