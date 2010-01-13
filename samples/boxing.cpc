@@ -1,4 +1,9 @@
-// should print: 42
+/* EXPECTED OUTPUT
+42
+* END OF OUTPUT */
+
+#include <stdio.h>
+
 cps void set_x(int *p) { *p = 42; }
 cps void print(int i) { printf("%d\n", i); }
 cps void foo(){
@@ -7,8 +12,6 @@ cps void foo(){
     print(x);
 }
 int main(){
-    int *p;
-    *p = 0;
     cpc_spawn foo();
     cpc_main_loop();
     return 0;

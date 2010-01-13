@@ -1,15 +1,25 @@
+/* EXPECTED OUTPUT
+A1
+B1
+C1
+B2
+A2
+C2
+* END OF OUTPUT */
+
 #include <stdio.h>
 
 int
 main()
 {
-    /* Displays A1, B1; after 500ms, displays B2 and A2 (immediately). */
+    /* Displays A1, B1, C1; after 500ms, displays B2 and A2 (immediately). 
+       After 1s, display C2 and quit. */
 
     cpc_condvar *c;
     c = cpc_condvar_get();
     cpc_spawn { 
         printf("A1\n"); 
-        cpc_sleep(1, 0, c);
+        cpc_sleep(10, 0, c);
         cpc_signal(c);
         printf("A2\n"); 
     }
@@ -19,9 +29,12 @@ main()
         cpc_signal(c);
         printf("B2\n"); 
     }
+    cpc_spawn {
+        printf("C1\n");
+        cpc_sleep(1, 0);
+        printf("C2\n");
+    }
     cpc_main_loop();
     cpc_condvar_release(c);
     return 0;
 }
-
-    

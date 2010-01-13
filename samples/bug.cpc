@@ -1,4 +1,7 @@
-// should print: 0 17 16 33
+/* EXPECTED OUTPUT
+0 17 16 33
+* END OF OUTPUT */
+
 int glob = 8;
 cps void set_glob() { glob = 16; }
 cps int identity(int x) { return x; }

@@ -128,6 +128,9 @@ cpc: $(BUILDER)
 samples: cpc
 	cd samples; $(MAKE) all
 
+testcpc: samples
+	cd samples; $(MAKE) test
+
 cilly: $(OBJDIR)/cilly$(EXE)
 $(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO)) \
                         $(CILLY_CMODULES:%=$(OBJDIR)/%.$(CMC))

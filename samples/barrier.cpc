@@ -1,11 +1,18 @@
-#include <stdio.h>
+/* EXPECTED OUTPUT
+M1
+A1
+B1
+M2
+A2
+B2
+* END OF OUTPUT */
 
+#include <stdio.h>
 #include "cpc/cpc_lib.h"
 
 cps void
 cpsmain()
 {
-    /* Displays M1, A1, B1, then M2, A2, B2. */
 
     cpc_barrier *barrier;
     barrier = cpc_barrier_get(3);

@@ -1,3 +1,7 @@
+/* EXPECTED OUTPUT
+A
+* END OF OUTPUT */
+
 #include <stdio.h>
 
 int

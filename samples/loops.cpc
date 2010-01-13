@@ -1,42 +1,81 @@
+/* EXPECTED OUTPUT
+a: 0
+a: 0
+a: 0
+b: 0
+b: 0
+b: 0
+a: 1
+a: 1
+b: 1
+b: 1
+a: 2
+a: 2
+a: 2
+b: 2
+b: 2
+b: 2
+a: 3
+a: 3
+b: 3
+b: 3
+a: 4
+a: 4
+a: 4
+b: 4
+b: 4
+b: 4
+a: 5
+a: 5
+b: 5
+b: 5
+a: 6
+a: 6
+a: 6
+b: 6
+b: 6
+b: 6
+a: 7
+a: 7
+b: 7
+b: 7
+a: 8
+a: 8
+a: 8
+b: 8
+b: 8
+b: 8
+a: 9
+a: 9
+A a fini, B devrait bientot.
+b: 9
+b: 9
+* END OF OUTPUT */
+
 #include <stdio.h>
-#include <assert.h>
 
 cps void
-g(char c, int mode)
+g(char c)
 {
-    int i,j;
+    int i;
 
-    cps void f(void) { printf("%c: %d\n", c, 2*i + j); }
+    cps void f(void) { printf("%c: %d\n", c, i); }
 
-    for(i = 0; i < 5; i++) {
-      for (j = 0; j < 2; j++) {
-        cpc_yield(mode);
+    for(i = 0; i < 10; i++) {
+        cpc_yield();
         f();
-        switch(i % 2) {
-          case 0:
+        if(i % 2 == 0)
             f();
-            /* This loop is not converted to gotos */
-            do assert(1 != 2);
-            while(0);
-          default:
-            break;
-        }
-      }
-      f();
+        f();
     }
 }
 
 
 int
-main(int argc, char **argv)
+main()
 {
-    cpc_spawn { g('a', CPC_NORMAL); printf("A a fini, B devrait bientot.\n"); }
-    cpc_spawn { g('b', CPC_NORMAL); }
-    cpc_spawn { g('c', CPC_OPPORTUNISTIC); }
-    if (argc > 1)
-        cpc_spawn { g('d', CPC_BACKGROUND); }
-    /* This thread will never run if d is not spawned. */
-    cpc_spawn { g('e', CPC_OPPORTUNISTIC | CPC_BACKGROUND); }
+    cpc_spawn { g('a'); printf("A a fini, B devrait bientot.\n"); }
+    cpc_spawn { g('b'); }
     cpc_main_loop();
     return 0;
 }

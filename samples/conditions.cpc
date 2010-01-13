@@ -1,9 +1,15 @@
+/* EXPECTED OUTPUT
+A1
+B1
+B2
+A2
+* END OF OUTPUT */
+
 #include <stdio.h>
 
 int
 main()
 {
-    /* Displays A1, B1, B2, A2. */
 
     cpc_condvar *c;
     c = cpc_condvar_get();
