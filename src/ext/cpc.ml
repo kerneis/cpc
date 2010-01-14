@@ -697,12 +697,6 @@ class cpsConverter = fun file ->
     TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
   let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
   let sched_field = find_field "cpc_continuation" "sched" file in
-  (*let cpc_condvar_ptr = TPtr(find_type "cpc_condvar" file,[]) in
-  let check_null condvar =
-    if condvar = mkCast (integer 0) voidPtrType
-    then mkCast (integer 0) cpc_condvar_ptr
-    else condvar in*)
-  let size_t = find_type "size_t" file in
   let cpc_alloc = find_function "cpc_alloc" file in
   let cpc_dealloc =  find_function "cpc_dealloc" file in
   let cpc_invoke =
@@ -721,7 +715,7 @@ class cpsConverter = fun file ->
        (* cpc_patch(cont, sizeof(typ), &temp); *)
       [ Call(None,Lval(Var cpc_patch, NoOffset), [
         Lval(Var cont, NoOffset);
-        mkCast (sizeOf typ) size_t;
+        mkCast (sizeOf typ) !typeOfSizeOf;
         mkCast (addr_of temp) voidPtrType],
         locUnknown)]
     else
@@ -738,7 +732,7 @@ class cpsConverter = fun file ->
         Call(None, Lval(Var memcpy, NoOffset), [
         Lval(Var cpc_arg, NoOffset);
         mkCast (addr_of temp) voidPtrType;
-        mkCast (sizeOf typ) size_t],
+        mkCast (sizeOf typ) !typeOfSizeOf],
         locUnknown)]
     in
   let cpc_spawn = find_function "cpc_prim_spawn" file in
@@ -1067,7 +1061,7 @@ class avoidAmpersand f =
       | TFun(rt, _, _, _) -> rt
       | _ -> E.s (E.bug "Function %s does not have a function type\n" fd.svar.vname) in
     let malloc = Lval(Var (findOrCreateFunc f "malloc" (TFun(voidPtrType, Some
-    ["size", find_type "size_t" f, []], false, []))), NoOffset) in
+    ["size", !typeOfSizeOf, []], false, []))), NoOffset) in
     let free = Lval(Var (findOrCreateFunc f "free" (TFun(voidType, Some ["ptr",
     voidPtrType, []], false, []))), NoOffset) in
     let mallocs = mkStmt (Instr (List.map (fun v ->
