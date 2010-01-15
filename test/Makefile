@@ -434,5 +434,24 @@ merge-ar:
 	cd small2; $(CILHOME)/bin/cilly --merge --mode=AR cr libmerge.a merge-ar.o merge-twice-1.o
 	cd small2; $(CILHOME)/bin/cilly --merge libmerge.a -o merge-ar
 
+#######
+#######  C-TORTURE
+#######
+# To run all c-torture tests do
+# test> testsafec --group=ctorture --run
+CTORTDIR := /usr/local/src/gcc/gcc/testsuite/gcc.c-torture
+# CILLY := gcc
+tort/compile/%: $(CTORTDIR)/compile/%.c mustbegcc
+	cd $(CTORTDIR)/compile; $(CILLY) --nomerge $*.c -c -o $*.o
 
+tort/execute/%: $(CTORTDIR)/execute/%.c mustbegcc
+	rm -f $(CTORTDIR)/execute/a.exe
+	cd $(CTORTDIR)/execute; $(CILLY) $*.c -o a.exe
+	echo Cure complete
+	$(CTORTDIR)/execute/a.exe
 
+tort/compat/%: $(CTORTDIR)/compat/%.c mustbegcc
+	rm -f $(CTORTDIR)/compat/a.exe
+	cd $(CTORTDIR)/compat; $(CILLY) $*.c -o a.exe
+	echo Cure complete
+	$(CTORTDIR)/compat/a.exe
