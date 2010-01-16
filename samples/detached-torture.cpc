@@ -1,0 +1,35 @@
+/* EXPECTED OUTPUT
+1000000
+* END OF OUTPUT */
+
+#include <stdio.h>
+#include "cpc/cpc_lib.h"
+#define N 1000000
+#define N_THREADS 10
+#define N_POOLS 10
+
+int n = 0;
+
+int main() {
+    int i;
+
+    cpc_sched *pools[N_POOLS];
+    cpc_barrier *barrier = cpc_barrier_get(N + 1);
+
+    for(i = 0; i < N_POOLS; i++)
+        pools[i] = cpc_threadpool_get(N_THREADS);
+
+    for(i = 0; i < N; i++) cpc_spawn {
+        cpc_attached(pools[i % N_POOLS]) __sync_fetch_and_add(&n, 1);
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_spawn { cpc_barrier_await(barrier); printf("%d\n", n); }
+
+    cpc_main_loop();
+
+    for(i = 0; i < N_POOLS; i++)
+        while(cpc_threadpool_release(pools[i]) < 0);
+
+    return 0;
+}
