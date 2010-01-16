@@ -1,11 +1,33 @@
 /* EXPECTED OUTPUT
 42
+2
 * END OF OUTPUT */
 
 #include <stdio.h>
+#include "cpc/cpc_lib.h"
 
-cps void set_x(int *p) { *p = 42; }
 cps void print(int i) { printf("%d\n", i); }
+
+cps void double_free_bug() {
+
+    cpc_barrier *b = cpc_barrier_get(2);
+
+    int x = 0;
+    int *p = &x;
+    cpc_yield();
+    int *q = p; /* x must be boxed */
+
+    /* If freeing is done in inner functions, this should lead a double
+     * free bug, or a segfault (depending on the scheduling). */
+    cpc_spawn { x++; cpc_barrier_await(b); }
+
+    x++;
+    cpc_barrier_await(b);
+    print(x);
+    return;
+}
+    
+cps void set_x(int *p) { *p = 42; }
 cps void foo(){
     int x = 0;
     set_x(&x);
@@ -13,6 +35,7 @@ cps void foo(){
 }
 int main(){
     cpc_spawn foo();
+    cpc_spawn double_free_bug();
     cpc_main_loop();
     return 0;
 }

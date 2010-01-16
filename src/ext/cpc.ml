@@ -1081,6 +1081,7 @@ class avoidAmpersand f =
           Call(None,free,[mkCast (Lval(Var v, NoOffset)) voidPtrType],locUnknown)) l));
           mkStmt (Return (rv,loc))]);
           SkipChildren
+       | CpcFun _ -> SkipChildren (* avoid double free bug *)
        | _ -> DoChildren
        end
       ) in
