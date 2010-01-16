@@ -130,12 +130,18 @@ cpc_continuation_get(int size)
     return c;
 }
 
+static void
+free_detached_cb(void *closure)
+{
+    detached_count--;
+}
+
 void
 cpc_continuation_free(struct cpc_continuation *c)
 {
     assert((c->state == STATE_UNKNOWN || c->state == STATE_DETACHED) && c->condvar == NULL);
     if(c->state == STATE_DETACHED)
-        __sync_fetch_and_sub(&detached_count, 1); // XXX
+        threadpool_schedule_back(c->sched->pool, free_detached_cb, NULL);
     free(c);
 }
 
@@ -762,8 +768,8 @@ cpc_attach(struct cpc_continuation *cont)
         cpc_prim_detach(sched, cont);
 }
 
-static void
-attach_cb(void *cont)
+static inline void
+spawn_cb(void *cont)
 {
     struct cpc_continuation *c = (struct cpc_continuation *)cont;
 
@@ -774,8 +780,14 @@ attach_cb(void *cont)
     if(c->state == STATE_DETACHED)
         c->state = STATE_UNKNOWN;
     c->sched = cpc_default_sched;
-    __sync_fetch_and_sub(&detached_count, 1); // XXX
     enqueue(&ready, c); // XXX Or maybe: exhaust_ready(c); ???
+}
+
+static void
+attach_cb(void *cont)
+{
+    spawn_cb(cont);
+    detached_count--;
 }
 
 void
@@ -815,7 +827,7 @@ cpc_prim_detach(cpc_sched *sched, cpc_continuation *cont)
     } else {
         assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
         assert(!IS_DETACHED);
-        __sync_fetch_and_add(&detached_count, 1); // XXX
+        detached_count++;
         if(sched == NULL)
             sched = cpc_default_pool;
     }
@@ -924,14 +936,12 @@ cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
     /* If context is NULL, we have to perform a syscall to know if we
      * are detached or not */
     if(context == NULL && IS_DETACHED) {
-        __sync_fetch_and_add(&detached_count, 1); // XXX
-        threadpool_schedule_back(cont->sched->pool, attach_cb, cont);
+        threadpool_schedule_back(cont->sched->pool, spawn_cb, cont);
     }
     /* Otherwise, trust the context */
     else if (context && context->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        __sync_fetch_and_add(&detached_count, 1); // XXX
-        threadpool_schedule_back(cont->sched->pool, attach_cb, cont);
+        threadpool_schedule_back(cont->sched->pool, spawn_cb, cont);
     }
     else {
         assert(!IS_DETACHED);
@@ -979,7 +989,7 @@ cpc_main_loop(void)
     gettimeofday(&cpc_now, NULL);
 
     while(ready.head || sleeping.head || num_fds > 0 ||
-          __sync_fetch_and_add(&detached_count, 0) > 0 /* XXX */) {
+          detached_count > 0) {
         q = ready;
         ready.head = ready.tail = NULL;
         while(1) {
@@ -989,8 +999,7 @@ cpc_main_loop(void)
             exhaust_ready(c);
         }
         if(ready.head && !sleeping.head && num_fds == 0 &&
-           __sync_fetch_and_add(&detached_count, 0) == 0 && /* XXX */
-           !cpc_pessimise_runtime)
+           detached_count == 0 && !cpc_pessimise_runtime)
             continue;
 
         gettimeofday(&cpc_now, NULL);
@@ -1011,15 +1020,14 @@ cpc_main_loop(void)
         }
 
         if(ready.head && !sleeping.head && num_fds == 0 &&
-           __sync_fetch_and_add(&detached_count, 0) == 0 && /* XXX */
-           !cpc_pessimise_runtime)
+           detached_count == 0 && !cpc_pessimise_runtime)
             continue;
 
         memcpy(&r_readfds, &readfds, sizeof(fd_set));
         memcpy(&r_writefds, &writefds, sizeof(fd_set));
         memcpy(&r_exceptfds, &exceptfds, sizeof(fd_set));
         int old_num_fds = num_fds;
-        if(__sync_fetch_and_add(&detached_count, 0) > 0) { /* XXX */
+        if(detached_count > 0) {
             FD_SET(p[0], &r_readfds);
             num_fds = num_fds > p[0] + 1 ? num_fds : p[0] + 1;
         }
@@ -1049,8 +1057,7 @@ cpc_main_loop(void)
             continue;
         }
 
-        if(__sync_fetch_and_add(&detached_count, 0) > 0 && // XXX
-           FD_ISSET(p[0], &r_readfds)) {
+        if(detached_count > 0 && FD_ISSET(p[0], &r_readfds)) {
             read(p[0], buf, BUF_SIZE);
             cpc_sched *s = schedulers.head;
             while(s) {
