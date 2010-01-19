@@ -1,0 +1,49 @@
+/* EXPECTED OUTPUT
+1000000
+* END OF OUTPUT */
+
+#define N 10000
+#define N_ITER 100
+
+#include <stdio.h>
+#include <stdlib.h>
+#include "cpc/cpc_lib.h"
+
+int count = 0;
+
+cps void
+sleep_and_die() {
+    int i;
+    cpc_condvar *c = cpc_condvar_get();
+
+    for(i = 0; i < N; i++) {
+        int sec = rand();
+        cpc_spawn {
+            cpc_sleep(sec, 0, c);
+            count++;
+        }
+    }
+
+    cpc_spawn {
+        cpc_signal_all(c);
+        cpc_condvar_release(c);
+    }
+}
+
+int
+main()
+{
+    int i;
+
+    srand(N);
+
+    cpc_spawn for(i = 0; i < N_ITER; i++) {
+        sleep_and_die();
+    }
+
+    cpc_main_loop();
+
+    printf("%d\n", count);
+
+    return 0;
+}
