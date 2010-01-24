@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/select.h>
+#include <math.h>
 
 #ifndef NIFTY
 #include "threadpool.h"
@@ -32,6 +33,13 @@ main_func(void *v)
 static void
 thread_func(void *v)
 {
+#ifdef WORK
+    int i;
+    double x = *(double*)v;
+    for(i = 0; i < WORK; i++)
+        x = cos(x);
+    *(double*)v = x;
+#endif
     __sync_fetch_and_add(&sum, 1);
 #ifdef MAIN_FUNC
     threadpool_schedule_back(threadpool, main_func, v);
@@ -44,6 +52,7 @@ main()
     int i, rc;
     int p[2];
     int done;
+    double d = 0.0;
 
     rc = pipe(p);
     if(rc < 0) {
@@ -63,9 +72,9 @@ main()
 
     for(i = 0; i < N; i++)
 #ifndef NIFTY
-        threadpool_schedule(threadpool, thread_func, NULL);
+        threadpool_schedule(threadpool, thread_func, &d);
 #else
-        nft_pool_add(threadpool, thread_func, NULL);
+        nft_pool_add(threadpool, thread_func, &d);
 #endif
 
 #ifndef NIFTY
