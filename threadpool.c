@@ -28,22 +28,9 @@ THE SOFTWARE.
 
 #include "threadpool.h"
 
-/* The Intel Itanium intrinsics are available on recent versions of gcc,
-   clang and icc, but not on all arches.  More ifdefs are needed. */
-
-#if defined(__GNUC__) || (__GNUC__ >= 4)
-#define HAVE_ATOMIC_INTRINSICS
-#endif
-
-#if defined(HAVE_ATOMIC_INTRINSICS) && !defined(i386) && !defined(__x86_64__)
-#define USE_ATOMIC_INTRINSICS
-#endif
-
 #ifndef USE_ATOMIC_INTRINSICS
 
-/* In principle, this might need memory barriers, at least on non-x86.
-   However, since every system call serves as a memory barrier, we should
-   be safe. */
+/* This should be safe, since every lock will ack as a memory barrier. */
 
 typedef volatile int atomic_bool;
 
@@ -67,10 +54,9 @@ atomic_reset(atomic_bool *a)
 
 #else
 
-typedef int atomic_bool;
+/* But if you're paranoid, and have a recent version of gcc or clang... */
 
-/* For some reason, there are no intrinsics for plain read and write, only
-   for synchronised read-modify-write cycles. */
+typedef int atomic_bool;
 
 static inline int
 atomic_test(atomic_bool *a)
