@@ -43,7 +43,7 @@ void
 tricky_copy(int y) {
     int x = y;
     int *p = &x;
-    cpc_spawn { print(x); *p = *p + 1; print(x); }
+    cpc_spawn { int *q = &x; print(x); *q = *q + 1; print(x); }
 }
 
 cps void
