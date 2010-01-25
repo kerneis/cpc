@@ -970,7 +970,7 @@ cpc_main_loop(void)
 {
     struct cpc_continuation *c;
     struct cpc_continuation_queue q;
-    struct timeval when;
+    struct timeval when, begin;
     int rc, i, done;
     fd_set r_readfds, r_writefds, r_exceptfds;
     char buf[BUF_SIZE];
@@ -987,6 +987,7 @@ cpc_main_loop(void)
 
     /* Make sure cpc_now has a reasonable initial value. */
     gettimeofday(&cpc_now, NULL);
+    begin = cpc_now;
 
     while(ready.head || sleeping.head || num_fds > 0 ||
           detached_count > 0) {
@@ -1111,6 +1112,11 @@ cpc_main_loop(void)
     while(cpc_threadpool_release(cpc_default_pool) < 0);
     close(p[0]);
     close(p[1]);
+    gettimeofday(&cpc_now, NULL);
+    timeval_minus(&when, &cpc_now, &begin);
+#ifdef DEBUG
+    fprintf(stderr, "%ld %ld\n", when.tv_sec, when.tv_usec);
+#endif
 }
 
 double
