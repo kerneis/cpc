@@ -1050,24 +1050,41 @@ end
 
 (********************* Avoid ampersand on local variables ********************)
 
-let has_ampersand v = v.vaddrof && not v.vglob
+(* return a set of free variables in a function *)
+let free_vars fd =
+  let args = List.fold_left (fun s x -> S.add x s) S.empty fd.sformals in
+  let bounded = List.fold_left (fun s x -> S.add x s) args fd.slocals in
+  let vars = ref S.empty in
+  let collector = object(self)
+    inherit nopCilVisitor (* do not use mynopCilVisitor, variables can
+    be hidden in types *)
+
+    method vvrbl v =
+      if not (v.vglob || isFunctionType v.vtype)
+      then begin
+        if isArrayType v.vtype && not (S.mem v bounded) then
+          E.s (E.error "Free array in function %s: %s (%a)"
+            fd.svar.vname v.vname d_loc !currentLoc)
+        else
+          vars := S.add v !vars;
+      end;
+      SkipChildren
+
+    method vstmt s = match s.skind with
+    | CpcFun _ -> SkipChildren
+    | _ -> DoChildren
+  end in
+  ignore(visitCilFunction collector fd);
+  S.diff !vars bounded
+
+let must_be_boxed v = v.vaddrof && not v.vglob
 
 class avoidAmpersand f =
-  let insert_malloc l stmts fd =
-    (* stolen from oneret.ml *)
-    (* Get the return type *)
-    let retTyp =
-      match fd.svar.vtype with
-      | TFun(rt, _, _, _) -> rt
-      | _ -> E.s (E.bug "Function %s does not have a function type\n" fd.svar.vname) in
     let malloc = Lval(Var (findOrCreateFunc f "malloc" (TFun(voidPtrType, Some
     ["size", !typeOfSizeOf, []], false, []))), NoOffset) in
     let free = Lval(Var (findOrCreateFunc f "free" (TFun(voidType, Some ["ptr",
     voidPtrType, []], false, []))), NoOffset) in
-    let mallocs = mkStmt (Instr (List.map (fun v ->
-      let mem_v = mkMem (Lval (Var v, NoOffset)) NoOffset in
-      Call(Some (Var v, NoOffset), malloc, [sizeOf (typeOfLval mem_v)],locUnknown)) l)) in
-    let insert_free = visitCilStmt
+    let insert_free oldnew retTyp fd = visitCilStmt
       (object(self)
        inherit mynopCilVisitor
        method vstmt s = match s.skind with
@@ -1077,48 +1094,84 @@ class avoidAmpersand f =
           | Some rval -> let r = make_ret_var fd retTyp in
               Some (Lval (Var r, NoOffset)), [Set((Var r, NoOffset), rval, loc)] in
           s.skind <- Block (mkBlock [
-          mkStmt (Instr (assign @ List.map (fun v ->
-          Call(None,free,[mkCast (Lval(Var v, NoOffset)) voidPtrType],locUnknown)) l));
+          mkStmt (Instr (assign @ List.map (fun (_, v) ->
+          Call(None,free,[mkCast (Lval(Var v, NoOffset))
+          voidPtrType],locUnknown)) oldnew));
           mkStmt (Return (rv,loc))]);
           SkipChildren
-       | CpcFun _ -> SkipChildren (* avoid double free bug *)
+       | CpcFun _ -> assert(false); (* Thanks to initial lambda-lifting *)
        | _ -> DoChildren
        end
-      ) in
-    mallocs :: (List.map insert_free stmts)
+      )  in
+  let malloc_init oldnew =
+    let mallocs = mkStmt (Instr (List.map (fun (_, v) ->
+      let mem_v = mkMem (Lval (Var v, NoOffset)) NoOffset in
+      Call(Some (Var v, NoOffset), malloc, [sizeOf (typeOfLval
+      mem_v)],locUnknown)) oldnew)) in
+    let inits =
+      mkStmt (Instr (List.map (fun (v,v') ->
+        Set(mkMem (Lval (Var v', NoOffset)) NoOffset, Lval(Var v, NoOffset), locUnknown))
+        (* Do not initialise a (local) variable with itself *)
+        (List.filter (fun (v1, v2) -> v1.vid != v2.vid) oldnew))) in
+    [mallocs ; inits]
   in
-  object(self)
-  inherit nopCilVisitor (* do not use mynopCilVisitor, lval can be
-  hidden in types *)
+  let add_stars oldnew = visitCilStmt
+    (object(self)
+      inherit nopCilVisitor (* do not use mynopCilVisitor, lval can be
+      hidden in types *)
+      
+      method vlval = function
+      | (Var v, _) as lval when must_be_boxed v ->
+          ChangeDoChildrenPost (lval, fun lval -> match lval with
+          | Var v, offset ->
+              let v' = try List.assoc v oldnew with Not_found -> assert false in
+              mkMem (Lval (Var v', NoOffset)) offset
+          | _ -> assert false)
+      | _ -> DoChildren
 
-  method vlval = function
-  | (Var v, _) as l when has_ampersand v ->
-      ChangeDoChildrenPost (l, fun l -> match l with
-      | Var v, offset -> mkMem (Lval (Var v, NoOffset)) offset
-      | _ -> assert false)
-  | _ -> DoChildren
+      method vstmt s = match s.skind with
+      | CpcFun _ -> assert(false); (* Thanks to initial lambda-lifting *)
+      | _ -> DoChildren
+    end) in
+  object(self)
+  inherit mynopCilVisitor
 
   method vfunc fd =
-    ChangeDoChildrenPost(fd, fun fd ->
-    let locals = List.filter has_ampersand fd.slocals in
-    let formals = List.filter has_ampersand fd.sformals in
-    let new_formals = List.map (fun v -> {(copyVarinfo v ("__"^v.vname)) with
-    vaddrof = false}) formals in
-    let full_formals = List.map (fun v -> List.assoc v (List.combine
-    (formals@fd.sformals) (new_formals@fd.sformals))) fd.sformals in
-    let init_formals = mkStmt (Instr (List.map2 (fun v v' ->
-    Set(mkMem (Lval (Var v, NoOffset)) NoOffset,
-    Lval(Var v', NoOffset), locUnknown)) formals new_formals)) in
-    let l = locals @ formals in
-    if l <> [] then begin
-      trace (dprintf "avoidAmpersand: %d\n" (List.length l));
-      setFormals fd full_formals;
-      List.iter (fun v -> v.vtype <- TPtr(v.vtype,[])) l;
-      fd.slocals <- fd.slocals @ formals;
-      fd.sbody <- {fd.sbody with bstmts =
-        insert_malloc l (init_formals :: fd.sbody.bstmts) fd
-      };
-     end;fd)
+    if fd.svar.vcps then begin
+      let retTyp =
+        match fd.svar.vtype with
+        | TFun(rt, _, _, _) -> rt
+        | _ -> E.s (E.bug "Function %s does not have a function type\n" fd.svar.vname) in
+      let locals = List.filter must_be_boxed fd.slocals in
+      let formals = List.filter must_be_boxed fd.sformals in
+      let fv = List.filter must_be_boxed (S.elements (free_vars fd)) in
+      assert(fv = []); (* Thanks to an initial lambda-lifting *)
+      let oldnew =
+        (List.map (fun v -> (* Change the type of locals directly *)
+          v.vtype <- TPtr (v.vtype, []);
+          (v,v))
+        locals) @
+        (List.map (fun v -> (* Copy the formals as locals and avoid name clash *)
+          let name = v.vname in
+          v.vname <- "__"^name;
+          (v, makeLocalVar fd name (TPtr (v.vtype, []))))
+        formals) @
+        (List.map (fun v -> (* Make a local copy of free variables *)
+          (v, makeLocalVar fd v.vname (TPtr (v.vtype, []))))
+        fv) in
+      if oldnew <> [] then begin
+        trace (dprintf "avoidAmpersand: %d\n" (List.length oldnew));
+        List.iter (fun (v, v') -> trace (dprintf "- %s(%d) -> %s (%d)\n"
+          v.vname v.vid v'.vname v'.vid)) oldnew;
+        fd.sbody <- {
+          fd.sbody with bstmts =
+            malloc_init oldnew @
+            (List.map (fun s -> insert_free oldnew retTyp fd (add_stars oldnew s))
+            fd.sbody.bstmts)
+        };
+      end;
+    end;
+    SkipChildren (* No CpcFun thanks to initial lambda-lifting *)
 end
 
 (********************* Assignment of cps return values ***********************)
@@ -1468,27 +1521,6 @@ let remove_local_fun fd =
         ChangeTo(mkEmptyStmt())
     | _ -> DoChildren
   end) fd
-
-(* return a set of free variables in a function *)
-let free_vars fd =
-  let args = List.fold_left (fun s x -> S.add x s) S.empty fd.sformals in
-  let bounded = List.fold_left (fun s x -> S.add x s) args fd.slocals in
-  let vars = ref S.empty in
-  let collector = object(self)
-    inherit nopCilVisitor (* do not use mynopCilVisitor, variables can
-    be hidden in types *)
-
-    method vvrbl v =
-      if not (v.vglob || isFunctionType v.vtype)
-      then vars := S.add v !vars;
-      SkipChildren
-
-    method vstmt s = match s.skind with
-    | CpcFun _ -> SkipChildren
-    | _ -> DoChildren
-  end in
-  ignore(visitCilFunction collector fd);
-  S.diff !vars bounded
 
 (* remove free variable thanks to an iterated lambda-lifting technique:
   - find free vars of a local function
@@ -1908,6 +1940,9 @@ let stages = [
   visitCilFileSameGlobals (new folder) file);
   ("Add defaults arguments\n", fun file ->
   visitCilFileSameGlobals (new addDefaultArgs file) file);
+  ("Lambda-lifting\n", fun file ->
+  visitCilFile (new lambdaLifter) file;
+  visitCilFileSameGlobals (new uniqueVarinfo) file);
   ("Avoid ampersand\n", fun file ->
   visitCilFileSameGlobals (new avoidAmpersand file) file);
   ("Remove nasty expressions\n", fun file ->
@@ -1922,7 +1957,8 @@ let stages = [
   percolateLocals file);
   ("Lambda-lifting\n", fun file ->
   visitCilFile (new lambdaLifter) file;
-  visitCilFileSameGlobals (new uniqueVarinfo) file;
+  visitCilFileSameGlobals (new uniqueVarinfo) file);
+  ("Remove identity functions\n", fun file ->
   removeIdentity file);
   ("Dumping Cfg\n", fun file -> if !dumpcfg then begin
   (try Unix.mkdir "cfg" 0o750 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());

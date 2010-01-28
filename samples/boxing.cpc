@@ -1,9 +1,14 @@
 /* EXPECTED OUTPUT
 1
+1
+1
+1
 2
 3
 4
 5
+6
+-1
 * END OF OUTPUT */
 
 #include <stdio.h>
@@ -34,9 +39,15 @@ cps void double_free_bug(int y) {
 cps void set_x(int *p, int y) { *p = y; }
 
 cps void foo(int y){
+    int tab[2];
+    tab[0] = tab[1] = y;
     int x = 0;
     set_x(&x, y);
     print(x);
+    set_x(&y, x);
+    print(y);
+    print(tab[0]);
+    print(tab[1]);
 }
 
 void
@@ -54,11 +65,27 @@ box_formal(int x) {
 }
 
 cps void
+spawn_in_spawn (int y) {
+  int *p = &y;
+  cpc_spawn {
+    y = -1;
+    cpc_spawn {
+      cpc_yield();
+      print(y);
+    }
+  }
+  (*p)++;
+  print(*p);
+}
+
+cps void
 test() {
     foo(1);
     box_formal(2);
     double_free_bug(3);
     tricky_copy(4);
+    cpc_yield(); /* execute the spawned thread */
+    spawn_in_spawn(5);
 }
 
 int main(){

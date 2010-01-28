@@ -19,9 +19,12 @@ int main() {
     for(i = 0; i < N_POOLS; i++)
         pools[i] = cpc_threadpool_get(N_THREADS);
 
-    for(i = 0; i < N; i++) cpc_spawn {
-        cpc_attached(pools[i % N_POOLS]) __sync_fetch_and_add(&n, 1);
+    for(i = 0; i < N; i++) {
+      cpc_sched *p = pools[i % N_POOLS];
+      cpc_spawn {
+        cpc_attached(p) __sync_fetch_and_add(&n, 1);
         cpc_barrier_await(barrier);
+      }
     }
 
     cpc_spawn { cpc_barrier_await(barrier); printf("%d\n", n); }
