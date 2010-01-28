@@ -328,7 +328,7 @@ timeval_plus(struct timeval *d, struct timeval *s1, int sec, int usec)
 static void
 timeval_minus(struct timeval *d, struct timeval *s1, struct timeval *s2)
 {
-    if(s1->tv_usec > s2->tv_usec) {
+    if(s1->tv_usec >= s2->tv_usec) {
         d->tv_usec = s1->tv_usec - s2->tv_usec;
         d->tv_sec = s1->tv_sec - s2->tv_sec;
     } else {
