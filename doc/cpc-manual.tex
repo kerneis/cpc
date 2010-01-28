@@ -109,6 +109,12 @@ is declared {\tt static}.}.  The free variables are initialized whenever
 the inner function is called; thus, their initial value does not depend
 on the location of the inner function within the outer one.
 
+Moreover:
+\begin{itemize}
+  \item array cannot appear as free variables,
+  \item variable-length arrays must not be used in cps context.
+\end{itemize}
+
 \subsection{Bootstrapping} \label{sec:bootstrapping}
 
 \begin{verbatim}
@@ -367,33 +373,18 @@ be lifted in a future version.
 \subsection{Fundamental limitations}
 
 The use of the {\tt longjmp} library function, and its variants, is
-not allowed in CPC code.
+not allowed in CPC code.  The use of \texttt{alloca} in cps context
+yields unpredictable behaviour.
 
 \subsection{Current limitations}
 
 The current implementation is based on CIL.  The CIL limitations
-therefore apply:
-\begin{quote}
-There are several implementation details of CIL that might make it
-unusable or less than ideal for certain tasks:
-\begin{itemize}
-\item CIL operates after preprocessing. If you need to see comments, for
-example, you cannot use CIL. But you can use attributes and pragmas
-instead. And there is some support to help you patch the include
-files before they are seen by the preprocessor. For example, this is
-how we turn some {\tt \#define}s that we don’t like into function calls.
-\item CIL does transform the code in a non-trivial way. This is done
-in order to make most analyses easier. But if you want to see
-the code {\tt e1, e2++} exactly as it appears in the code, then you
-should not use CIL.
-\item CIL removes all local scopes and moves all variables to
-function scope. It also separates a declaration with an
-initializer into a declaration plus an assignment. The
-unfortunate effect of this transformation is that local
-variables cannot have the {\tt const} qualifier.
-\end{itemize}
-From \url{http://hal.cs.berkeley.edu/cil/cil011.html}.
-\end{quote}
+therefore apply.  You should read the \textit{CIL Limitations} and
+\textit{Known Bugs and Limitations} sections of the CIL user manual
+(see \texttt{doc/cil.tex}).
+
+Other current limitations are described in each relevant section of the
+present document.
 
 \subsection{Time complexity of CPC operations}
 
