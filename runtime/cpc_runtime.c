@@ -162,6 +162,7 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
         d->length = 0;
         d->condvar = NULL;
         d->cond_next = NULL;
+        d->next = NULL;
         d->sched = cpc_default_sched;
         d->state = STATE_UNKNOWN;
         d->ready = NULL;
@@ -173,6 +174,7 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->length = c->length;
     d->condvar = c->condvar;
     d->cond_next = c->cond_next;
+    d->next = c->next;
     d->sched = c->sched;
     d->state = c->state;
     d->ready = c->ready;
@@ -234,18 +236,20 @@ dequeue(cpc_continuation_queue *queue)
 static void
 dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
 {
-    cpc_continuation *c, *next;
+    cpc_continuation *c, *target;
     c = queue->head;
     if(c == cont) {
         queue->head = queue->head->next;
+        cont->next = NULL;
         if(queue->head == NULL)
             queue->tail = NULL;
         return;
     }
     while(c->next != cont)
         c = c->next;
-    next = c->next;
-    c->next = c->next->next;
+    target = c->next;
+    c->next = target->next;
+    target->next = NULL;
     if(c->next == NULL)
         queue->tail = c;
 }
@@ -283,7 +287,7 @@ cond_dequeue(cpc_continuation_queue *queue)
 static void
 cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
 {
-    cpc_continuation *c, *next;
+    cpc_continuation *c, *target;
     c = queue->head;
     if(c == cont) {
         queue->head = queue->head->cond_next;
@@ -293,8 +297,9 @@ cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
     }
     while(c->cond_next != cont)
         c = c->cond_next;
-    next = c->cond_next;
-    c->cond_next = c->cond_next->cond_next;
+    target = c->cond_next;
+    c->cond_next = target->cond_next;
+    target->cond_next = NULL;
     if(c->cond_next == NULL)
         queue->tail = c;
 }
