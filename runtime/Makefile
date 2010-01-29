@@ -1,8 +1,10 @@
 CPC='../bin/cpc.asm.exe'
 
-CDEBUGFLAGS=-O3 -Wall -fno-strict-aliasing
-CLIBS=-I ../include/cpc -pthread
+CDEBUGFLAGS=-Wall -g
+CLIBS=-I ../include/cpc
 CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
+
+LDLIBS=-pthread
 
 PREFIX=/usr/local
 

@@ -1,7 +1,8 @@
 CPC='../bin/cpc.asm.exe'
 
-CLIBS=-I ../include
-CFLAGS=-Wall -g $(CLIBS)
+CDEBUGFLAGS=-Wall -g
+CLIBS=-I ../include/cpc
+CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
 
 LDLIBS=-L../runtime -lm -pthread -lcpcfull
 
