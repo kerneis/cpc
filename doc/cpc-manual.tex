@@ -32,7 +32,7 @@ A detached thread, on the other hand, is associated to a native
 operating-system thread, and is scheduled by the operating system
 asynchronously with respect to all other threads.
 
-\paragraph{Structure of a CPC program}
+\section{Structure of a CPC program}
 
 Just like a plain C program, a CPC program is a set of functions.
 Functions in a CPC program are partitioned into ``cps'' functions and
@@ -62,7 +62,7 @@ continuations with the CPC runtime (using {\tt cpc\_spawn},
 Section~\ref{sec:cooperating}), and then passes control to the CPC
 runtime (by calling {\tt cpc\_main\_loop}, Section~\ref{sec:bootstrapping}).
 
-\section{The CPC language}
+\section{Reserved words}
 
 CPC is a conservative extension of the 1999 edition of the C programming
 language; thus, the syntax of CPC is defined as a set of productions to be
@@ -71,7 +71,7 @@ added to the grammar defined in the ISO C99 standard \cite{iso:c99}.
 In addition to the reserved words in C99, CPC reserves the words
 {\tt cps}, {\tt cpc\_spawn} and {\tt cpc\_attached}.
 
-\subsection{CPS contexts} \label{sec:contexts}
+\section{CPS contexts} \label{sec:contexts}
 
 Any instruction, declaration, or function definition in CPC can be in
 {\em cps context\/} or in {\em native context}.  Cps context is
@@ -86,7 +86,7 @@ defined as follows:
 \end{itemize}
 Any construct that is not in cps context is said to be in native context.
 
-\subsection{CPS functions} \label{sec:cpc-functions}
+\section{CPS functions} \label{sec:cpc-functions}
 
 \[ \mbox{function-specifier} ::= \mathtt{cps} \]
 
@@ -115,7 +115,7 @@ Moreover:
   \item variable-length arrays must not be used in cps context.
 \end{itemize}
 
-\subsection{Bootstrapping} \label{sec:bootstrapping}
+\section{Bootstrapping} \label{sec:bootstrapping}
 
 \begin{verbatim}
     void cpc_main_loop(void);
@@ -127,21 +127,23 @@ function \verb|cpc_main_loop| invokes the CPC scheduler; it returns
 when all threads have been exhausted (i.e.\ where there is
 nothing more to do).
 
-\subsection{CPC statements and primitive cps functions}
+\section{CPC statements and primitive cps functions}
+
+CPC provides a set of primitive cps functions, allowing the programmer
+to schedule threads and wait for some events.  It is important to
+understand that those primitive functions could not be defined outside
+the CPC runtime: they must have access to the internals of the scheduler
+to operate.  Since they are cps functions, they are valid only in cps
+context.
+
+In addition to these functions, CPC extends the C language with two
+statements -- \texttt{cpc\_spawn} and \texttt{cpc\_attached} -- and some
+syntactic sugar (\textit{e.g.} \texttt{cpc\_detached}), described in the
+following sections.
 
 \[ \mbox{statement} ::= \mbox{cpc-statement} \]
 
-CPC has a number\footnote{Three, to be precise.} of statements not
-present in the C language.  Moreover, it provides a set of primitive cps
-functions, allowing the programmer to schedule threads and wait for some
-events.
-
-It is important to understand that those primitive functions could not
-be defined outside the CPC runtime: they must have access to the
-internals of the scheduler to operate.  Since they are cps functions,
-they are valid only in cps context.
-
-\subsection{Detaching and reattaching} \label{sec:native-threads}
+\section{Detaching and reattaching} \label{sec:native-threads}
 
 A continuation can be scheduled to be run by a native thread; intuitively,
 the continuation ``becomes'' a native thread.  When this happens, we say
@@ -203,7 +205,7 @@ the current scheduler.  Although this is not a cps function, it should
 be treated as such: this function is valid in cps context only, and no
 pointer to it should be taken.
 
-\subsubsection*{Syntactic sugar}
+\subsection*{Syntactic sugar}
 \paragraph{\tt cpc\_attached}
 \[ \mbox{cpc-statement} ::=
    \mathtt{cpc\_attached}\ (\mbox{expression})\ \mbox{statement} \]
@@ -232,7 +234,7 @@ pool, if not already detached.
       cpc_attached(cpc_get_sched() == cpc_default_sched ? \
       cpc_default_pool : cpc_get_sched())
 \end{verbatim}
-\subsection{Cooperating: yielding, spawning} \label{sec:cooperating}
+\section{Cooperating: yielding, spawning} \label{sec:cooperating}
 
 \[ \mbox{cpc-statement} ::=
    \mathtt{cpc\_spawn}\ \mbox{statement} \]
@@ -262,7 +264,7 @@ proceeds after the {\tt cpc\_spawn} statement (control is {\em not\/}
 passed back to the main CPC loop).  This statement is valid in arbitrary
 context.
 
-\subsection{Synchronisation: condition variables}
+\section{Synchronisation: condition variables}
 
 \begin{verbatim}
     typedef struct cpc_condvar cpc_condvar;
@@ -300,7 +302,7 @@ This function guarantees that the continuations will be run in the order in
 which they were suspended.  This statement is valid in arbitrary context,
 but only in attached state.
 
-\subsection{Sleeping}
+\section{Sleeping}
 
 \begin{verbatim}
     cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
@@ -335,7 +337,7 @@ are syntactic sugar for, respectively,
 representing the current time in seconds.  This function is not valid in
 detached mode.
 
-\subsection{Waiting for I/O}
+\section{Waiting for I/O}
 
 \begin{verbatim}
     cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
