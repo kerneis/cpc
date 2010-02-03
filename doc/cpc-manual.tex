@@ -5,7 +5,7 @@
 \title{The CPC manual}
 \author{Juliusz Chroboczek, Gabriel Kerneis\\
 {\tt <jch@pps.jussieu.fr>, <kerneis@pps.jussieu.fr>}}
-\date{20 June 2009}
+\date{3 February 2010}
 
 \begin{document}
 \maketitle
@@ -246,10 +246,7 @@ pool, if not already detached.
 \paragraph{\tt cpc\_yield} The function {\tt cpc\_yield} causes the
 current continuation to be suspended, and placed at the end of the
 queue of runnable continuations.  Control is passed back to the CPC
-main loop.  This statement has no effect in detached state.\\
-{\bf Experimental:} this function accepts an optionnal {\tt int mode}
-argument but this is likely to change in a near future.  You shall not
-rely on it.
+main loop.  This statement has no effect in detached state.
 
 \paragraph{\tt cpc\_done} The function {\tt cpc\_done} causes the
 current continuation to be discarded, and control to be passed back to
@@ -363,7 +360,7 @@ The form with a third argument is only valid in attached state.
 up the continuations waiting for an event {\tt direction} on the {\tt
 fd} file descriptor.  It shall only be called in the same thread as the
 CPC scheduler (but not necessarily in cps context) and will only wake up
-attached threads. {\bf Not implemented in the current runtime!}
+attached threads.
 
 \section{Limitations and implementation notes}
 
@@ -391,16 +388,15 @@ present document.
 \subsection{Time complexity of CPC operations}
 
 The current implementation of CPC implements all the CPS operations in
-constant time, with the following exceptions:\marginpar{\small This
-might not be true anymore, but the old behaviour will eventually be
-restored.}
+constant time, with the following exceptions:
 \begin{itemize} 
 \item when a continuation is queued on two structures simultaneously
   (because of {\tt cpc\_sleep} or {\tt cpc\_io\_wait} with a non-null
   last argument), invoking it requires dequeueing it from the second
   queue, which takes linear time in the worst case;
 \item the {\tt cpc\_sleep} instruction runs in worst-case time
-  proportional to the number of currently sleeping continuations;
+  proportional to logarithm of the number of currently sleeping
+  continuations (thanks to a heap-based sleeping queue).
 \end{itemize}
 
 \chapter{The CPC library}
