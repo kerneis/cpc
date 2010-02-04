@@ -224,14 +224,16 @@ to do this in the past.  But I believe this is ``too much of magic''
 with a potentially unhealthy semantics.  Therefore, the programmer has
 to take care of such tricky cases by himself.
 
-\paragraph{\tt cpc\_detach, cpc\_detached} Attach to the default thread
-pool, if not already detached.
+\paragraph{\tt cpc\_is\_detached, cpc\_detach, cpc\_detached} Attach to
+the default thread pool, if not already detached.
 \begin{verbatim}
+    #define cpc_is_detached() \
+      (cpc_get_sched() != cpc_default_sched)
     #define cpc_detach() \
-      cpc_attach(cpc_get_sched() == cpc_default_sched ? \
+      cpc_attach(cpc_is_detached () ? \
       cpc_default_pool : cpc_get_sched())
     #define cpc_detached \
-      cpc_attached(cpc_get_sched() == cpc_default_sched ? \
+      cpc_attached(cpc_is_detached () ? \
       cpc_default_pool : cpc_get_sched())
 \end{verbatim}
 \section{Cooperating: yielding, spawning} \label{sec:cooperating}

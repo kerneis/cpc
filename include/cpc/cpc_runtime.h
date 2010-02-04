@@ -159,7 +159,8 @@ extern cps void cpc_yield(int mode);
 extern cps void cpc_done(void);
 extern cps cpc_sched *cpc_attach(cpc_sched *pool);
 
-#define cpc_detach() cpc_attach(cpc_get_sched() == cpc_default_sched ? cpc_default_pool : cpc_get_sched())
-#define cpc_detached cpc_attached(cpc_get_sched() == cpc_default_sched ? cpc_default_pool : cpc_get_sched())
+#define cpc_is_detached() (cpc_get_sched() != cpc_default_sched)
+#define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_default_pool : cpc_get_sched())
+#define cpc_detached cpc_attached(cpc_is_detached() ? cpc_default_pool : cpc_get_sched())
 
 #endif
