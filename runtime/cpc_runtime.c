@@ -1192,5 +1192,5 @@ double
 cpc_gettime(void)
 {
     assert(!IS_DETACHED);
-    return ((double) cpc_now.tv_sec + 1E6 * cpc_now.tv_usec);
+    return ((double) cpc_now.tv_sec * 1E6 + cpc_now.tv_usec);
 }
