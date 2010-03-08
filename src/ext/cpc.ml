@@ -88,7 +88,7 @@ let cont_dest = ref dummyStmt
 
 let rec xform_switch_stmt s = begin
   if not(!break_dest == dummyStmt) then
-  s.labels <- List.map (fun lab -> match lab with
+  s.labels <- Util.list_map (fun lab -> match lab with
     Label _ -> lab
   | Case(e,l) ->
       let suffix =
@@ -948,7 +948,7 @@ class cpsConverter = fun file ->
       if List.mem_assq v struct_map then ChangeTo [] else begin
       let args = argsToList args in
       (* XXX copy the attributes too? Should be empty anyway *)
-      let fields = List.map (fun (name,typ, attr) ->
+      let fields = Util.list_map (fun (name,typ, attr) ->
         name, typ, None, attr, locUnknown ) args in
       let arglist_struct =
         mkCompInfo true (v.vname^"_arglist")
@@ -1094,7 +1094,7 @@ class avoidAmpersand f =
           | Some rval -> let r = make_ret_var fd retTyp in
               Some (Lval (Var r, NoOffset)), [Set((Var r, NoOffset), rval, loc)] in
           s.skind <- Block (mkBlock [
-          mkStmt (Instr (assign @ List.map (fun (_, v) ->
+          mkStmt (Instr (assign @ Util.list_map (fun (_, v) ->
           Call(None,free,[mkCast (Lval(Var v, NoOffset))
           voidPtrType],locUnknown)) oldnew));
           mkStmt (Return (rv,loc))]);
@@ -1104,12 +1104,12 @@ class avoidAmpersand f =
        end
       )  in
   let malloc_init oldnew =
-    let mallocs = mkStmt (Instr (List.map (fun (_, v) ->
+    let mallocs = mkStmt (Instr (Util.list_map (fun (_, v) ->
       let mem_v = mkMem (Lval (Var v, NoOffset)) NoOffset in
       Call(Some (Var v, NoOffset), malloc, [sizeOf (typeOfLval
       mem_v)],locUnknown)) oldnew)) in
     let inits =
-      mkStmt (Instr (List.map (fun (v,v') ->
+      mkStmt (Instr (Util.list_map (fun (v,v') ->
         Set(mkMem (Lval (Var v', NoOffset)) NoOffset, Lval(Var v, NoOffset), locUnknown))
         (* Do not initialise a (local) variable with itself *)
         (List.filter (fun (v1, v2) -> v1.vid != v2.vid) oldnew))) in
@@ -1147,16 +1147,16 @@ class avoidAmpersand f =
       let fv = List.filter must_be_boxed (S.elements (free_vars fd)) in
       assert(fv = []); (* Thanks to an initial lambda-lifting *)
       let oldnew =
-        (List.map (fun v -> (* Change the type of locals directly *)
+        (Util.list_map (fun v -> (* Change the type of locals directly *)
           v.vtype <- TPtr (v.vtype, []);
           (v,v))
         locals) @
-        (List.map (fun v -> (* Copy the formals as locals and avoid name clash *)
+        (Util.list_map (fun v -> (* Copy the formals as locals and avoid name clash *)
           let name = v.vname in
           v.vname <- "__"^name;
           (v, makeLocalVar fd name (TPtr (v.vtype, []))))
         formals) @
-        (List.map (fun v -> (* Make a local copy of free variables *)
+        (Util.list_map (fun v -> (* Make a local copy of free variables *)
           (v, makeLocalVar fd v.vname (TPtr (v.vtype, []))))
         fv) in
       if oldnew <> [] then begin
@@ -1166,7 +1166,7 @@ class avoidAmpersand f =
         fd.sbody <- {
           fd.sbody with bstmts =
             malloc_init oldnew @
-            (List.map (fun s -> insert_free oldnew retTyp fd (add_stars oldnew s))
+            (Util.list_map (fun s -> insert_free oldnew retTyp fd (add_stars oldnew s))
             fd.sbody.bstmts)
         };
       end;
@@ -1229,17 +1229,17 @@ let contains_nasty args =
     | (Mem _, _) -> raise ContainsNasty
     | _ -> DoChildren
      end in
-  ignore(List.map (visitCilExpr visitor) args)
+  ignore(Util.list_map (visitCilExpr visitor) args)
 
 let rebind ef ftype args =
   let argstype =
     match ftype with
     | TFun (_,x,_,_) -> argsToList x
     | _ -> assert false in
-  let args' = List.map (fun (s,t,_) -> makeTempVar ~name:s ef t) argstype in
+  let args' = Util.list_map (fun (s,t,_) -> makeTempVar ~name:s ef t) argstype in
    let bind_list =
      List.map2 (fun  v e -> Set((Var v,NoOffset), e,locUnknown)) args' args in
-   bind_list, List.map (fun v -> Lval(Var v, NoOffset)) args'
+   bind_list, Util.list_map (fun v -> Lval(Var v, NoOffset)) args'
 
 class removeNastyExpressions = object(self)
   inherit (enclosingFunction dummyFunDec)
@@ -1365,13 +1365,13 @@ let removeIdentity = fun file ->
     else match fd.sbody.bstmts with
     | {skind=Instr [Call(None,Lval(Var fd',NoOffset),args,_)]} ::
       {skind=Return(None,_)} :: _ when fd'.vcps &&
-      args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
+      args = Util.list_map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaced :=  (fd.svar,fd')::!replaced;
         (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | {skind=Instr [Call(Some(l),Lval(Var fd',NoOffset),args,_)]} ::
       {skind=Return(Some(Lval l'),_)} :: _ when fd'.vcps && l=l' &&
-      args = List.map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
+      args = Util.list_map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaced :=  (fd.svar,fd')::!replaced;
         (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
@@ -1462,7 +1462,7 @@ let percolateLocals file =
 
 let make_fresh_varinfo fd =
   let args = fd.sformals in
-  let new_args = List.map (fun v -> copyVarinfo v v.vname) args in
+  let new_args = Util.list_map (fun v -> copyVarinfo v v.vname) args in
   setFormals fd new_args;
   List.combine args new_args
 
@@ -1536,7 +1536,7 @@ let remove_free_vars enclosing_fun loc =
         GVarDecl(fd.svar,locUnknown) ::
           make_globals (GFun(remove_local_fun fd,locUnknown) :: gfuns) tl in
   let introduce_new_vars fd fv =
-    let new_args = List.map (fun v -> Lval(Var v, NoOffset)) fv in
+    let new_args = Util.list_map (fun v -> Lval(Var v, NoOffset)) fv in
     let insert =
       object(self)
         inherit mynopCilVisitor
