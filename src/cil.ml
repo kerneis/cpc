@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010,
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2003,
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -789,17 +791,8 @@ and stmtkind =
     
   (** CPC statements *)
 
-(*  | CpcCut of varinfo option * cpc_cut * location *)
   | CpcSpawn of exp * exp list * location
   | CpcFun of fundec * location
-
-(* and cpc_cut = 
-  | Yield | Done 
-  | Attach of exp | Detach of exp
-  | Wait of exp
-  | Sleep of exp * exp * exp
-  | IoWait of exp * exp * exp
-*)
 
 (** Instructions. They may cause effects directly but may not have control
     flow.*)
@@ -1127,7 +1120,6 @@ let rec get_stmtLoc (statement : stmtkind) =
                  else get_stmtLoc ((List.hd b.bstmts).skind)
     | TryFinally (_, _, l) -> l
     | TryExcept (_, _, _, l) -> l
-(*    | CpcCut (_, _, l) -> l *)
     | CpcSpawn (_, _, l) -> l
     | CpcFun (_, l) -> l
 
@@ -3869,57 +3861,6 @@ class defaultCilPrinterClass : cilPrinter = object (self)
           ++ text ") " ++ unalign
           ++ self#pBlock () h
 
-(*    | CpcCut (ret, cut, l) ->
-        self#pLineDirective l ++
-        (match ret with
-        | None -> nil
-        | Some vi -> self#pVar vi ++ text " = ") ++
-        (match cut with
-        | Yield ->
-            text "cpc_yield;"
-
-        | Done ->
-            text "cpc_done;"
-
-        | Attach e ->
-            text "cpc_attach"
-            ++ (text " ("
-            ++ self#pExp () e
-            ++ text ");")
-
-        | Detach e ->
-            text "cpc_detach"
-            ++ (text " ("
-            ++ self#pExp () e
-            ++ text ");")
-
-        | Wait e ->
-            text "cpc_wait"
-            ++ (text " ("
-            ++ self#pExp () e
-            ++ text ");")
-
-        | Sleep (e1, e2, e3) ->
-            text "cpc_sleep"
-            ++ (text " ("
-            ++ self#pExp () e1
-            ++ text ", "
-            ++ self#pExp () e2
-            ++ text ", "
-            ++ self#pExp () e3
-            ++ text ");")
-
-        | IoWait(e1, e2, e3) ->
-            text "cpc_io_wait"
-            ++ (text " ("
-            ++ self#pExp () e1
-            ++ text ", "
-            ++ self#pExp () e2
-            ++ text ", "
-            ++ self#pExp () e3
-            ++ text ");")
-        )
-*)
     | CpcSpawn (f, args, l) ->
         self#pLineDirective l
           ++ text "cpc_spawn "
@@ -5358,51 +5299,6 @@ and childrenStmt (toPrepend: instr list ref) : cilVisitor -> stmt -> stmt =
         if e' != e || el' != el then
           CpcSpawn (e', el', l)
         else s.skind
-(*    | CpcCut (ret, cut, l) ->
-        let ret' =
-          (match ret with
-          | None -> ret
-          | Some v ->
-              let v'   = doVisit vis (vis#vvrbl v) (fun _ x -> x) v in
-              if v' != v then Some v' else ret) in
-        let cut' =
-          (match cut with
-          | Yield | Done -> cut
-          | Attach e ->
-              let e' = fExp e in
-              toPrepend := vis#unqueueInstr ();
-              if e' != e then Attach e' else cut
-          | Detach e ->
-              let e' = fExp e in
-              toPrepend := vis#unqueueInstr ();
-              if e' != e then Detach e' else cut
-          | Wait e ->
-              let e' = fExp e in
-              toPrepend := vis#unqueueInstr (); (* insert these before cpc_wait  *)
-              if e' != e then Wait e' else cut
-          | Sleep (e1, e2, e3) ->
-              let e1' = fExp e1 in
-              let q1 = vis#unqueueInstr () in
-              let e2' = fExp e2 in
-              let q2 = vis#unqueueInstr () in
-              let e3' = fExp e3 in
-              toPrepend := q1 @ q2 @ ( vis#unqueueInstr () );
-              if e1' != e1 || e2' != e2 || e3' != e3 then
-                Sleep (e1', e2', e3')
-              else cut
-          | IoWait (e1, e2, e3) ->
-              let e1' = fExp e1 in
-              let q1 = vis#unqueueInstr () in
-              let e2' = fExp e2 in
-              let q2 = vis#unqueueInstr () in
-              let e3' = fExp e3 in
-              toPrepend := q1 @ q2 @ ( vis#unqueueInstr () );
-              if e1' != e1 || e2' != e2 || e3' != e3 then
-                IoWait (e1', e2', e3')
-              else cut) in
-        if ret' != ret || cut' != cut then
-          CpcCut( ret', cut', l)
-        else s.skind *)
     | CpcFun (f, l) ->
         let f' = visitCilFunction vis f in
         if f' != f then
@@ -5901,7 +5797,7 @@ let rec peepHole1 (* Process one instruction and possibly replace it *)
           peepHole1 doone h.bstmts;
           s.skind <- TryExcept(b, (doInstrList il, e), h, l);
       | Return _ | Goto _ | Break _ | Continue _ -> ()
-      (*| CpcCut _*) | CpcSpawn _ -> ()
+      | CpcSpawn _ -> ()
       | CpcFun _ -> ())
     ss
 
@@ -5937,7 +5833,7 @@ let rec peepHole2  (* Process two instructions and possibly replace them both *)
           s.skind <- TryExcept (b, (doInstrList il, e), h, l)
 
       | Return _ | Goto _ | Break _ | Continue _ -> ()
-      (*| CpcCut _*) | CpcSpawn _ -> ()
+      | CpcSpawn _ -> ()
       (*| CpcFork (s, _) -> peepHole2 dotwo [s]*)
       | CpcFun _ -> ())
     ss
@@ -6581,7 +6477,7 @@ and succpred_stmt s fallthrough =
                 end
   | TryExcept _ | TryFinally _ -> 
       failwith "computeCFGInfo: structured exception handling not implemented"
-  (*| CpcCut _*) | CpcFun _ | CpcSpawn _ ->
+  | CpcFun _ | CpcSpawn _ ->
       failwith "computeCFGInfo: CPC constructs handling not implemented"
 
 (* [weimer] Sun May  5 12:25:24 PDT 2002
@@ -6728,7 +6624,7 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
 
   | TryExcept _ | TryFinally _ -> 
       failwith "xform_switch_statement: structured exception handling not implemented"
-  (*| CpcCut _*) | CpcFun _ | CpcSpawn _ -> ()
+  | CpcFun _ | CpcSpawn _ -> ()
 
 end and xform_switch_block b break_dest cont_dest label_index = 
   try 

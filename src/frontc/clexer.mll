@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010,
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2003,
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -220,15 +222,6 @@ let init_lexicon _ =
                          IDENT ("__thread", loc));
       (**** CPC ***)
       ("cps", fun loc -> CPC_CPS loc);
-      (*("cpc_fork", fun loc -> CPC_FORK loc);*)
-      (*("cpc_wait", fun loc -> CPC_WAIT loc);
-      ("cpc_sleep", fun loc -> CPC_SLEEP loc);
-      ("cpc_io_wait", fun loc -> CPC_IO_WAIT loc);
-      ("cpc_yield", fun loc -> CPC_YIELD loc);
-      ("cpc_done", fun loc -> CPC_DONE loc);
-      ("cpc_attach", fun loc -> CPC_ATTACH loc);
-      ("cpc_detach", fun loc -> CPC_DETACH loc);
-      ("cpc_detached", fun loc -> CPC_DETACHED loc);*)
       ("cpc_spawn", fun loc -> CPC_SPAWN loc);
       ("cpc_attached", fun loc -> CPC_ATTACHED loc);
     ]

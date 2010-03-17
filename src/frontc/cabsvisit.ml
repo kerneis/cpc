@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010,
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -465,13 +467,6 @@ and childrenStatement vis s =
       if b1' != b1 || e' != e || b2' != b2 then TRY_EXCEPT(b1', e', b2', l) else s
       
   (*** CPC ***)
-  (*| CPC_YIELD _ -> s
-  | CPC_DONE _ -> s
-  | CPC_ATTACH _ -> s
-  | CPC_DETACH _ -> s
-  | CPC_DETACHED (stmt, l) ->
-      let s' = vs l stmt in
-      if s' != stmt then CPC_DETACHED (s', l) else s *)
   | CPC_ATTACHED (e, stmt, l) ->
       let e' = ve e in
       let s' = vs l stmt in
@@ -479,24 +474,6 @@ and childrenStatement vis s =
   | CPC_SPAWN (stmt, l) ->
       let s' = vs l stmt in
       if s' != stmt then CPC_SPAWN (s', l) else s
-  (*| CPC_FORK (stmt, l) ->
-      let s' = vs l stmt in
-      if s' != stmt then CPC_FORK (s', l) else s
-  | CPC_WAIT (e, l) ->
-      let e' = ve e in
-      if e' != e then CPC_WAIT (e', l) else s
-  | CPC_SLEEP (e1, e2, e3, l) ->
-      let e1' = ve e1 in
-      let e2' = ve e2 in
-      let e3' = ve e3 in
-      if e1' != e1 || e2' != e2 || e3' != e3 then CPC_SLEEP (e1', e2', e3', l)
-      else s
-  | CPC_IO_WAIT (e1, e2, e3, l) ->
-      let e1' = ve e1 in
-      let e2' = ve e2 in
-      let e3' = ve e3 in
-      if e1' != e1 || e2' != e2 || e3' != e3 then CPC_IO_WAIT (e1', e2', e3', l)
-      else s*)
   | CPC_FUN d -> match visitCabsDefinition vis d with
       | [FUNDEF _ as fd] -> if fd != d then CPC_FUN fd else s
       | _ -> assert false

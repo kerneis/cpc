@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010,
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -6514,33 +6516,6 @@ and doStatement (s : A.statement) : chunk =
         s2c (mkStmt (TryExcept (c2block b', (il', e'), c2block h', loc')))
 
     (*** CPC ***)
-     (*| CPC_YIELD loc ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        s2c (mkStmt (CpcCut (None, Yield, loc')))
-     | CPC_DONE loc ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        s2c (mkStmt (CpcCut (None, Done, loc')))
-     | CPC_ATTACH (A.NOTHING, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        s2c (mkStmt (CpcCut (None, Attach null, loc')))
-     | CPC_ATTACH (e, loc) ->
-        E.s (error "cpc_attach(scheduler) is disabled");
-        (*let loc' = convLoc loc in
-        currentLoc := loc';
-        let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcCut (None, Attach e', loc')))*)
-     | CPC_DETACH (A.NOTHING, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        s2c (mkStmt (CpcCut (None, Detach null, loc')))
-     | CPC_DETACH (e, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcCut (None, Detach e', loc')))*)
      | CPC_SPAWN (s, loc) ->
         let loc' = convLoc loc in
         (* The body of a cpc_spawn should always be converted as if it
@@ -6580,47 +6555,6 @@ and doStatement (s : A.statement) : chunk =
           let attach = s2c (setSched e') in
           let stmt = doStatement s in
           c @@ attach @@ stmt @@ s2c (resetSched ())
-      (*| CPC_DETACHED (s, loc) ->
-          (* setSched and resetSched update detachedVars *)
-          let detach = s2c (setSched false) in
-          let c = doStatement s in
-          detach @@ c @@ s2c (resetSched ())
-     | CPC_WAIT (e, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcCut(None, Wait e', loc')))
-     | CPC_SLEEP (e, A.NOTHING, A.NOTHING, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        let (c, e', _) = doExp false e (AExp None) in
-        c @@ s2c (mkStmt (CpcCut (None, Sleep (e', integer 0, null), loc')))
-     | CPC_SLEEP (e1, e2, A.NOTHING, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        let (c1, e1', _) = doExp false e1 (AExp None) in
-        let (c2, e2', _) = doExp false e2 (AExp None) in
-        c1 @@ c2 @@ s2c (mkStmt (CpcCut (None, Sleep (e1', e2', null), loc')))
-     | CPC_SLEEP (e1, e2, e3, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        let (c1, e1', _) = doExp false e1 (AExp None) in
-        let (c2, e2', _) = doExp false e2 (AExp None) in
-        let (c3, e3', _) = doExp false e3 (AExp None) in
-        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcCut (None, Sleep (e1', e2', e3'), loc')))
-     | CPC_IO_WAIT (e1, e2, A.NOTHING, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        let (c1, e1', _) = doExp false e1 (AExp None) in
-        let (c2, e2', _) = doExp false e2 (AExp None) in
-        c1 @@ c2 @@ s2c (mkStmt (CpcCut (None, IoWait (e1', e2', null), loc')))
-     | CPC_IO_WAIT (e1, e2, e3, loc) ->
-        let loc' = convLoc loc in
-        currentLoc := loc';
-        let (c1, e1', _) = doExp false e1 (AExp None) in
-        let (c2, e2', _) = doExp false e2 (AExp None) in
-        let (c3, e3', _) = doExp false e3 (AExp None) in
-        c1 @@ c2 @@ c3 @@ s2c (mkStmt (CpcCut (None, IoWait (e1', e2', e3'), loc'))) *)
      | CPC_FUN d -> doDecl false d
 
 

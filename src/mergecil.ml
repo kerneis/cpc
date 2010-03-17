@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -1158,15 +1160,8 @@ begin
         67 + 83*(stmtListSum b.bstmts) + 97*(stmtListSum h.bstmts)
     | TryFinally (b, h, _) -> 
         103 + 113*(stmtListSum b.bstmts) + 119*(stmtListSum h.bstmts)
-    | CpcSpawn (_, _, _) -> 137
-    (*| CpcCut (_, Yield, _) -> 127
-    | CpcCut (_, Done, _) -> 131
-    | CpcCut (_, Attach _, _) -> 149
-    | CpcCut (_, Detach _, _) -> 151
-    | CpcCut (_, Wait _, _) -> 157
-    | CpcCut (_, Sleep _, _) -> 163
-    | CpcCut (_, IoWait _, _) -> 167 *)
-    | CpcFun (f, _) -> 173*(functionChecksum f)
+    | CpcSpawn (_, _, _) -> 127
+    | CpcFun (f, _) -> 131*(functionChecksum f)
   in
   
   (* disabled 2nd and 3rd measure because they appear to get different

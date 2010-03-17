@@ -1,4 +1,6 @@
 /*(*
+ * Copyright (c) 2008-2010,
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2003,
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -261,8 +263,6 @@ let transformOffsetOf (speclist, dtype) member =
 %token<Cabs.cabsloc> VOLATILE EXTERN STATIC CONST RESTRICT AUTO REGISTER
 %token<Cabs.cabsloc> THREAD
 
-%token<Cabs.cabsloc> CPC_CPS
-
 %token<Cabs.cabsloc> SIZEOF ALIGNOF
 
 %token EQ PLUS_EQ MINUS_EQ STAR_EQ SLASH_EQ PERCENT_EQ
@@ -294,11 +294,8 @@ let transformOffsetOf (speclist, dtype) member =
 %token ELSE 
 
 /* CPC */
-/* %token<Cabs.cabsloc> CPC_FORK
-%token<Cabs.cabsloc> CPC_YIELD CPC_DONE CPC_ATTACH CPC_DETACH CPC_DETACHED
-%token<Cabs.cabsloc> CPC_WAIT CPC_SLEEP CPC_IO_WAIT */
-%token<Cabs.cabsloc> CPC_ATTACHED
-%token<Cabs.cabsloc> CPC_FUN CPC_SPAWN
+%token<Cabs.cabsloc> CPC_CPS
+%token<Cabs.cabsloc> CPC_FUN CPC_SPAWN CPC_ATTACHED
 
 %token<Cabs.cabsloc> ATTRIBUTE INLINE ASM TYPEOF FUNCTION__ PRETTY_FUNCTION__
 %token LABEL__
@@ -923,41 +920,10 @@ statement:
                             parse_error "try/finally in GCC code";
                           TRY_FINALLY (b, h, (*handleLoc*) $1) }
 
-/*|   CPC_YIELD SEMICOLON   { CPC_YIELD ((*handleLoc*) $1) }
-|   CPC_DONE SEMICOLON   { CPC_DONE ((*handleLoc*) $1) }
-|   CPC_ATTACH SEMICOLON   { CPC_ATTACH (NOTHING, (*handleLoc*) $1) }
-Attach to a specific scheduler --- disabled in the current runtime
-|   CPC_ATTACH LPAREN expression RPAREN SEMICOLON
-                        { CPC_ATTACH (fst $3, (*handleLoc*) $1) }
-|   CPC_DETACH SEMICOLON   { CPC_DETACH (NOTHING, (*handleLoc*) $1) }
-Detach to a specific thread pool
-|   CPC_DETACH LPAREN expression RPAREN SEMICOLON
-                        { CPC_DETACH (fst $3, (*handleLoc*) $1) }
-|   CPC_DETACHED statement   { CPC_DETACHED ($2, (*handleLoc*) $1) }
-*/
+                          /* CPC */
 |   CPC_SPAWN statement   { CPC_SPAWN ($2, (*handleLoc*) $1) }
 |   CPC_ATTACHED LPAREN expression RPAREN statement
                         { CPC_ATTACHED (fst $3, $5, (*handleLoc*) $1) }
-/*|   CPC_FORK statement   { CPC_FORK ($2, (*handleLoc*) $1)}
-|   CPC_WAIT LPAREN expression RPAREN SEMICOLON
-                        { CPC_WAIT(fst $3, (*handleLoc*) $1) }
-cpc_wait accepts a timeout, handled via cpc_sleep with a condition
-variable
-|   CPC_WAIT LPAREN expression COMMA expression RPAREN SEMICOLON
-                        { CPC_SLEEP(fst $5, NOTHING, fst $3, (*handleLoc*) $1) }
-|   CPC_WAIT LPAREN expression COMMA expression COMMA expression RPAREN SEMICOLON
-                        { CPC_SLEEP(fst $5, fst $7, fst $3, (*handleLoc*) $1) }
-|   CPC_SLEEP LPAREN expression RPAREN SEMICOLON
-                        { CPC_SLEEP(fst $3, NOTHING, NOTHING, (*handleLoc*) $1) }
-|   CPC_SLEEP LPAREN expression COMMA expression RPAREN SEMICOLON
-                        { CPC_SLEEP(fst $3, fst $5, NOTHING, (*handleLoc*) $1) }
-|   CPC_SLEEP LPAREN expression COMMA expression COMMA expression RPAREN SEMICOLON
-                        { CPC_SLEEP(fst $3, fst $5, fst $7, (*handleLoc*) $1) }
-|   CPC_IO_WAIT LPAREN expression COMMA expression RPAREN SEMICOLON
-                        { CPC_IO_WAIT(fst $3, fst $5, NOTHING, (*handleLoc*) $1) }
-|   CPC_IO_WAIT LPAREN expression COMMA expression COMMA expression RPAREN SEMICOLON
-                        { CPC_IO_WAIT(fst $3, fst $5, fst $7, (*handleLoc*) $1) }
-*/
 |   function_def        { CPC_FUN $1 }
 |   error location   SEMICOLON   { (NOP $2)}
 ;

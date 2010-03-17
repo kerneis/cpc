@@ -150,7 +150,7 @@ directly from one thread pool to another.
     cpc_sched *cpc_default_scheduler, *cpc_default_pool;
 
     cpc_sched *cpc_threadpool_get(int);
-    void cpc_threadpool_release(cpc_sched *);
+    int cpc_threadpool_release(cpc_sched *);
 
     cps cpc_sched *cpc_attach(cpc_sched *pool);
     cpc_sched *cpc_get_sched();
@@ -168,23 +168,25 @@ scheduler you are coming from.\\
 NULL} pointer, but this is {\em not\/} guaranteed to hold in the future.
 Always use the {\tt cpc\_default\_scheduler} variable.
 
-\paragraph{\tt cpc\_threadpool\_get} The function {\tt cpc\_threadpool\_get}
-returns a pointer to a new thread pool.  It takes one argument: the
-maximum number of threads in the pool (thread are created dynamically).
-This argument is cropped to {\tt MAX\_THREADS}\footnote{{\tt
-MAX\_THREADS} is an internal constant of the CPC runtime, currently set
-to 20.} if it is outside the $\llbracket 1; \mbox{\tt
-MAX\_THREADS}\rrbracket$ interval.
+\paragraph{\tt cpc\_threadpool\_get} The function {\tt
+cpc\_threadpool\_get} returns a pointer to a new thread pool.  It takes
+one argument: the maximum number of threads in the pool (thread are
+created dynamically).  This argument is cropped to {\tt
+MAX\_THREADS}\footnote{{\tt MAX\_THREADS} is an internal constant of the
+CPC runtime, currently set to 20.} if it is outside the $\llbracket 1;
+\mbox{\tt MAX\_THREADS}\rrbracket$ interval.  This function shall not be
+called outside the main loop (it is not thread-safe).
 
 \paragraph{\tt cpc\_threadpool\_release} Conversely, {\tt
-cpc\_threadpool\_release} releases a given thread pool {\em in an
-asynchronous manner\/}: once this function has returned, it is
-impossible to attach new continuations to the thread pool anymore, but
-the ressources will effectively be released only once every attached
-continuation is either finished or attached back to another scheduler.\\
-{\bf Bug:} the current implementation suffers from a race condition.
-You have the guarantee that the pool will eventually be released, but
-some continuations might manage to attach to it after the function has
+cpc\_threadpool\_release} releases a given thread pool.  This function
+does not block.  It returns 0 if the pool has been released, -1
+otherwise (most notably when they are some threads still detached).  In
+that case, you shall retry later --- calling {\tt
+cpc\_yield(CPC\_OPPORTUNISTIC)} is recommended (but notice that the flag
+is ignored in the current implementation, leading to busy-waiting).
+This function can be called in any mode and context, but notice that it
+will always fail if you try to release the pool you are attached to.
+Conversely, it should always succeed when {\tt cpc\_main\_loop} has
 returned.
 
 \paragraph{\tt cpc\_default\_pool} A pointer to the default thread pool,
@@ -296,6 +298,7 @@ but only in attached state.
 
 \begin{verbatim}
     cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
+    double cpc_gettime(void);
 \end{verbatim}
 
 \paragraph{\tt cpc\_sleep} The function {\tt cpc\_sleep} takes three
@@ -322,6 +325,10 @@ are syntactic sugar for, respectively,
     cpc_sleep(sec, usec, cond);
 \end{verbatim}
 
+\paragraph{\tt cpc\_gettime} The function {\tt cpc\_gettime} returns a double
+representing the current time in seconds.  This function is not valid in
+detached mode.
+
 \subsection{Waiting for I/O}
 
 \begin{verbatim}
@@ -338,7 +345,9 @@ This function causes the current continuation to be suspended until
 either the given file descriptor is available for I/O in the given
 direction, or the given condition variable is signalled, whichever
 happens first.  It returns {\tt CPC\_IO\_IN}, {\tt CPC\_IO\_OUT} or {\tt
-CPC\_CONDVAR}, depending on what happened.
+CPC\_CONDVAR}, depending on what happened.  It may also return {\tt -1}
+if some error occurred (e.g. in detached mode, when the call to
+{\tt poll} fails).
 
 The form with a third argument is only valid in attached state.
 
@@ -346,7 +355,7 @@ The form with a third argument is only valid in attached state.
 up the continuations waiting for an event {\tt direction} on the {\tt
 fd} file descriptor.  It shall only be called in the same thread as the
 CPC scheduler (but not necessarily in cps context) and will only wake up
-attached threads.
+attached threads. {\bf Not implemented in the current runtime!}
 
 \section{Limitations and implementation notes}
 

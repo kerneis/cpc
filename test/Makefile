@@ -145,6 +145,10 @@ ifdef CABSONLY
   CILLY+= --cabsonly
 endif
 
+# Disable CPC specific options when running the regular tests
+ifndef CPC
+  CILLY+= --dontcpc --nokeepunused
+endif
 
 # This is a way to enable the stats, allowing the command line to override it
 # Do STATS= to disable the stats.

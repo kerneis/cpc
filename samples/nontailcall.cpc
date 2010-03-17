@@ -1,0 +1,28 @@
+#include <stdlib.h>
+int i = 0;
+int j = 0;
+
+cps void loop(){
+    i++;
+    loop();
+    j++;
+    return;
+}
+
+cps void malloc_loop(){
+    char *c;
+    c = malloc(1);
+    printf("%p\n",c);
+    malloc_loop();
+    free(c);
+    return;
+}
+
+
+int main(){
+    cpc_spawn { printf("loop\n");loop();};
+    cpc_spawn { printf("malloc_loop %d %d\n",i,j);malloc_loop();};
+    cpc_main_loop();
+    printf("The end!\n");
+    return 0;
+}

@@ -112,7 +112,7 @@ BEFOREDEPS += $(OBJDIR)/feature_config.ml
 include ocamlutil/Makefile.ocaml
 
 OBEXEEXT = $(EXEEXT:asm=native)
-IGNOREDIRS = obj,runtime,samples,doc,test,Nifty,bench
+IGNOREDIRS = obj,doc,test,runtime,samples
 ocamlbuild:
 	ocamlbuild -cflags "$(COMPILE_FLAGS)" -lflags "$(LINK_FLAGS)" \
 	-Xs $(IGNOREDIRS) -no-links src/main$(OBEXEEXT) src/cil.$(CMXA)

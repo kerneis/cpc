@@ -1,18 +1,7 @@
-[src/cil.ml]
-* Handle CPC constructs in computeCFGInfo (function succpred_stmt)
-  => needs careful analysis. Handling in xform_switch_stmt is probably
-     broken too, btw. Anyway, this is now done in src/ext/cfg.ml.
-* peepHole doesn't dive into CpcFun
-  => I think one should lambda-lift CpcFun before using it anyway.
-     It is used in src/frontc/cabs2cil.ml too, but there is no
-     local functions at this stage.
-
 [src/ext/cpc.ml]
 * during CPS conversion, if there is a typo in a cpc_spawn, building
   fails with a Not_found error message
   => print a more informative error message (or check it before)
-* in avoidAmpersand
-  => what about arrays?
 * OPT: There is an inefficiency with return values:
   x = f(); return x; is converted to
   x = f(); w(x); return; with w(x){return x;}
@@ -28,25 +17,3 @@
 * OPT: Return probably does not have to be split if there is no
   assignment before it
   => is it worth the trouble?
-
-[src/ext/dataflow.ml]
-* CpcConstructs do not contain instructions, but they contain
-  expressions, should we ignore them too?
-  => probably yes, just like if, switch, etc.
-
-[src/frontc/cabs2cil.ml]
-* check transformation of CPC_FUN (scoping, globals, etc.)
-* Remember if we are in a switch statement, and handle BREAK accordingly
-  (make a distinction between loops and switch)
-  => is it worth the trouble?
-
-[src/check.ml]
-* do the right thing with CpcFun (there is much more to save and restore
-  than the few global references I deal with --- hashtables, startEnv(),
-  etc.)
-
-[samples/detached.cpc]
-* Rewrite from scratch to test the various features.
-
-[runtime/cpc_runtime.c]
-* http://golubenco.org/2007/06/14/atomic-operations/

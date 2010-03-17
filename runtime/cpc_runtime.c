@@ -1,9 +1,29 @@
 /*
-Copyright (c) 2008, 2009 by Gabriel Kerneis.
-Copyright (c) 2004, 2005 by Juliusz Chroboczek.
-Experimental; do not redistribute.
+Copyright (c) 2008-2010,
+  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+Copyright (c) 2004-2005,
+  Juliusz Chroboczek  <jch@pps.jussieu.fr>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 */
 
+#define _GNU_SOURCE
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -11,33 +31,48 @@ Experimental; do not redistribute.
 #include <stdlib.h>
 #include <assert.h>
 #include <pthread.h>
+#include <sys/time.h>
+#include <fcntl.h>
 
 #define NO_CPS_PROTO
 #include "cpc_runtime.h"
-#include "ev.c"
 
 #include <poll.h> /* cpc_d_io_wait */
 
-#include "nft_pool.h"
+#include "threadpool/threadpool.h"
 
-static struct ev_loop *loop = NULL;
-static ev_idle run, idle_run;
-static ev_check check;
-
+struct cpc_sched {
+    threadpool_t *pool;
+    struct cpc_sched *next;
+};
 static pthread_t main_loop_id;
-
-#define IS_DETACHED (loop && !pthread_equal(main_loop_id,pthread_self()))
-
+#define IS_DETACHED (cpc_default_pool && !pthread_equal(main_loop_id,pthread_self()))
 #define MAX_THREADS 20
-nft_pool_t *cpc_default_pool;
+cpc_sched *cpc_default_pool = NULL;
+static int p[2];
 
-static ev_async attach_sig;
-static pthread_mutex_t attach_mutex = PTHREAD_MUTEX_INITIALIZER;
+const int cpc_pessimise_runtime = 0;
 
 typedef struct cpc_continuation_queue {
     struct cpc_continuation *head;
     struct cpc_continuation *tail;
 } cpc_continuation_queue;
+
+typedef struct cpc_timed_continuation {
+    cpc_continuation *continuation;
+    struct timeval time;
+    struct cpc_timed_continuation *next;
+} cpc_timed_continuation;
+
+typedef struct cpc_timed_continuation_queue {
+    struct cpc_timed_continuation *head;
+    struct cpc_timed_continuation *tail;
+} cpc_timed_continuation_queue;
+
+typedef struct cpc_sched_queue {
+    struct cpc_sched *head;
+    struct cpc_sched *tail;
+} cpc_sched_queue;
 
 struct cpc_condvar {
     int refcount;
@@ -47,17 +82,21 @@ struct cpc_condvar {
 #define STATE_UNKNOWN -1
 #define STATE_SLEEPING -2
 #define STATE_DETACHED -3
-/* Detached continuations that must be discarded */
-#define STATE_GARBAGE -4
 
 static cpc_continuation_queue ready = {NULL, NULL};
-static cpc_continuation_queue idle_ready = {NULL, NULL};
-static cpc_continuation_queue attach_queue = {NULL, NULL};
+static cpc_timed_continuation_queue sleeping = {NULL, NULL};
+static cpc_sched_queue schedulers = {NULL, NULL};
+static cpc_continuation_queue *fd_queues = NULL;
+static int num_fds = 0, size_fds = 0;
+static fd_set readfds, writefds, exceptfds;
 
-static void io_cb (struct ev_loop *, ev_io *, int);
-static void timer_cb (struct ev_loop *, ev_timer *, int);
-static void idle_cb (struct ev_loop *, ev_idle *, int);
+static struct timeval cpc_now;
+
+static void recompute_fdsets(int fd);
+
 static inline void exhaust_ready(cpc_continuation *);
+
+volatile int detached_count = 0;
 
 /*** Basic operations on continuations ***/
 
@@ -94,15 +133,9 @@ cpc_continuation_get(int size)
 void
 cpc_continuation_free(struct cpc_continuation *c)
 {
-    /* Detached continuations are re-attached in a GARBAGE state and
-     * freed by attach_cb, so that the event loop is aware they have
-     * been discarded. */
-    if(c->state == STATE_DETACHED) {
-        c->state = STATE_GARBAGE;
-        cpc_prim_attach(c);
-        return;
-    }
-    assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
+    assert((c->state == STATE_UNKNOWN || c->state == STATE_DETACHED) && c->condvar == NULL);
+    if(c->state == STATE_DETACHED)
+        __sync_fetch_and_sub(&detached_count, 1); // XXX
     free(c);
 }
 
@@ -137,40 +170,8 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->sched = c->sched;
     d->state = c->state;
     d->ready = c->ready;
-    /* The ev_watcher struct is stored directly in the continuation. But
-     * it must not be copied since libev uses pointers to this struct.
-     * Rather than using malloc and a pointer to the structure, we claim
-     * that cpc_continuation_expand and cpc_continuation_copy cannot be
-     * called when the continuation is sleeping or io_waiting. Checking
-     * the claim, just in case we missed something:
-     */
-    assert(("This is a bug, please report it.",
-            c->state == STATE_UNKNOWN || c->state == STATE_DETACHED));
-    /* And do not copy c->watcher since it's meaningless garbage. */
 
     free(c);
-
-    return d;
-}
-
-struct cpc_continuation *
-cpc_continuation_copy(struct cpc_continuation *c)
-{
-    int i;
-    cpc_continuation *d;
-
-    if(c == NULL) return NULL;
-
-    d = cpc_continuation_get(c->size);
-    for(i = 0; i < c->length; i++)
-        d->c[i] = c->c[i];
-    d->length = c->length;
-    d->condvar = c->condvar;
-    d->sched = c->sched;
-    d->state = c->state;
-    d->ready = c->ready;
-    assert(("This is a bug, please report it.", /* See above for more details. */
-            c->state == STATE_UNKNOWN || c->state == STATE_DETACHED));
 
     return d;
 }
@@ -193,6 +194,23 @@ enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
     }
 }
 
+/*
+static void
+enqueue_head(cpc_continuation_queue *queue, cpc_continuation *c)
+{
+    if(c == NULL)
+        c = cpc_continuation_expand(NULL, 0);
+
+    if(queue->head == NULL) {
+        c->next = NULL;
+        queue->head = queue->tail = c;
+    } else {
+        c->next = queue->head;
+        queue->head = c;
+    }
+}
+*/
+
 static cpc_continuation *
 dequeue(cpc_continuation_queue *queue)
 {
@@ -205,6 +223,25 @@ dequeue(cpc_continuation_queue *queue)
         queue->tail = NULL;
     cont->next = NULL;
     return cont;
+}    
+
+static void
+dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
+{
+    cpc_continuation *c, *next;
+    c = queue->head;
+    if(c == cont) {
+        queue->head = queue->head->next;
+        if(queue->head == NULL)
+            queue->tail = NULL;
+        return;
+    }
+    while(c->next != cont)
+        c = c->next;
+    next = c->next;
+    c->next = c->next->next;
+    if(c->next == NULL)
+        queue->tail = c;
 }
 
 static void
@@ -235,7 +272,7 @@ cond_dequeue(cpc_continuation_queue *queue)
         queue->tail = NULL;
     cont->cond_next = NULL;
     return cont;
-}
+}    
 
 static void
 cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
@@ -256,13 +293,129 @@ cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
         queue->tail = c;
 }
 
+static int
+timeval_cmp(struct timeval *t1, struct timeval *t2)
+{
+    if(t1->tv_sec < t2->tv_sec)
+        return -1;
+    else if(t1->tv_sec > t2->tv_sec)
+        return +1;
+    else if(t1->tv_usec < t2->tv_usec)
+        return -1;
+    else if(t1->tv_usec > t2->tv_usec)
+        return +1;
+    else
+        return 0;
+}
+
+static void
+timeval_plus(struct timeval *d, struct timeval *s1, int sec, int usec)
+{
+    d->tv_usec = s1->tv_usec + usec;
+    d->tv_sec = s1->tv_sec + sec;
+    if(d->tv_usec >= 1000000) {
+        d->tv_sec += 1;
+        d->tv_usec -= 1000000;
+    }
+}
+
+static void
+timeval_minus(struct timeval *d, struct timeval *s1, struct timeval *s2)
+{
+    if(s1->tv_usec > s2->tv_usec) {
+        d->tv_usec = s1->tv_usec - s2->tv_usec;
+        d->tv_sec = s1->tv_sec - s2->tv_sec;
+    } else {
+        d->tv_usec = s1->tv_usec + 1000000 - s2->tv_usec;
+        d->tv_sec = s1->tv_sec - s2->tv_sec - 1;
+    }
+    if(d->tv_sec < 0)
+        d->tv_sec = d->tv_usec = 0;
+}
+
+static void
+timed_enqueue(cpc_timed_continuation_queue *queue, cpc_continuation *c,
+              struct timeval *time)
+{
+    cpc_timed_continuation *tc;
+
+    if(c == NULL)
+        c = cpc_continuation_expand(NULL, 0);
+
+    tc = malloc(sizeof(struct cpc_timed_continuation));
+    tc->continuation = c;
+    tc->time = *time;
+
+    if(queue->head == NULL ||
+       timeval_cmp(time, &queue->head->time) < 0) {
+        /* Insert at head */
+        tc->next = queue->head;
+        queue->head = tc;
+        if(tc->next == NULL)
+            queue->tail = tc;
+    } else if(timeval_cmp(time, &queue->tail->time) >= 0) {
+        /* Insert at tail */
+        tc->next = NULL;
+        queue->tail->next = tc;
+        queue->tail = tc;
+    } else {
+        cpc_timed_continuation *other;
+        other = queue->head;
+        while(timeval_cmp(time, &other->next->time) >= 0)
+            other = other->next;
+        tc->next = other->next;
+        other->next = tc->next;
+    }
+}
+
+static cpc_continuation*
+timed_dequeue(cpc_timed_continuation_queue *queue, struct timeval *time)
+{
+    cpc_timed_continuation *tc;
+    cpc_continuation *cont;
+
+    if(queue->head == NULL || timeval_cmp(time, &queue->head->time) < 0)
+        return NULL;
+
+    tc = queue->head;
+    queue->head = tc->next;
+    if(queue->head == NULL)
+        queue->tail = NULL;
+    cont = tc->continuation;
+    free(tc);
+    return cont;
+}
+
+void
+timed_dequeue_1(cpc_timed_continuation_queue *queue,
+                cpc_continuation *cont)
+{
+    cpc_timed_continuation *tc, *next;
+    tc = queue->head;
+    if(tc->continuation == cont) {
+        queue->head = queue->head->next;
+        if(queue->head == NULL)
+            queue->tail = NULL;
+        free(tc);
+        return;
+    }
+    while(tc->next->continuation != cont)
+        tc = tc->next;
+    next = tc->next;
+    tc->next = tc->next->next;
+    if(tc->next == NULL)
+        queue->tail = tc;
+    free(next);
+}
+
 static void
 dequeue_other(cpc_continuation *cont)
 {
-    if(cont->state == STATE_SLEEPING) {
-        ev_timer_stop(loop, &cont->watcher.timer);
-    } else if(cont->state >= 0) {
-        ev_io_stop(loop, &cont->watcher.io);
+    if(cont->state == STATE_SLEEPING)
+        timed_dequeue_1(&sleeping, cont);
+    else if(cont->state >= 0 && (cont->state & ((1 << 29) - 1)) <= size_fds) {
+        dequeue_1(&fd_queues[cont->state & ((1 << 29) - 1)], cont);
+        recompute_fdsets(cont->state & ((1 << 29) - 1));
     } else
         assert(cont->state == STATE_UNKNOWN);
     cont->state = STATE_UNKNOWN;
@@ -316,22 +469,10 @@ cpc_condvar_count(cpc_condvar *cond)
     return i;
 }
 
-/*
-void
-cpc_prim_wait(cpc_condvar *cond, cpc_continuation *cont)
-{
-    assert(!IS_DETACHED && cont->condvar == NULL && cont->state == STATE_UNKNOWN);
-    cont->condvar = cond;
-    cond_enqueue(&cond->queue, cont);
-}
-*/
-
+/* cps int cpc_wait(cpc_condvar *cond) */
 struct cpc_wait_arglist {
    cpc_condvar *cond ;
 } __attribute__((__packed__)) ;
-
-/* CPS converted version of:
-int cps cpc_wait(cpc_condvar *c) */
 void cpc_wait(struct cpc_continuation *cont)
 {
     cpc_condvar *cond;
@@ -349,7 +490,7 @@ void cpc_wait(struct cpc_continuation *cont)
 void
 cpc_signal(cpc_condvar *cond)
 {
-    int rc = CPC_CONDVAR; /* TODO define return values for cpc_wait */
+    int rc = CPC_CONDVAR;
     assert(!IS_DETACHED);
     cpc_continuation *cont;
     cont = cond_dequeue(&cond->queue);
@@ -360,14 +501,12 @@ cpc_signal(cpc_condvar *cond)
     cpc_continuation_patch(cont, sizeof(int), &rc);
     dequeue_other(cont);
     enqueue(&ready, cont);
-    if(loop)
-        ev_idle_start(loop, &run);
 }
 
 void
 cpc_signal_all(cpc_condvar *cond)
 {
-    int rc = CPC_CONDVAR; /* TODO define return values for cpc_wait */
+    int rc = CPC_CONDVAR;
     cpc_continuation *cont;
 
     assert(!IS_DETACHED);
@@ -380,49 +519,17 @@ cpc_signal_all(cpc_condvar *cond)
         cpc_continuation_patch(cont, sizeof(int), &rc);
         dequeue_other(cont);
         enqueue(&ready, cont);
-        if(loop)
-            ev_idle_start(loop, &run);
     }
 }
 
 /*** cpc_sleep ***/
 
-/*
-void
-cpc_prim_sleep(int sec, int usec, cpc_condvar *cond, cpc_continuation *cont)
-{
-    ev_tstamp timeout = sec + ((ev_tstamp) usec) / 1e6;
-
-    if(cont->state == STATE_DETACHED) {
-        assert(IS_DETACHED && cond == NULL);
-        ev_sleep(timeout); // Uses nanosleep or select
-        cpc_invoke_continuation(cont);
-        return;
-    }
-
-    if(cont == NULL)
-        cont = cpc_continuation_expand(NULL, 0);
-
-    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
-    if(cond) {
-        cont->condvar = cond;
-        cond_enqueue(&cond->queue, cont);
-    }
-    cont->state = STATE_SLEEPING;
-    ev_timer_init(&cont->watcher.timer, timer_cb, timeout, 0.);
-    ev_timer_start(loop, &cont->watcher.timer);
-    return;
-}
-*/
-
+/* cps int cpc_sleep(int sec, int usec, cpc_condvar *c) */
 struct cpc_sleep_arglist {
    int sec ;
    int usec ;
    cpc_condvar *cond ;
 } __attribute__((__packed__)) ;
-
-/* CPS converted version of:
-int cps cpc_sleep(int sec, int usec, cpc_condvar *c) */
 void cpc_sleep(struct cpc_continuation *cont)
 {
     int sec, usec;
@@ -435,17 +542,21 @@ void cpc_sleep(struct cpc_continuation *cont)
     usec = cpc_arguments->usec;
     cond = cpc_arguments->cond;
 
-    ev_tstamp timeout = sec + ((ev_tstamp) usec) / 1e6;
-
-    if(cont->state == STATE_DETACHED) {
-        assert(IS_DETACHED && cond == NULL);
-        ev_sleep(timeout); // Uses nanosleep or select
-        cpc_invoke_continuation(cont);
-        return;
-    }
+    struct timeval when;
 
     if(cont == NULL)
         cont = cpc_continuation_expand(NULL, 0);
+
+    if(cont->state == STATE_DETACHED) {
+        assert(IS_DETACHED && cond == NULL);
+        when.tv_sec = sec;
+        when.tv_usec = usec;
+        select(0, NULL, NULL, NULL, &when); // XXX
+        int rc = CPC_TIMEOUT;
+        cpc_continuation_patch(cont, sizeof(int), &rc);
+        cpc_invoke_continuation(cont);
+        return;
+    }
 
     assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
     if(cond) {
@@ -453,51 +564,21 @@ void cpc_sleep(struct cpc_continuation *cont)
         cond_enqueue(&cond->queue, cont);
     }
     cont->state = STATE_SLEEPING;
-    ev_timer_init(&cont->watcher.timer, timer_cb, timeout, 0.);
-    ev_timer_start(loop, &cont->watcher.timer);
-    return;
-}
-static void
-timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
-{
-    /* Ugly pointer arithmetic to get the continuation including the
-     * watcher w */
-    struct cpc_continuation *c = (struct cpc_continuation *)
-    (((char *)w) - offsetof(struct cpc_continuation, watcher));
-
-    assert(c->state == STATE_SLEEPING);
-
-    ev_timer_stop(loop, w);
-    c->state = STATE_UNKNOWN;
-    if(c->condvar) {
-        cond_dequeue_1(&c->condvar->queue, c);
-    }
-    c->condvar = NULL;
-
-    /* TODO define return values for cpc_sleep */
-    cpc_continuation_patch(c, sizeof(int), &revents);
-
-    enqueue(&ready, c);
-    assert(loop);
-    ev_idle_start(loop, &run);
+    timeval_plus(&when, &cpc_now, sec, usec);
+    timed_enqueue(&sleeping, cont, &when);
 }
 
 /*** cpc_io_wait ***/
-
-void
-cpc_signal_fd(int fd, int direction)
-{
-    assert(!IS_DETACHED);
-    if(loop)
-        ev_feed_fd_event (loop, fd, direction);
-}
 
 static inline int
 cpc_d_io_wait(int fd, int direction)
 {
     struct pollfd pfd[1];
-    int pollevent = direction == CPC_IO_OUT ? POLLOUT : POLLIN;
+    int pollevent = 0;
     int rc;
+
+    pollevent |= (direction | CPC_IO_OUT) ? POLLOUT : 0;
+    pollevent |= (direction | CPC_IO_IN) ? POLLIN : 0;
 
     pfd[0].fd = fd;
     pfd[0].events = pollevent;
@@ -507,74 +588,85 @@ cpc_d_io_wait(int fd, int direction)
     if(rc < 0)
         return -1;
 
-    if(pfd[0].revents & pollevent)
-        return 1;
+    rc = 0;
+    rc |= (pfd[0].revents & POLLOUT) ? CPC_IO_OUT : 0;
+    rc |= (pfd[0].revents & POLLIN) ? CPC_IO_IN : 0;
 
-    return 0;
+    return rc;
 }
-
-/*
-void
-cpc_prim_io_wait(int fd, int direction, cpc_condvar *cond,
-                 cpc_continuation *cont)
-{
-    if(cont->state == STATE_DETACHED) {
-        assert(IS_DETACHED && cond == NULL);
-        cpc_d_io_wait(fd, direction); // XXX No error handling
-        cpc_invoke_continuation(cont);
-        return;
-    }
-
-    if(cont == NULL)
-        return;
-
-    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
-
-    if(cond) {
-        cont->condvar = cond;
-        cond_enqueue(&cond->queue, cont);
-    }
-
-    cont->state = fd; // formerly: fd | ((direction & 3) << 29);
-    ev_io_init(&cont->watcher.io, io_cb, fd, direction);
-    ev_io_start(loop, &cont->watcher.io);
-    return;
-}
-*/
 
 static void
-io_cb(struct ev_loop *loop, ev_io *w, int revents)
+fd_queues_expand(int n)
 {
-    /* Ugly pointer arithmetic to get the continuation including the
-     * watcher w */
-    struct cpc_continuation *c = (struct cpc_continuation *)
-    (((char *) w ) - offsetof(struct cpc_continuation, watcher));
+    cpc_continuation_queue *new;
 
-    assert(c->state == w->fd);
-
-    ev_io_stop(loop, w);
-    c->state = STATE_UNKNOWN;
-    if(c->condvar) {
-        cond_dequeue_1(&c->condvar->queue, c);
+    assert(n >= size_fds && n <= FD_SETSIZE);
+    new = malloc(n * sizeof(struct cpc_continuation_queue));
+    if(size_fds > 0) {
+        memcpy(new, fd_queues,
+               size_fds * sizeof(struct cpc_continuation_queue));
+    } else {
+        FD_ZERO(&readfds);
+        FD_ZERO(&writefds);
+        FD_ZERO(&exceptfds);
     }
-    c->condvar = NULL;
 
-    /* TODO define return values for cpc_io_wait */
-    cpc_continuation_patch(c, sizeof(int), &revents);
-
-    enqueue(&ready, c);
-    assert(loop);
-    ev_idle_start(loop, &run);
+    memset(new + size_fds, 0,
+           (n - size_fds) * sizeof(struct cpc_continuation_queue));
+    free(fd_queues);
+    fd_queues = new;
+    size_fds = n;
 }
 
+static void
+recompute_fdsets(int fd)
+{
+    int r = 0, w = 0;
+    cpc_continuation *cont;
+
+    cont = fd_queues[fd].head;
+    while(cont) {
+        if(((cont->state >> 29) & CPC_IO_IN))
+            r = 1;
+        if(((cont->state >> 29) & CPC_IO_OUT))
+            w = 1;
+        if(r && w)
+            break;
+        cont = cont->next;
+    }
+    if(r)
+        FD_SET(fd, &readfds);
+    else
+        FD_CLR(fd, &readfds);
+    if(w)
+        FD_SET(fd, &writefds);
+    else
+        FD_CLR(fd, &writefds);
+    if(r || w)
+        FD_SET(fd, &exceptfds);
+    else
+        FD_CLR(fd, &exceptfds);
+
+    if(r || w) {
+        if(num_fds <= fd + 1)
+            num_fds = fd + 1;
+    } else if(fd == num_fds - 1) {
+        while(!FD_ISSET(num_fds - 1, &readfds) &&
+              !FD_ISSET(num_fds - 1, &writefds) &&
+              !FD_ISSET(num_fds - 1, &exceptfds)) {
+            num_fds--;
+            if(num_fds == 0)
+                break;
+        }
+    }
+}
+        
+/* cps int cpc_io_wait(int fd, int direction, cpc_condvar *c) */
 struct cpc_io_wait_arglist {
    int fd ;
    int direction ;
    cpc_condvar *cond ;
 } __attribute__((__packed__)) ;
-
-/* CPS converted version of:
-int cps cpc_io_wait(int fd, int direction, cpc_condvar *c) */
 void cpc_io_wait(struct cpc_continuation *cont)
 {
     int fd, direction, rc;
@@ -590,7 +682,6 @@ void cpc_io_wait(struct cpc_continuation *cont)
 
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED && cond == NULL);
-	/* TODO define return values for cpc_io_wait */
         rc = cpc_d_io_wait(fd, direction);
         cpc_continuation_patch(cont, sizeof(int), &rc);
         cpc_invoke_continuation(cont);
@@ -601,25 +692,57 @@ void cpc_io_wait(struct cpc_continuation *cont)
         return;
 
     assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
+    assert((fd & (7 << 29)) == 0);
 
     if(cond) {
         cont->condvar = cond;
         cond_enqueue(&cond->queue, cont);
     }
+    if(size_fds <= fd)
+        fd_queues_expand(fd + 10);
 
-    cont->state = fd /*| ((direction & 3) << 29)*/;
-    ev_io_init(&cont->watcher.io, io_cb, fd, direction);
-    ev_io_start(loop, &cont->watcher.io);
-    return;
+    cont->state = fd | ((direction & 3) << 29);
+    enqueue(&fd_queues[fd], cont);
+    recompute_fdsets(fd);
 }
 
+static void
+requeue_io_ready(int fd, int direction)
+{
+    cpc_continuation *c;
+    c = fd_queues[fd].head;
+    while(c) {
+        if((c->state >> 29) & direction) {
+            dequeue_1(&fd_queues[fd], c); /* XXX */
+            c->state = STATE_UNKNOWN;
+            cpc_continuation_patch(c, sizeof(int), &direction);
+            if(c->condvar) {
+                cond_dequeue_1(&c->condvar->queue, c);
+            }
+            c->condvar = NULL;
+            enqueue(&ready, c);
+        }
+        c = c->next;
+    }
+    recompute_fdsets(fd);
+}
+
+void
+cpc_signal_fd(int fd, int direction)
+{
+    assert(!IS_DETACHED);
+    requeue_io_ready(fd, direction);
+}
 
 /*** cpc_attach ****/
 
+void cpc_prim_attach(cpc_continuation*);
+void cpc_prim_detach(cpc_sched*, cpc_continuation*);
+
+/* cps cpc_sched *cpc_attach(cpc_sched *pool) */
 struct cpc_attach_arglist {
    cpc_sched *sched;
 } __attribute__((__packed__)) ;
-
 void
 cpc_attach(struct cpc_continuation *cont)
 {
@@ -639,6 +762,22 @@ cpc_attach(struct cpc_continuation *cont)
         cpc_prim_detach(sched, cont);
 }
 
+static void
+attach_cb(void *cont)
+{
+    struct cpc_continuation *c = (struct cpc_continuation *)cont;
+
+    /* If the state is UNKNOWN, then the continuation comes from a
+     * cpc_spawn. */
+    assert((c->state == STATE_UNKNOWN || c->state == STATE_DETACHED)
+        && c->condvar == NULL);
+    if(c->state == STATE_DETACHED)
+        c->state = STATE_UNKNOWN;
+    c->sched = cpc_default_sched;
+    __sync_fetch_and_sub(&detached_count, 1); // XXX
+    enqueue(&ready, c); // XXX Or maybe: exhaust_ready(c); ???
+}
+
 void
 cpc_prim_attach(cpc_continuation *cont)
 {
@@ -648,108 +787,109 @@ cpc_prim_attach(cpc_continuation *cont)
         cpc_invoke_continuation(cont);
         return;
     }
-    if(cont->state != STATE_DETACHED)
-        /* cont must be freed, but we have to attach it first, so that
-         * the event loop doesn't wait for it forever. */
-        assert(cont->state == STATE_GARBAGE);
-    pthread_mutex_lock (&attach_mutex);
-    enqueue(&attach_queue, cont);
-    pthread_mutex_unlock (&attach_mutex);
-    ev_async_send(loop, &attach_sig);
-    return;
+
+    assert(cont->state == STATE_DETACHED);
+    threadpool_schedule_back(cont->sched->pool, attach_cb, cont);
 }
 
 static void
-attach_cb(struct ev_loop *loop, ev_async *w, int revents)
-{
-    struct cpc_continuation *c;
-
-    pthread_mutex_lock (&attach_mutex);
-    while((c = dequeue(&attach_queue))) {
-        if(c->state == STATE_GARBAGE) {
-            free(c);
-            ev_unref(loop);
-            continue;
-        }
-        assert((c->state == STATE_UNKNOWN || c->state == STATE_DETACHED)
-            && c->condvar == NULL);
-        /* If the state is UNKNOWN, then the continuation comes from a
-         * cpc_spawn, and ev_unref must not be called. */
-        if(c->state == STATE_DETACHED) {
-            c->state = STATE_UNKNOWN;
-            ev_unref(loop);
-        }
-        c->sched = cpc_default_sched;
-        exhaust_ready(c);
-    }
-    pthread_mutex_unlock (&attach_mutex);
-}
-
-/*** cpc_detach ***/
-
-static void *
 perform_detach(void *cont)
 {
     struct cpc_continuation *c = (struct cpc_continuation *)cont;
     c->state = STATE_DETACHED;
     exhaust_ready(c);
-    return NULL;
 }
 
 void
-cpc_prim_detach(struct nft_pool *pool, cpc_continuation *cont)
+cpc_prim_detach(cpc_sched *sched, cpc_continuation *cont)
 {
+    int rc;
+
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        /* Already in the good threadpool */
-        if(cont->sched == pool) {
+        /* Already in the good threadpool. */
+        if(cont->sched == sched) {
             cpc_invoke_continuation(cont);
             return;
         }
     } else {
         assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
-        ev_ref(loop);
-        if(pool == NULL)
-            pool = cpc_default_pool;
+        assert(!IS_DETACHED);
+        __sync_fetch_and_add(&detached_count, 1); // XXX
+        if(sched == NULL)
+            sched = cpc_default_pool;
     }
-    cont->sched = pool;
-    nft_pool_add(pool, (void(*)(void*)) perform_detach, cont);
+    cont->sched = sched;
+    rc = threadpool_schedule(sched->pool, perform_detach, (void *)cont);
+    if (rc < 0) {
+      perror("threadpool_schedule");
+      exit(1);
+    }
     return;
 }
 
-struct nft_pool *
-cpc_threadpool_get(int max_threads)
+void
+wakeup(void *pp)
 {
-    if(max_threads <= 0 || max_threads > MAX_THREADS)
-        max_threads = MAX_THREADS;
-    return nft_pool_create(max_threads, 0);
+    int *p = (int*)pp;
+    write(p[1], "a", 1);
 }
 
-void
-cpc_threadpool_release(struct nft_pool *pool)
+cpc_sched *
+cpc_threadpool_get(int max_threads)
 {
-    /* ntf_pool_destroy is blocking until every thread in the pool is
-     * done, so we destroy it in a separate thread. */
-     pthread_t t;
-     pthread_attr_t attr;
-     pthread_attr_init(&attr);
-     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-     pthread_create(&t, &attr, (void*(*)(void*)) nft_pool_destroy, (void *)pool);
-     pthread_attr_destroy(&attr);
-     /* FIXME: race condition */
-     sched_yield(); // Mitigating the race?
+    cpc_sched_queue *q = &schedulers;
+
+    assert(!IS_DETACHED);
+
+    if(max_threads <= 0 || max_threads > MAX_THREADS)
+        max_threads = MAX_THREADS;
+
+    cpc_sched *sched = malloc(sizeof(cpc_sched));
+
+    sched->pool = threadpool_create(max_threads, wakeup, (void *)p);
+    sched->next = NULL;
+
+    if(q->head == NULL) {
+        q->head = q->tail = sched;
+    } else {
+        q->tail->next = sched;
+        q->tail = sched;
+    }
+    return sched;
+}
+
+int
+cpc_threadpool_release(cpc_sched *sched)
+{
+    cpc_sched *s = schedulers.head;
+  
+    if(threadpool_die(sched->pool, 0) < 0)
+        return -1;
+    if(threadpool_destroy(sched->pool) < 0)
+        return -1;
+
+    while(s) {
+        if(s->next == sched) {
+            s->next = sched->next;
+            break;
+        } else {
+            s = s->next;
+        }
+    }
+    free(sched);
+    return 0;
 }
 
 /*** cpc_yield and cpc_spawn ***/
 
+/* cps void cpc_yield(int mode) */
 struct cpc_yield_arglist {
    int mode;
 } __attribute__((__packed__)) ;
-
 void cpc_yield(struct cpc_continuation *cont)
 {
     int mode;
-    cpc_condvar *cond;
     struct cpc_yield_arglist *cpc_arguments ;
 
     cpc_arguments = (struct cpc_yield_arglist *) cpc_dealloc(cont,
@@ -764,16 +904,12 @@ void cpc_yield(struct cpc_continuation *cont)
 
     assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
         cont->condvar == NULL);
-    assert(loop);
 
-    enqueue(mode & CPC_BACKGROUND ? &idle_ready : &ready, cont);
-    if(mode & CPC_OPPORTUNISTIC)
-        /* Opportunistic equivalent of ev_idle_start(loop, &run); */
-        ev_check_start(loop, &check);
-    else
-        ev_idle_start(loop, mode & CPC_BACKGROUND ? &idle_run : &run);
+    enqueue(&ready, cont);
 }
 
+
+/* cps void cpc_done(void) */
 void
 cpc_done(struct cpc_continuation *cont)
 {
@@ -784,27 +920,22 @@ void
 cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
 {
     assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+ 
     /* If context is NULL, we have to perform a syscall to know if we
      * are detached or not */
     if(context == NULL && IS_DETACHED) {
-        pthread_mutex_lock (&attach_mutex);
-        enqueue(&attach_queue, cont);
-        pthread_mutex_unlock (&attach_mutex);
-        ev_async_send(loop, &attach_sig);
+        __sync_fetch_and_add(&detached_count, 1); // XXX
+        threadpool_schedule_back(cont->sched->pool, attach_cb, cont);
     }
     /* Otherwise, trust the context */
     else if (context && context->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        pthread_mutex_lock (&attach_mutex);
-        enqueue(&attach_queue, cont);
-        pthread_mutex_unlock (&attach_mutex);
-        ev_async_send(loop, &attach_sig);
+        __sync_fetch_and_add(&detached_count, 1); // XXX
+        threadpool_schedule_back(cont->sched->pool, attach_cb, cont);
     }
     else {
         assert(!IS_DETACHED);
         enqueue(&ready, cont);
-        if(loop)
-            ev_idle_start(loop, &run);
     }
 }
 
@@ -822,79 +953,162 @@ exhaust_ready(cpc_continuation *c)
     }
 }
 
-/*** The default callback, which runs continuations ***/
-
-static void
-idle_cb(struct ev_loop *loop, ev_idle *w, int revents)
-{
-    struct cpc_continuation *c;
-    struct cpc_continuation_queue q, *p;
-
-    ev_idle_stop(loop, w);
-    if(w == &run) {
-        p = &ready;
-    } else {
-        assert(w == &idle_run);
-        p = &idle_ready;
-    }
-    q = *p;
-    p->head = p->tail = NULL;
-    while((c = dequeue(&q))) {
-        assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
-        exhaust_ready(c);
-    }
-}
-
-static void
-check_cb(struct ev_loop *loop, ev_check *w, int revents)
-{
-    ev_check_stop(loop, w);
-
-    /* XXX: Opportunistic foreground yield will trigger even on
-       background threads waking up.  If you want to avoid this, use the
-       following condition instead:
-    if(ready.head && !ev_is_pending(&idle_run))
-    */
-    if(ready.head) {
-        /* Execute the idle callback as if the run watcher had triggered. */
-        idle_cb(loop, &run, EV_CUSTOM);
-    }
-}
+#define BUF_SIZE 4096
 
 void
 cpc_main_loop(void)
 {
-    loop = ev_default_loop(0);
+    struct cpc_continuation *c;
+    struct cpc_continuation_queue q;
+    struct timeval when;
+    int rc, i, done;
+    fd_set r_readfds, r_writefds, r_exceptfds;
+    char buf[BUF_SIZE];
 
     main_loop_id = pthread_self();
 
-    ev_async_init(&attach_sig, attach_cb);
-    ev_async_start(loop, &attach_sig);
-    ev_unref(loop);
+    cpc_default_pool = cpc_threadpool_get(MAX_THREADS);
 
-    ev_idle_init(&run, idle_cb);
-    /* Executing continuations must be the task of highest priority. */
-    ev_set_priority(&run, EV_MAXPRI);
-    ev_idle_start(loop, &run);
+    rc = pipe2(p, O_NONBLOCK);
+    if(rc < 0) {
+        perror("pipe");
+        exit(1);
+    }
 
-    ev_idle_init(&idle_run, idle_cb);
-    /* Executing idle continuations must be the task of lowest priority. */
-    ev_set_priority(&idle_run, EV_MINPRI);
+    /* Make sure cpc_now has a reasonable initial value. */
+    gettimeofday(&cpc_now, NULL);
 
-    ev_check_init(&check, check_cb);
-    /* Check watchers must always be the task of highest priority. */
-    ev_set_priority(&check, EV_MAXPRI);
-    ev_check_start(loop, &check);
+    while(ready.head || sleeping.head || num_fds > 0 ||
+          __sync_fetch_and_add(&detached_count, 0) > 0 /* XXX */) {
+        q = ready;
+        ready.head = ready.tail = NULL;
+        while(1) {
+            c = dequeue(&q);
+            if(c == NULL) break;
+            assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
+            exhaust_ready(c);
+        }
+        if(ready.head && !sleeping.head && num_fds == 0 &&
+           __sync_fetch_and_add(&detached_count, 0) == 0 && /* XXX */
+           !cpc_pessimise_runtime)
+            continue;
 
-    cpc_default_pool = nft_pool_create(MAX_THREADS, 0);
+        gettimeofday(&cpc_now, NULL);
 
-    ev_loop(loop, 0);
+        rc = CPC_TIMEOUT;
+        if(sleeping.head) {
+            while(1) {
+                c = timed_dequeue(&sleeping, &cpc_now);
+                if(c == NULL) break;
+                assert(c->state == STATE_SLEEPING);
+                if(c->condvar)
+                    cond_dequeue_1(&c->condvar->queue, c);
+                c->condvar = NULL;
+                c->state = STATE_UNKNOWN;
+                cpc_continuation_patch(c, sizeof(int), &rc);
+                exhaust_ready(c);
+            }
+        }
 
-    nft_pool_destroy(cpc_default_pool);
+        if(ready.head && !sleeping.head && num_fds == 0 &&
+           __sync_fetch_and_add(&detached_count, 0) == 0 && /* XXX */
+           !cpc_pessimise_runtime)
+            continue;
+
+        memcpy(&r_readfds, &readfds, sizeof(fd_set));
+        memcpy(&r_writefds, &writefds, sizeof(fd_set));
+        memcpy(&r_exceptfds, &exceptfds, sizeof(fd_set));
+        int old_num_fds = num_fds;
+        if(__sync_fetch_and_add(&detached_count, 0) > 0) { /* XXX */
+            FD_SET(p[0], &r_readfds);
+            num_fds = num_fds > p[0] + 1 ? num_fds : p[0] + 1;
+        }
+        gettimeofday(&cpc_now, NULL);
+        if(ready.head || sleeping.head) {
+            if(ready.head) {
+                when.tv_sec = 0;
+                when.tv_usec = 0;
+            } else {
+                timeval_minus(&when, &sleeping.head->time, &cpc_now);
+            }
+            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
+                        &when);
+            num_fds = old_num_fds;
+        } else {
+            if(num_fds == 0)
+                continue;
+            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
+                        NULL);
+            num_fds = old_num_fds;
+        }
+        if(rc == 0 || (rc < 0 && errno == EINTR)) {
+            continue;
+        } else if(rc < 0) {
+            perror("select");
+            sleep(1);
+            continue;
+        }
+
+        if(__sync_fetch_and_add(&detached_count, 0) > 0 && // XXX
+           FD_ISSET(p[0], &r_readfds)) {
+            read(p[0], buf, BUF_SIZE);
+            cpc_sched *s = schedulers.head;
+            while(s) {
+                threadpool_items_run(threadpool_get_back(s->pool));
+                s = s->next;
+            }
+        }
+
+        /* 1 for reads, 2 for writes.  0x100 means allow starvation. */
+#ifndef PREFER
+#define PREFER 3
+#endif
+
+        done = 0;
+        for(i = 0; i < num_fds; i++) {
+            int dir = 0;
+            if(rc <= 0)
+                break;
+            if((PREFER & 1) && FD_ISSET(i, &r_readfds))
+                dir |= CPC_IO_IN;
+            if((PREFER & 2) && FD_ISSET(i, &r_writefds))
+                dir |= CPC_IO_OUT;
+            if(FD_ISSET(i, &r_exceptfds))
+                dir |= (CPC_IO_IN | CPC_IO_OUT);
+            if(dir) {
+                requeue_io_ready(i, dir);
+                rc--;
+                done = 1;
+            }
+        }
+
+#if (PREFER & 3) != 3
+        if((PREFER & 0x100) && done)
+            continue;
+        for(i = 0; i < num_fds; i++) {
+            int dir = 0;
+            if(rc <= 0)
+                break;
+            if(FD_ISSET(i, &r_readfds))
+                dir |= CPC_IO_IN;
+            if(FD_ISSET(i, &r_writefds))
+                dir |= CPC_IO_OUT;
+            if(dir) {
+                requeue_io_ready(i, dir);
+                rc--;
+            }
+        }
+#endif
+    }
+
+    while(cpc_threadpool_release(cpc_default_pool) < 0);
+    close(p[0]);
+    close(p[1]);
 }
 
 double
-cpc_now(void)
+cpc_gettime(void)
 {
-    return ((double) ev_now(loop));
+    assert(!IS_DETACHED);
+    return ((double) cpc_now.tv_sec + 1E6 * cpc_now.tv_usec);
 }

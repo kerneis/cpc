@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2002,
  *  John Kodumal        <jkodumal@eecs.berkeley.edu>
@@ -331,7 +333,7 @@ let rec analyze_stmt (s : stmt ) : unit =
         analyze_block h
     | Break l -> ()
     | Continue l -> ()
-    (*| CpcCut _*) | CpcSpawn _ -> ()
+    | CpcSpawn _ -> ()
     | CpcFun (fd, _) ->
         Errormsg.warn "ptranal: blindly diving into CpcFun (hoping \
         it's correct)\n";

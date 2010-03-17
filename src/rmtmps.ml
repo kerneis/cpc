@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -46,7 +48,7 @@ module E = Errormsg
 module U = Util
 
 (* Set on the command-line: *)
-let keepUnused = ref true
+let keepUnused = ref true (* Defaults to true for CPC *)
 let rmUnusedInlines = ref false
 
 

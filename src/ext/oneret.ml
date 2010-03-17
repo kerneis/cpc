@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -150,7 +152,7 @@ let rec oneret (f: Cil.fundec) : unit =
         s :: scanStmts mainbody rests
     | ({skind=(Goto _ | Instr _ | Continue _ | Break _ 
                | TryExcept _ | TryFinally _
-               (*| CpcCut _*) | CpcSpawn _)} as s)
+               | CpcSpawn _)} as s)
       :: rests -> s :: scanStmts mainbody rests
     | ({skind=CpcFun (fd, l)} as s) :: rests ->
         oneret fd;

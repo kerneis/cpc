@@ -1,4 +1,6 @@
 (*
+ * Copyright (c) 2008-2010,
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -993,17 +995,8 @@ and stmtkind =
   
   (** CPC statements *)
 
-(*  | CpcCut of varinfo option * cpc_cut * location *)
   | CpcSpawn of exp * exp list * location
   | CpcFun of fundec * location
-
-(* and cpc_cut = 
-  | Yield | Done 
-  | Attach of exp | Detach of exp
-  | Wait of exp
-  | Sleep of exp * exp * exp
-  | IoWait of exp * exp * exp
-*)
 
 (** {b Instructions}. 
  An instruction {!Cil.instr} is a statement that has no local

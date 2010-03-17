@@ -1,5 +1,8 @@
 (* 
  *
+ * Copyright (c) 2008-2010,
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
  *  Scott McPeak        <smcpeak@cs.berkeley.edu>
@@ -788,23 +791,6 @@ and checkStmt (s: stmt) =
             currentReturnType := ret;
             statements := stmts;
             gotoTargets := gotos
-      (*| CpcCut (Some v, _, _) ->
-          E.s (bug "Return values not handled yet for cpc constructs")
-      | CpcCut (None, cut, _) ->
-          match cut with
-          | Done | Yield -> ()
-          | Attach e | Detach e
-          (* do not check the type of condition variables *)
-          | Wait e -> ignore(checkExp false e)
-          | Sleep (e, e', e'') ->
-              checkExpType false e intType;
-              checkExpType false e' intType;
-              ignore(checkExp false e'')
-          | IoWait (e, e', e'') ->
-              ignore(checkExp false e);
-              ignore(checkExp false e');
-              ignore(checkExp false e'')
-    *)
           )
     () (* argument of withContext *)
 

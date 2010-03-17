@@ -47,7 +47,7 @@ be found in the bin/ directory).
 If you choose to install cpc, you should add:
     -I cpc
 to your compile flags and:
-    -lm -pthread -lcpcfull
+    -pthread -lcpcfull
 to your link flags. You can replace -lcpcfull by -lcpc if you do not use
 the functions defined in <cpc_lib.h>.
 
@@ -69,7 +69,10 @@ bin/cpc.asm.exe has the following useful options:
                     graph of every cps function in it (in .dot files)
 --debug debug       include debug printf in the generated code
 --out file          output file
---external-patch    cpc_patch from cpc_runtime.h instead of inlining it
+--external-patch    cpc_patch from cpc_runtime.h instead of inlining it.
+                    This is useful to remove some warnings if you use
+                    --check (which checks the correctness of the CIL AST
+                    after CPC transformations).
 
 and a gazillion useless ones, inherited from CIL, that you might
 discover through bin/cpc.asm.exe --help. Using some of them might break
@@ -83,9 +86,10 @@ cpc completely, so use at your own risk!
 
 Known bugs and limitations:
 ---------------------------
-Condition variables must not be used in detached mode. cpc_signal_fd
-will only wake up attached threads (and must not be used in detached
-mode).
+Condition variables must not be used in detached mode.  cpc_signal_fd
+is not implemented in the current runtime.  Others limitations might be
+found in the CPC manual (doc/cpc-manual.tex), which you should read by
+the way.
 
 Cpc relies on CIL, which makes a number of assumptions about
 the underlying C machine and compiler. These assumptions are defined
@@ -96,7 +100,7 @@ when ./configure is executed. As a result:
   variable. See the CIL documentation and src/machdepenv.ml for further
   details.
 
-Please do not hesitate to report any bug at kerneis@pps.jussieu.fr.
+Please do not hesitate to report any bug at <kerneis@pps.jussieu.fr>.
 
 Further details:
 ----------------
@@ -110,5 +114,5 @@ disabled in cpc.  If you want more information about CIL, you'll find
 the (automatically generated) documentation in doc/html. Also checkout:
 http://manju.cs.berkeley.edu/cil/ for the original CIL.
 
-                           Gabriel Kerneis, <kerneis@pps.jussieu.fr>
-                           Juliusz Chroboczek, <jch@pps.jussieu.fr>
+                           Gabriel Kerneis <kerneis@pps.jussieu.fr>
+                           Juliusz Chroboczek <jch@pps.jussieu.fr>

@@ -200,16 +200,6 @@ let computeUseDefStmtKind ?(acc_used=VS.empty)
     | CpcSpawn (e, el, _) ->
         ve e;
         List.iter ve el
-    (*| CpcCut (ret, cut, _) ->
-        (match ret with
-        | None -> ()
-        | Some v -> ignore(useDefVisitor#vvrbl v));
-        match cut with
-        | Yield | Done -> ()
-        | Attach e | Detach e | Wait e -> ve e
-        | IoWait (e, e', e'')
-        | Sleep (e, e', e'') ->
-            ve e; ve e'; ve e''*)
   in
   !varUsed, !varDefs
 

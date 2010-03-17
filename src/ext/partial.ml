@@ -704,7 +704,6 @@ struct
                                 stmt_fun
                                 (visit_block stmt_fun y block1)
                                 block2
-                          (*| CpcCut _ -> y*)
                           | CpcSpawn _ | CpcFun _ ->
                               Errormsg.warn "partial: blindly assuming \
                               cpc_spawn and cpc_fun do not have live \
@@ -1149,6 +1148,8 @@ let feature : featureDescr = {
 }
 
 (*
+ * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2002,
  *  George C. Necula    <necula@cs.berkeley.edu>

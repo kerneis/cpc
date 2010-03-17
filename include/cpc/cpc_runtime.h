@@ -1,19 +1,33 @@
-/* 
-Copyright (c) 2008, 2009 by Gabriel Kerneis.
-Copyright (c) 2004, 2005 by Juliusz Chroboczek.
-Experimental; do not redistribute.
-*/
-#include <stddef.h>
-#define EV_STANDALONE 1
-#define EV_STAT_ENABLE 0
-#define EV_PERIODIC_ENABLE 0
-#define EV_EMBED_ENABLE 0
-/* XXX This is not portable -- int should be sig_atomic_t, but this
- * would require signal.h. */
-#define EV_ATOMIC_T int volatile
-#include "ev.h"
+/*
+Copyright (c) 2008-2010,
+  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+Copyright (c) 2004-2005,
+  Juliusz Chroboczek  <jch@pps.jussieu.fr>
 
-typedef struct nft_pool cpc_sched;
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+#include <stddef.h> // size_t
+
+typedef void cpc_function(void*);
+typedef struct cpc_condvar cpc_condvar;
+typedef struct cpc_sched cpc_sched;
 extern cpc_sched *cpc_default_pool;
 #define cpc_default_sched NULL
 
@@ -25,21 +39,16 @@ typedef struct cpc_continuation {
     struct cpc_continuation *cond_next;
     struct cpc_continuation **ready;
     cpc_sched *sched;
-    union ev_any_watcher watcher;
     int state;
     unsigned short length;
     unsigned short size;
     char c[1];
 } cpc_continuation;
 
-typedef void cpc_function(void*);
-typedef struct cpc_condvar cpc_condvar;
-
 void cpc_continuation_free(struct cpc_continuation *c);
 struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);
 struct cpc_continuation *cpc_continuation_copy(struct cpc_continuation *c);
-
 
 static inline void* 
 cpc_alloc(struct cpc_continuation **cp, int s)
@@ -92,10 +101,10 @@ cpc_invoke_continuation(struct cpc_continuation *c)
 }
 #endif
 
-#define CPC_IO_IN EV_READ
-#define CPC_IO_OUT EV_WRITE
-#define CPC_TIMEOUT EV_TIMEOUT
-#define CPC_CONDVAR EV_CUSTOM
+#define CPC_IO_IN 1
+#define CPC_IO_OUT 2
+#define CPC_TIMEOUT 4
+#define CPC_CONDVAR 8
 
 #define CPC_NORMAL 0
 #define CPC_BACKGROUND 1
@@ -134,20 +143,13 @@ extern void cpc_signal_all(cpc_condvar*);
 extern int cpc_condvar_count(cpc_condvar*);
 
 extern void cpc_prim_spawn(struct cpc_continuation*, struct cpc_continuation*);
-/* extern void cpc_prim_yield(struct cpc_continuation *cont); */
 
-/* extern void cpc_prim_sleep(int, int, cpc_condvar*, cpc_continuation*);
-extern void cpc_prim_wait(cpc_condvar*, cpc_continuation*);
-extern void cpc_prim_io_wait(int, int, cpc_condvar*, cpc_continuation*); */
-
-extern void cpc_prim_attach(cpc_continuation*);
-extern void cpc_prim_detach(cpc_sched*, cpc_continuation*);
 extern cpc_sched *cpc_threadpool_get(int);
-extern void cpc_threadpool_release(cpc_sched *);
+extern int cpc_threadpool_release(cpc_sched *);
 
-extern cpc_sched *cpc_get_sched();
+extern cpc_sched *cpc_get_sched(void);
 
-extern double cpc_now(void);
+extern double cpc_gettime(void);
 
 #ifndef NO_CPS_PROTO
 extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
@@ -161,5 +163,3 @@ extern cps cpc_sched *cpc_attach(cpc_sched *pool);
 #define cpc_detached cpc_attached(cpc_get_sched() == cpc_default_sched ? cpc_default_pool : cpc_get_sched())
 
 #endif
-
-

@@ -1,4 +1,6 @@
 (* 
+ * Copyright (c) 2008-2010,
+ *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
  *
  * Copyright (c) 2001-2003,
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -715,42 +717,6 @@ and print_statement stat =
       print_block h
 
   (*** CPC ***)
-  (*| CPC_YIELD (loc) ->
-      setLoc(loc);
-      print "cpc_yield ;" ;
-      new_line ()
-  | CPC_DONE (loc) ->
-      setLoc(loc);
-      print "cpc_done ;" ;
-      new_line ()
-  | CPC_ATTACH (exp, loc) ->
-      setLoc(loc);
-      print "cpc_attach" ;
-      if exp = NOTHING
-      then print ";"
-      else begin
-        print "(";
-        print_expression exp;
-        print ");"
-      end;
-      new_line ()
-  | CPC_DETACH (exp, loc) ->
-      setLoc(loc);
-      print "cpc_detach" ;
-      if exp = NOTHING
-      then print ";"
-      else begin
-        print "(";
-        print_expression exp;
-        print ");"
-      end;
-      new_line ()
-  | CPC_DETACHED (stat, loc) ->
-      setLoc loc;
-      print "cpc_detached";
-      new_line () ;
-      indent () ;
-      print_substatement stat;*)
   | CPC_ATTACHED (exp, stat, loc) ->
       setLoc loc;
       printl ["cpc_attached";"("];
@@ -764,40 +730,6 @@ and print_statement stat =
       new_line () ;
       indent () ;
       print_substatement stat;
-  (*| CPC_FORK (stat, loc)  ->
-      setLoc loc;
-      print "cpc_fork";
-      new_line () ;
-      indent () ;
-      print_substatement stat;
-  | CPC_WAIT (exp, loc) ->
-      printl ["cpc_wait";"("];
-      print_expression exp;
-      print ");"; new_line ()
-  | CPC_SLEEP (exp1, exp2, exp3, loc) ->
-      printl ["cpc_sleep";"("];
-      print_expression exp1;
-      if exp2 = NOTHING then ()
-      else begin
-        print ", ";
-        print_expression exp2;
-        if exp3 = NOTHING then ()
-        else begin
-          print ", ";
-          print_expression exp3;
-        end
-      end;
-      print ");"; new_line ()
-  | CPC_IO_WAIT (exp1, exp2, exp3, loc) ->
-      printl ["cpc_io_wait";"("];
-      print_expression exp1;
-      print ", "; print_expression exp2;
-      if exp3 = NOTHING then ()
-      else begin
-        print ", ";
-        print_expression exp3;
-      end;
-      print ");"; new_line ()*)
   | CPC_FUN d -> print_def d
       
 and print_block blk = 

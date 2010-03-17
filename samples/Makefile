@@ -39,9 +39,8 @@ tcat_fd: tcat_fd.o
 trivial-httpd: trivial-httpd.o
 trivial-httpd.o: trivial-httpd.c
 static-httpd.cpi: trivial-httpd.cpc
-	$(CPP) -P $(CFLAGS) -include cpc/cpc_runtime.h \
-	-D__extension__= -D'__attribute__(x)=' \
-	-DSTATIC - <$< >$@
+	$(CPP) -x c $(CFLAGS) -include cpc/cpc_runtime.h \
+	-DSTATIC -o $@ $<
 static-httpd: static-httpd.o
 
 trivial-httpd-fork: trivial-httpd-fork.o
