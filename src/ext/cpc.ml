@@ -86,6 +86,23 @@ let switch_label = ref (-1)
 let break_dest = ref dummyStmt
 let cont_dest = ref dummyStmt
 
+let labelTbl = ref []
+let recordGoto s =
+  match s.skind with
+  | Goto(g, _) ->
+      labelTbl := (!g,s)::!labelTbl;
+      trace (dprintf "recorded:\n%a\n" d_stmt !g);
+      s
+  | _ -> s
+
+class initLabelTbl = object(self)
+    inherit mynopCilVisitor
+    method vstmt s =
+      ignore(recordGoto s);
+      DoChildren
+end
+
+
 let rec xform_switch_stmt s = begin
   if not(!break_dest == dummyStmt) then
   s.labels <- Util.list_map (fun lab -> match lab with
@@ -111,9 +128,11 @@ let rec xform_switch_stmt s = begin
   match s.skind with
   | Instr _ | Return _ | Goto _ -> ()
   | Break(l) -> if (not(!break_dest == dummyStmt)) then
-                s.skind <- Goto(ref !break_dest,l)
+                s.skind <- Goto(ref !break_dest,l);
+                ignore(recordGoto s)
   | Continue(l) -> assert(not(!cont_dest == dummyStmt));
-                s.skind <- Goto(ref !cont_dest,l)
+                s.skind <- Goto(ref !cont_dest,l);
+                ignore(recordGoto s)
   | If(e,b1,b2,l) -> xform_switch_block b1;
                      xform_switch_block b2
   | Switch(_,b,_,_) when not(!cont_dest == dummyStmt)->
@@ -170,7 +189,7 @@ let eliminate_switch_loop s = match s.skind with
             [] -> handle_choices stmt_tl
           | Case(ce,cl) :: lab_tl ->
               let pred = BinOp(Eq,e,ce,intType) in
-              let then_block = mkBlock [ mkStmt (Goto(ref stmt_hd,cl)) ] in
+              let then_block = mkBlock [ recordGoto(mkStmt (Goto(ref stmt_hd,cl))) ] in
               let else_block = mkBlock [ mkStmt (handle_labels lab_tl) ] in
               If(pred,then_block,else_block,cl)
           | Default(dl) :: lab_tl ->
@@ -178,7 +197,7 @@ let eliminate_switch_loop s = match s.skind with
               out this might confuse someone down the line who doesn't have
               special handling for if(1) into thinking that there are two
               paths here. The simpler 'goto label' is what we want. *)
-              Block(mkBlock [ mkStmt (Goto(ref stmt_hd,dl)) ;
+              Block(mkBlock [ recordGoto(mkStmt (Goto(ref stmt_hd,dl))) ;
                               mkStmt (handle_labels lab_tl) ])
           | Label(_,_,_) :: lab_tl -> handle_labels lab_tl
         end in
@@ -222,30 +241,31 @@ let first_instr s = match s.skind with
   | Instr (hd::_) -> hd
   | _ -> raise (Invalid_argument "first_instr")
 
-class replaceGotos start replace_with =
-  object(self)
-  inherit mynopCilVisitor
-
-  method vstmt s = match s.skind with
-  | Goto (g, loc) when !g == start ->
+let replaceGotos start replace_with =
+  let perform_replace (_,s) = match s.skind with
+  | Goto (g, loc) -> (
+      assert(!g == start);
       s.skind <- (match replace_with s with
       | [] -> Instr []
-      | [{labels=[];skind=x}] -> x
-      | l -> Block (mkBlock l));
-      SkipChildren
-  | _ -> DoChildren
-end
+      | l -> Block (mkBlock l))
+  )
+   | _ -> assert false  in
+  let (gotos, others) = List.partition (fun (x,_) -> x==start) !labelTbl in
+  labelTbl := others;
+  List.iter perform_replace gotos
 
 (* Return a copy of statement, clear the initial one and update gotos
 accordingly *)
-let copyClearStmt s file stack =
+let copyClearStmt s =
+  trace (dprintf "CLEARING %a\n" d_stmt s);
   let res = {(mkEmptyStmt()) with skind = s.skind; labels = s.labels; cps=s.cps} in
-  let new_goto s = [mkStmt (Goto (ref res, get_stmtLoc s.skind))] in
-  if (List.exists is_label s.labels)
-  then (
-    let vis = new replaceGotos s new_goto in
-    visitCilFileSameGlobals vis file;
-    List.iter (fun s -> ignore(visitCilStmt vis s)) stack);
+  let new_goto s = [recordGoto(mkStmt (Goto (ref res, get_stmtLoc s.skind)))] in
+  (if List.exists is_label s.labels
+  then replaceGotos s new_goto);
+  (match s.skind with Goto (g, _) ->
+    labelTbl := List.map (fun (dst,src) -> if src == s then
+      (assert(!g == dst); (dst,res)) else (dst,src)) !labelTbl
+   | _ -> ());
   s.skind <- Instr [];
   s.labels <- [];
   s.cps <- false;
@@ -269,14 +289,14 @@ let add_goto src dst =
   let src' = {(mkEmptyStmt()) with skind=src.skind; cps = src.cps} in
   src.skind <- Block (mkBlock ([
     src';
-    mkStmt (Goto (ref dst, src_loc));
+    recordGoto(mkStmt (Goto (ref dst, src_loc)));
     ]));
   dst.labels <- [Label (make_label(), dst_loc, false)]
 
-let add_goto_after src enclosing file stack =
+let add_goto_after src enclosing =
   trace (dprintf "add_goto_after: enclosing is %a\n" d_stmt enclosing);
   let dst = mkEmptyStmt() in
-  let copy = copyClearStmt enclosing file stack in
+  let copy = copyClearStmt enclosing in
   add_goto src dst;
   enclosing.skind <- Block (mkBlock ([
     copy;
@@ -357,6 +377,15 @@ let enclosing_function start file =
     raise Not_found
   with FoundFun f -> f
 
+let stmt_in_fun stmt fd =
+    let visitor = object(self)
+      inherit mynopCilVisitor
+      method vstmt s = if s == stmt then raise Not_found; 
+      match s.skind with CpcFun _ -> SkipChildren | _ -> DoChildren
+    end in
+    try ignore(visitCilFunction visitor fd); false
+    with Not_found -> true
+
 exception FoundCompinfo of compinfo
 
 let find_struct name file =
@@ -429,14 +458,16 @@ let find_function name file =
 type mark_context = {
   mutable cps_fun : bool; (* is it a cps function *)
   mutable cps_con : bool; (* is it in cps context *)
+  ef : fundec;
   mutable last_stmt : stmt; (* last stmt in cps context *)
   mutable next_stmt : stmt; (* next stmt in cps context *)
   mutable enclosing_stmt : stmt; (* nearest loop or switch *)
   mutable last_var : varinfo option; (* last (cps) assigned variable *)
   }
 
-let fresh_context () =
+let fresh_context ef =
   { cps_fun = false; cps_con = false;
+    ef = ef;
     last_stmt = dummyStmt;
     next_stmt = dummyStmt;
     enclosing_stmt = dummyStmt;
@@ -445,6 +476,7 @@ let fresh_context () =
 let copy_context c =
   {cps_fun = c.cps_fun;
    cps_con = c.cps_con;
+   ef = c.ef;
    last_stmt = c.last_stmt;
    next_stmt = c.next_stmt;
    enclosing_stmt = c.enclosing_stmt;
@@ -459,7 +491,7 @@ exception FunctionalizeGoto of stmt * mark_context
 class markCps = fun file -> object(self)
   inherit mynopCilVisitor
 
-  val mutable c = fresh_context ()
+  val mutable c = fresh_context dummyFunDec
 
   method private set_next ?(set_last=true) (s: stmt) : unit =
       (* set next_stmt in cps context only *)
@@ -637,11 +669,15 @@ class markCps = fun file -> object(self)
         raise (AddGoto c)
 
     (* Control flow otherwise *)
-    | Goto (g, _)
-        when enclosing_function s file != enclosing_function !g file ->
+    | Goto (g, _) ->
+        assert (c.ef != dummyFunDec) ;
+        if stmt_in_fun !g c.ef then
+        (
+        SkipChildren)
+        else (
           trace (dprintf "live goto!\n");
-          raise (FunctionalizeGoto (!g,c))
-    | Goto _ | Break _ | Continue _ -> SkipChildren
+          raise (FunctionalizeGoto (!g,c)))
+    | Break _ | Continue _ -> SkipChildren
     | If _ -> ChangeDoChildrenPost (s, fun s ->
         if c.next_stmt != dummyStmt then begin
           trace (dprintf "escaping cps context in if statement %a\n***\n" dn_stmt s);
@@ -680,7 +716,7 @@ class markCps = fun file -> object(self)
     Cfg.clearCFGinfo f;
     ignore(Cfg.cfgFun f);
     let context = copy_context c in
-    c <- {(fresh_context ()) with cps_fun = f.svar.vcps};
+    c <- {(fresh_context f) with cps_fun = f.svar.vcps};
     ChangeDoChildrenPost (f, fun f -> c <- context; f)
 
 end
@@ -923,7 +959,7 @@ class cpsConverter = fun file ->
          so the stack has to be empty. *)
       assert(s.labels = [] || stack = []);
       let l = s.labels in
-      stack <- (copyClearStmt s file stack)::stack;
+      stack <- (copyClearStmt s)::stack;
       (* Restore the labels, if any. *)
       s.labels <- l;
       SkipChildren
@@ -1679,8 +1715,7 @@ and blockCanBreak b =
        first we can't be fallen through. *)
 let goto_method = ref 1
 
-class functionalizeGoto start file =
-      let enclosing_fun = enclosing_function start file in
+class functionalizeGoto start enclosing_fun file =
       let last_var = find_last_var start file in
       let label = match List.find is_label start.labels with
         | Label(l,_,_) -> l | _ -> assert false in
@@ -1729,7 +1764,7 @@ class functionalizeGoto start file =
               mkStmt (CpcFun (fd, locUnknown))];
           let start_copy = List.hd fd.sbody.bstmts in
           (* Replace every goto to the start of fd by a call to fd. *)
-          visitCilFileSameGlobals (new replaceGotos start_copy call_fun) file;
+          replaceGotos start_copy call_fun;
           assert(List.for_all is_label start_copy.labels); (* No Case or Default *)
           start_copy.labels <- []
 
@@ -1737,7 +1772,7 @@ class functionalizeGoto start file =
           last_stmt <- s;
           if s == start then (assert(stack = []); acc <- true);
           if acc then begin
-            let copy = copyClearStmt s file stack in
+            let copy = copyClearStmt s in
             stack <- copy :: stack;
             (* Do NOT stop accumulating as early as possible: we want
             bigger functions to maximize the odds to keep gotos and
@@ -1787,7 +1822,7 @@ class functionalizeGoto start file =
                    * returning from vblock. Updating in place is OK of
                    * course. *)
                   self#unstack_block b;
-                  add_goto_after last_in_stack enclosing file stack;
+                  add_goto_after last_in_stack enclosing;
               end;
               assert(acc = false && stack = []);
               b
@@ -1811,59 +1846,62 @@ let rec choose_stmt set start =
 (* Look for break/continue in statements to be functionalized ---
 XXX code must be kept in sync with functionalizeGotos !!! ---
 and return the nearest enclosing loop/switch statement *)
-class findEnclosing = fun start -> object(self)
-  inherit mynopCilVisitor
-
-  val mutable nearest_loop = dummyStmt
-  val mutable seen_start = false
-  val mutable check_loops = false
-
-  method vstmt s =
-    assert(check_loops =>  seen_start);
-    if s == start then (seen_start <- true; check_loops <- true);
-    match s.skind with
-    | Break _ | Continue _ when check_loops ->
-        raise (BreakContinue nearest_loop)
-    | Switch _ | Loop _ ->
-      let e = nearest_loop in
-      let cl = check_loops in
-        ChangeDoChildrenPost(
-          (nearest_loop <- s; check_loops <- false; s),
-          (fun s ->
-            nearest_loop <- e;
-            check_loops <- cl;
-            s))
-    | _ -> DoChildren
-
-  method vblock b =
-    let seen = seen_start in
-    let cl = check_loops in
-    ChangeDoChildrenPost(b, fun b ->
-      (*let live_stmt =
-        if seen_start
-        then choose_stmt (live_labels b) start
-        else None in
-      match live_stmt with
-      | Some s -> raise (LiveStmt s)
-      | None ->*) (seen_start <- seen; check_loops <- cl; b))
-
-end
 
 let rec functionalize start f =
   begin try
-    visitCilFileSameGlobals (new findEnclosing start) f;
-    visitCilFileSameGlobals (new functionalizeGoto start f) f;
+    let enclosing = ref dummyFunDec in
+    let findEnclosing = 
+      object(self)
+        inherit (enclosingFunction dummyFunDec)
+
+        val mutable nearest_loop = dummyStmt
+        val mutable seen_start = false
+        val mutable check_loops = false
+
+        method vstmt s =
+          assert(check_loops =>  seen_start);
+          if s == start then (seen_start <- true; check_loops <- true;
+          enclosing := ef);
+          match s.skind with
+          | Break _ | Continue _ when check_loops ->
+              raise (BreakContinue nearest_loop)
+          | Switch _ | Loop _ ->
+              let e = nearest_loop in
+              let cl = check_loops in
+              ChangeDoChildrenPost(
+                (nearest_loop <- s; check_loops <- false; s),
+                (fun s ->
+                  nearest_loop <- e;
+                  check_loops <- cl;
+                  s))
+          | _ -> DoChildren
+
+        method vblock b =
+          let seen = seen_start in
+          let cl = check_loops in
+          ChangeDoChildrenPost(b, fun b ->
+            (*let live_stmt =
+              if seen_start
+              then choose_stmt (live_labels b) start
+              else None in
+    match live_stmt with
+    | Some s -> raise (LiveStmt s)
+          | None ->*) (seen_start <- seen; check_loops <- cl; b))
+
+      end
+    in  visitCilFileSameGlobals findEnclosing f;
+    visitCilFileSameGlobals (new functionalizeGoto start !enclosing f) f;
   with
   | BreakContinue s ->
       assert( s != dummyStmt);
       trace (dprintf "found escaping break or continue: trivializing\n%a\n" d_stmt s);
       eliminate_switch_loop s;
       trace (dprintf "***\nresult:\n%a\n" d_stmt s);
-  (*| LiveStmt s ->
-      trace (dprintf "found a live label: functionalizing it\n%a\n" d_stmt s);
-      functionalize s f*)
+      (*| LiveStmt s ->
+        trace (dprintf "found a live label: functionalizing it\n%a\n" d_stmt s);
+        functionalize s f*)
   | Not_found -> E.s (E.bug "no enclosing function found\n")
-  end
+      end
 
 (*****************************************************************************)
 
@@ -1936,6 +1974,8 @@ let rec cps_marking f =
       end
 
 let stages = [
+  ("Initialize label table\n", fun file ->
+  visitCilFileSameGlobals (new initLabelTbl) file);
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
   ("Add defaults arguments\n", fun file ->
