@@ -305,7 +305,7 @@ but only in attached state.
 
 \begin{verbatim}
     cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
-    double cpc_gettime(void);
+    int cpc_gettimeofday(stuct timeval *tv);
 \end{verbatim}
 
 \paragraph{\tt cpc\_sleep} The function {\tt cpc\_sleep} takes three
@@ -332,9 +332,11 @@ are syntactic sugar for, respectively,
     cpc_sleep(sec, usec, cond);
 \end{verbatim}
 
-\paragraph{\tt cpc\_gettime} The function {\tt cpc\_gettime} returns a double
-representing the current time in seconds.  This function is not valid in
-detached mode.
+\paragraph{\tt cpc\_gettimeofday} The function {\tt cpc\_gettime} is a
+non-blocking equivalent of {\tt gettimeofday}.  In detached mode it
+simply calls it.  In attached mode, it returns the latest time measured
+by the scheduler.  (The timezone is set to NULL.)  This function is only
+valid in cps context.
 
 \section{Waiting for I/O}
 

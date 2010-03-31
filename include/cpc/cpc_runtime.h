@@ -143,10 +143,6 @@ extern void cpc_prim_spawn(struct cpc_continuation*, struct cpc_continuation*);
 extern cpc_sched *cpc_threadpool_get(int);
 extern int cpc_threadpool_release(cpc_sched *);
 
-extern cpc_sched *cpc_get_sched(void);
-
-extern double cpc_gettime(void);
-
 #ifndef NO_CPS_PROTO
 extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
@@ -154,6 +150,9 @@ extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_yield(void);
 extern cps void cpc_done(void);
 extern cps cpc_sched *cpc_attach(cpc_sched *pool);
+
+extern cpc_sched *cpc_get_sched(void);
+extern int cpc_gettimeofday(struct timeval *tv);
 
 #define cpc_is_detached() (cpc_get_sched() != cpc_default_sched)
 #define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_default_pool : cpc_get_sched())

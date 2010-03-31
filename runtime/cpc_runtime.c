@@ -1178,9 +1178,14 @@ cpc_main_loop(void)
 
 }
 
-double
-cpc_gettime(void)
+int
+cpc_gettimeofday(struct timeval *tv, cpc_continuation *c)
 {
-    assert(!IS_DETACHED);
-    return ((double) cpc_now.tv_sec * 1E6 + cpc_now.tv_usec);
+  if(c->state == STATE_DETACHED) {
+    assert(IS_DETACHED);
+    return gettimeofday(tv, NULL); /* XXX */
+  }
+  assert(c->state == STATE_UNKNOWN && !IS_DETACHED);
+  *tv = cpc_now;
+  return 0;
 }
