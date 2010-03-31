@@ -24,6 +24,7 @@ THE SOFTWARE.
 */
 
 #include <stddef.h> // size_t
+#include <time.h>
 
 typedef void cpc_function(void*);
 typedef struct cpc_condvar cpc_condvar;
@@ -152,8 +153,8 @@ extern cps void cpc_done(void);
 extern cps cpc_sched *cpc_attach(cpc_sched *pool);
 
 extern cpc_sched *cpc_get_sched(void);
-extern int cpc_gettimeofday(struct timeval *tv);
-extern time_t cpc_time(time_t *t);
+extern int cpc_gettimeofday(struct timeval *tv, cpc_continuation *c);
+extern time_t cpc_time(time_t *t, cpc_continuation *c);
 
 #define cpc_is_detached() (cpc_get_sched() != cpc_default_sched)
 #define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_default_pool : cpc_get_sched())
