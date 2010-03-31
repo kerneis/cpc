@@ -332,11 +332,16 @@ are syntactic sugar for, respectively,
     cpc_sleep(sec, usec, cond);
 \end{verbatim}
 
-\paragraph{\tt cpc\_gettimeofday} The function {\tt cpc\_gettime} is a
-non-blocking equivalent of {\tt gettimeofday}.  In detached mode it
+\paragraph{\tt cpc\_gettimeofday} The function {\tt cpc\_gettimeofday}
+is a non-blocking equivalent of {\tt gettimeofday}.  In detached mode it
 simply calls it.  In attached mode, it returns the latest time measured
 by the scheduler.  (The timezone is set to NULL.)  This function is only
 valid in cps context.
+
+\paragraph{\tt cpc\_time} The function {\tt cpc\_time} is a non-blocking
+equivalent of {\tt time}.  In detached mode it simply calls it.  In
+attached mode, it returns the latest time measured by the scheduler.
+This function is only valid in cps context.
 
 \section{Waiting for I/O}
 

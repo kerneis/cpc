@@ -951,7 +951,8 @@ class cpsConverter = fun file ->
       | Some v -> ChangeTo [Set(v, Lval(Mem (Lval (Var current_continuation,
       NoOffset)),
         Field(sched_field, NoOffset)), loc)])
-  | Call(r, (Lval (Var {vname = "cpc_gettimeofday" }, NoOffset) as l), [tv], loc) ->
+  | Call(r, (Lval (Var {vname = "cpc_gettimeofday" }, NoOffset) as l), [tv], loc)
+  | Call(r, (Lval (Var {vname = "cpc_time" }, NoOffset) as l), [tv], loc) ->
       ChangeTo [Call(r, l, [tv; Lval (Var current_continuation, NoOffset)], loc)] 
   | _ -> DoChildren
 

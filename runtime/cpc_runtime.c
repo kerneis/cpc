@@ -1189,3 +1189,16 @@ cpc_gettimeofday(struct timeval *tv, cpc_continuation *c)
   *tv = cpc_now;
   return 0;
 }
+
+time_t
+cpc_time(time_t *t, cpc_continuation *c)
+{
+  if(c->state == STATE_DETACHED) {
+    assert(IS_DETACHED);
+    return time(t); /* XXX */
+  }
+  assert(c->state == STATE_UNKNOWN && !IS_DETACHED);
+  if(t)
+    *t = cpc_now.tv_sec;
+  return cpc_now.tv_sec;
+}
