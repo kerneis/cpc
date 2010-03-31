@@ -958,19 +958,9 @@ cpc_threadpool_release(cpc_sched *sched)
 
 /*** cpc_yield and cpc_spawn ***/
 
-/* cps void cpc_yield(int mode) */
-struct cpc_yield_arglist {
-   int mode;
-} __attribute__((__packed__)) ;
+/* cps void cpc_yield(void) */
 void cpc_yield(struct cpc_continuation *cont)
 {
-    int mode;
-    struct cpc_yield_arglist *cpc_arguments ;
-
-    cpc_arguments = (struct cpc_yield_arglist *) cpc_dealloc(cont,
-                    (int )sizeof(struct cpc_yield_arglist ));
-    mode = cpc_arguments->mode;
-
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED);
         cpc_invoke_continuation(cont);

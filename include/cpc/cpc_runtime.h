@@ -106,10 +106,6 @@ cpc_invoke_continuation(struct cpc_continuation *c)
 #define CPC_TIMEOUT 4
 #define CPC_CONDVAR 8
 
-#define CPC_NORMAL 0
-#define CPC_BACKGROUND 1
-#define CPC_OPPORTUNISTIC 2
-
 static inline struct cpc_continuation *
 cpc_continuation_push(cpc_continuation *c, cpc_function *f)
 {
@@ -155,7 +151,7 @@ extern double cpc_gettime(void);
 extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
-extern cps void cpc_yield(int mode);
+extern cps void cpc_yield(void);
 extern cps void cpc_done(void);
 extern cps cpc_sched *cpc_attach(cpc_sched *pool);
 
