@@ -478,6 +478,21 @@ The versions with \verb|timeout| appended return after \verb|secs|
 seconds and \verb|micros| micreseconds if no I/O has been possible.
 In this case, they return -1 with \verb|errno| set to \verb|EAGAIN|.
 
+\chapter{Tips and tricks}
+
+\paragraph{Using ctags}
+\begin{verbatim}
+ctags -R --langmap=c:+.cpc *
+\end{verbatim}
+
+\paragraph{Vim setup} Put the following in your {\tt .vimrc}:
+\begin{verbatim}
+" CPC
+au BufNewFile,BufRead *.cpc setf c
+au BufNewFile,BufRead *.cpc syn keyword cType cps
+au BufNewFile,BufRead *.cpc syn keyword cStatement cpc_spawn cpc_detached cpc_attached
+\end{verbatim}
+
 \begin{thebibliography}{MTHM90}
 
 \bibitem[ISO99]{iso:c99}
