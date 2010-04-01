@@ -493,6 +493,12 @@ au BufNewFile,BufRead *.cpc syn keyword cType cps
 au BufNewFile,BufRead *.cpc syn keyword cStatement cpc_spawn cpc_detached cpc_attached
 \end{verbatim}
 
+\paragraph{Emacs setup} Put the following in your {\tt .emacs}:
+\begin{verbatim}
+;;; CPC
+(push '("\\.cpc$" . c-mode) auto-mode-alist)
+\end{verbatim}
+
 \begin{thebibliography}{MTHM90}
 
 \bibitem[ISO99]{iso:c99}
