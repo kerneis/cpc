@@ -26,7 +26,6 @@ THE SOFTWARE.
 #include <stddef.h> // size_t
 #include <time.h>
 
-typedef void cpc_function(void*);
 typedef struct cpc_condvar cpc_condvar;
 typedef struct cpc_sched cpc_sched;
 extern cpc_sched *cpc_default_pool;
@@ -38,13 +37,14 @@ typedef struct cpc_continuation {
     struct cpc_continuation *next;
     struct cpc_condvar *condvar;
     struct cpc_continuation *cond_next;
-    struct cpc_continuation **ready;
     cpc_sched *sched;
     int state;
     unsigned short length;
     unsigned short size;
     char c[1];
 } cpc_continuation;
+
+typedef cpc_continuation *cpc_function(void*);
 
 void cpc_continuation_free(struct cpc_continuation *c);
 struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
@@ -72,35 +72,6 @@ cpc_dealloc(struct cpc_continuation *c, int s)
     c->length -= s;
     return c->c + c->length;
 }
-
-static void
-cpc_really_invoke_continuation(struct cpc_continuation *c)
-{
-    cpc_function *f;
-
-    if(c == (void*)0)
-        return;
-
-    if(c->length == 0) {
-        cpc_continuation_free(c);
-        return;
-    }
-
-    c->length -= sizeof(cpc_function*);
-    f = *(cpc_function**)(c->c + c->length);
-    (*f)(c);
-}
-
-#ifdef CPC_TAIL_RECURSIVE_COMPILER
-#define cpc_invoke_continuation cpc_really_invoke_continuation
-#else
-static inline void
-cpc_invoke_continuation(struct cpc_continuation *c)
-{
-    *(c->ready) = c;
-    return;
-}
-#endif
 
 #define CPC_IO_IN 1
 #define CPC_IO_OUT 2

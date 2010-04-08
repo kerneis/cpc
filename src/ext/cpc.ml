@@ -718,11 +718,6 @@ class cpsConverter = fun file ->
   let sched_field = find_field "cpc_continuation" "sched" file in
   let cpc_alloc = find_function "cpc_alloc" file in
   let cpc_dealloc =  find_function "cpc_dealloc" file in
-  let cpc_invoke =
-    try find_function "cpc_invoke_continuation" file
-    with E.Error ->
-      E.hadErrors := false;
-      find_function "cpc_really_invoke_continuation" file in
   let cpc_push = find_function "cpc_continuation_push" file in
   let patch cont value f =
     let typ = typeOf value in
@@ -850,13 +845,7 @@ class cpsConverter = fun file ->
       (* XXX DEBUGING *)
       (debug ("patching before exiting "^ef.svar.vname) @
       patch current_continuation ret_exp ef) in
-    mkStmt (Instr (
-    convert (List.rev stack) @
-    patch_instr @
-    (* cpc_invoke(current_continuation); *)
-    [Call(None, Lval(Var cpc_invoke, NoOffset),
-    [Lval(Var current_continuation, NoOffset)], locUnknown)]
-  ))
+    mkStmt (Instr (convert (List.rev stack) @ patch_instr))
 
   method vinst = function
   (* Special case: some functions need to be given the current continuation *)
@@ -886,7 +875,8 @@ class cpsConverter = fun file ->
       assert(s.labels = [] || stack = []);
       s.skind <- Block (mkBlock [
           self#do_convert ret_exp;
-          mkStmt (Return (None, loc))]);
+          mkStmt (Return
+            (Some (Lval(Var current_continuation, NoOffset)), loc))]);
       stack <- [];
       SkipChildren
   | CpcSpawn (f, args, _) ->
@@ -951,7 +941,7 @@ class cpsConverter = fun file ->
       if v.vstorage = Extern then begin
         (* mark it as completed (will be done later for non-extern function *)
         v.vcps <- false;
-        v.vtype <- TFun(voidType,
+        v.vtype <- TFun(cpc_cont_ptr,
           Some ["cpc_current_continuation", cpc_cont_ptr, []], va, attr)
         end;
       ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
@@ -966,7 +956,7 @@ class cpsConverter = fun file ->
       (* add former arguments to slocals *)
       fd.slocals <- args @ fd.slocals;
       fd.sformals <- [];
-      setFunctionTypeMakeFormals fd (TFun(voidType, Some new_arg, va, attr));
+      setFunctionTypeMakeFormals fd (TFun(cpc_cont_ptr, Some new_arg, va, attr));
       current_continuation <- begin match fd.sformals with
         | [x] -> x
         | _ -> assert false end;

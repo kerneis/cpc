@@ -95,7 +95,7 @@ static struct timeval cpc_now;
 
 static void recompute_fdsets(int fd);
 
-static inline void exhaust_ready(cpc_continuation *);
+static void cpc_invoke_continuation(struct cpc_continuation *c);
 
 volatile int detached_count = 0;
 
@@ -109,16 +109,16 @@ cpc_print_continuation(struct cpc_continuation *c, char *s)
         fprintf(stderr, "(%s) NULL continuation\n", s);
         return;
     }
-    fprintf(stderr, "(%s) At %p %lu:\n%p\t%p\t%p\t%p\t%d\t%u\t%u\n",s,c,
-    sizeof(cpc_function*),
-    c->next,c->condvar,c->cond_next,c->ready,c->state,c->length,c->size);
+    fprintf(stderr, "(%s) Continuation %p:\n"
+        "  next: %p\tcondvar%p\tcond_next: %p\n"
+        "  state: %d\tlength: %u\tsize: %u\n",
+        s,c,
+        c->next,c->condvar,c->cond_next,
+        c->state,c->length,c->size);
     while(i < c->length) {
-        fprintf(stderr,"%02x",c->c[i]);
+        fprintf(stderr,"%.2x",(unsigned char)c->c[i]);
         i++;
-        if(i%16 == 0 || i == c->length)
-            fprintf(stderr,"\n");
-        else if(i%2 == 0)
-            fprintf(stderr, " ");
+        fprintf(stderr, (i%16 == 0 || i == c->length) ? "\n" : " ");
     }
 }
 
@@ -166,7 +166,6 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
         d->next = NULL;
         d->sched = cpc_default_sched;
         d->state = STATE_UNKNOWN;
-        d->ready = NULL;
         return d;
     }
 
@@ -178,7 +177,6 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
     d->next = c->next;
     d->sched = c->sched;
     d->state = c->state;
-    d->ready = c->ready;
 
     free(c);
 
@@ -542,7 +540,8 @@ cpc_condvar_count(cpc_condvar *cond)
 struct cpc_wait_arglist {
    cpc_condvar *cond ;
 } __attribute__((__packed__)) ;
-void cpc_wait(struct cpc_continuation *cont)
+cpc_continuation *
+cpc_wait(struct cpc_continuation *cont)
 {
     cpc_condvar *cond;
     struct cpc_wait_arglist *cpc_arguments ;
@@ -554,6 +553,7 @@ void cpc_wait(struct cpc_continuation *cont)
     assert(!IS_DETACHED && cont->condvar == NULL && cont->state == STATE_UNKNOWN);
     cont->condvar = cond;
     cond_enqueue(&cond->queue, cont);
+    return NULL;
 }
 
 void
@@ -599,7 +599,8 @@ struct cpc_sleep_arglist {
    int usec ;
    cpc_condvar *cond ;
 } __attribute__((__packed__)) ;
-void cpc_sleep(struct cpc_continuation *cont)
+cpc_continuation *
+cpc_sleep(struct cpc_continuation *cont)
 {
     int sec, usec;
     cpc_condvar *cond;
@@ -623,8 +624,7 @@ void cpc_sleep(struct cpc_continuation *cont)
         select(0, NULL, NULL, NULL, &when); // XXX
         int rc = CPC_TIMEOUT;
         cpc_continuation_patch(cont, sizeof(int), &rc);
-        cpc_invoke_continuation(cont);
-        return;
+        return cont;
     }
 
     assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
@@ -635,6 +635,7 @@ void cpc_sleep(struct cpc_continuation *cont)
     cont->state = STATE_SLEEPING;
     timeval_plus(&when, &cpc_now, sec, usec);
     timed_enqueue(&sleeping, cont, &when);
+    return NULL;
 }
 
 /*** cpc_io_wait ***/
@@ -736,7 +737,8 @@ struct cpc_io_wait_arglist {
    int direction ;
    cpc_condvar *cond ;
 } __attribute__((__packed__)) ;
-void cpc_io_wait(struct cpc_continuation *cont)
+cpc_continuation *
+cpc_io_wait(struct cpc_continuation *cont)
 {
     int fd, direction, rc;
     cpc_condvar *cond;
@@ -753,12 +755,11 @@ void cpc_io_wait(struct cpc_continuation *cont)
         assert(IS_DETACHED && cond == NULL);
         rc = cpc_d_io_wait(fd, direction);
         cpc_continuation_patch(cont, sizeof(int), &rc);
-        cpc_invoke_continuation(cont);
-        return;
+        return cont;
     }
 
     if(cont == NULL)
-        return;
+        return NULL;
 
     assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
     assert((fd & (7 << 29)) == 0);
@@ -773,6 +774,7 @@ void cpc_io_wait(struct cpc_continuation *cont)
     cont->state = fd | ((direction & 3) << 29);
     enqueue(&fd_queues[fd], cont);
     recompute_fdsets(fd);
+    return NULL;
 }
 
 static void
@@ -805,14 +807,14 @@ cpc_signal_fd(int fd, int direction)
 
 /*** cpc_attach ****/
 
-void cpc_prim_attach(cpc_continuation*);
-void cpc_prim_detach(cpc_sched*, cpc_continuation*);
+cpc_continuation *cpc_prim_attach(cpc_continuation*);
+cpc_continuation *cpc_prim_detach(cpc_sched*, cpc_continuation*);
 
 /* cps cpc_sched *cpc_attach(cpc_sched *pool) */
 struct cpc_attach_arglist {
    cpc_sched *sched;
 } __attribute__((__packed__)) ;
-void
+cpc_continuation *
 cpc_attach(struct cpc_continuation *cont)
 {
     cpc_sched *sched;
@@ -826,9 +828,9 @@ cpc_attach(struct cpc_continuation *cont)
     cpc_continuation_patch(cont, sizeof(cpc_sched *), &cont->sched);
 
     if(sched == cpc_default_sched)
-        cpc_prim_attach(cont);
+        return cpc_prim_attach(cont);
     else
-        cpc_prim_detach(sched, cont);
+        return cpc_prim_detach(sched, cont);
 }
 
 static inline void
@@ -843,7 +845,7 @@ spawn_cb(void *cont)
     if(c->state == STATE_DETACHED)
         c->state = STATE_UNKNOWN;
     c->sched = cpc_default_sched;
-    enqueue(&ready, c); // XXX Or maybe: exhaust_ready(c); ???
+    enqueue(&ready, c); // XXX
 }
 
 static void
@@ -853,18 +855,18 @@ attach_cb(void *cont)
     detached_count--;
 }
 
-void
+cpc_continuation *
 cpc_prim_attach(cpc_continuation *cont)
 {
     if(cont->state == STATE_UNKNOWN) {
         assert(!IS_DETACHED && cont->condvar == NULL);
         assert(cont->sched == cpc_default_sched);
-        cpc_invoke_continuation(cont);
-        return;
+        return cont;
     }
 
     assert(cont->state == STATE_DETACHED);
     threadpool_schedule_back(cont->sched->pool, attach_cb, cont);
+    return NULL;
 }
 
 static void
@@ -872,10 +874,10 @@ perform_detach(void *cont)
 {
     struct cpc_continuation *c = (struct cpc_continuation *)cont;
     c->state = STATE_DETACHED;
-    exhaust_ready(c);
+    cpc_invoke_continuation(c);
 }
 
-void
+cpc_continuation *
 cpc_prim_detach(cpc_sched *sched, cpc_continuation *cont)
 {
     int rc;
@@ -884,8 +886,7 @@ cpc_prim_detach(cpc_sched *sched, cpc_continuation *cont)
         assert(IS_DETACHED);
         /* Already in the good threadpool. */
         if(cont->sched == sched) {
-            cpc_invoke_continuation(cont);
-            return;
+            return cont;
         }
     } else {
         assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
@@ -900,7 +901,7 @@ cpc_prim_detach(cpc_sched *sched, cpc_continuation *cont)
       perror("threadpool_schedule");
       exit(1);
     }
-    return;
+    return NULL;
 }
 
 void
@@ -959,26 +960,28 @@ cpc_threadpool_release(cpc_sched *sched)
 /*** cpc_yield and cpc_spawn ***/
 
 /* cps void cpc_yield(void) */
-void cpc_yield(struct cpc_continuation *cont)
+cpc_continuation *
+cpc_yield(struct cpc_continuation *cont)
 {
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        cpc_invoke_continuation(cont);
-        return;
+        return cont;
     }
 
     assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
         cont->condvar == NULL);
 
     enqueue(&ready, cont);
+    return NULL;
 }
 
 
 /* cps void cpc_done(void) */
-void
+cpc_continuation *
 cpc_done(struct cpc_continuation *cont)
 {
     cpc_continuation_free(cont);
+    return NULL;
 }
 
 void
@@ -1004,15 +1007,20 @@ cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
 
 /*** Executing continuations with trampolines ***/
 
-static inline void
-exhaust_ready(cpc_continuation *c)
+static void
+cpc_invoke_continuation(struct cpc_continuation *c)
 {
-    cpc_continuation *cpc_ready_1 = c;
-    c->ready = &cpc_ready_1;
-    while(cpc_ready_1) {
-        c = cpc_ready_1;
-        cpc_ready_1 = NULL;
-        cpc_really_invoke_continuation(c);
+    cpc_function *f;
+
+    while(c) {
+      if(c->length == 0) {
+        cpc_continuation_free(c);
+        return;
+      }
+
+      c->length -= sizeof(cpc_function*);
+      f = *(cpc_function**)(c->c + c->length);
+      c = (*f)(c);
     }
 }
 
@@ -1053,7 +1061,7 @@ cpc_main_loop(void)
             c = dequeue(&q);
             if(c == NULL) break;
             assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
-            exhaust_ready(c);
+            cpc_invoke_continuation(c);
         }
         if(ready.head && sleeping.size == 0 && num_fds == 0 &&
            detached_count == 0 && !cpc_pessimise_runtime)
@@ -1072,7 +1080,7 @@ cpc_main_loop(void)
                 c->condvar = NULL;
                 c->state = STATE_UNKNOWN;
                 cpc_continuation_patch(c, sizeof(int), &rc);
-                exhaust_ready(c);
+                cpc_invoke_continuation(c);
             }
         }
 
