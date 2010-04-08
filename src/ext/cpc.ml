@@ -1233,7 +1233,7 @@ class cpsReturnValues = object(self)
           ]
       | None when  (typeSig typ <> typeSig voidType) -> (* Missing assignment *)
           let v = makeTempVar ef typ in
-          trace (dprintf "Ignoring a cps return value: %a" d_instr i);
+          trace (dprintf "Ignoring a cps return value: %a\n" d_instr i);
           ChangeTo [
           Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc)]
       | None -> SkipChildren (* No assignement (void function) *)
@@ -1802,7 +1802,8 @@ class functionalizeGoto start enclosing_fun file =
               enclosing.skind with
               (* Loops should have been trivialized first, and stack should
                * contain at least the <start> stmt *)
-              | [], _, _ | _, _, Loop _ -> assert false
+              | [], _, _ -> assert false
+              | _, _, Loop _ -> assert false
               | _, _, CpcFun _
               | _, [], _ ->
                   (* if we don't have any successor, or if we are at the
