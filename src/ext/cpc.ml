@@ -145,7 +145,7 @@ let rec xform_switch_stmt s = begin
 
   | TryExcept _ | TryFinally _ ->
       failwith "xform_switch_statement: structured exception handling not implemented"
-  (*| CpcCut _*) | CpcFun _ | CpcSpawn _ -> ()
+  | CpcFun _ | CpcSpawn _ -> ()
 
 end and xform_switch_block b =
   try
@@ -328,8 +328,6 @@ class lastVar = fun start -> object(self)
       match s.preds with
       | [{skind=Instr l} as p] when p.cps ->
           raise (find_var l)
-      (*| [{skind=CpcCut (Some v, _, _)}] ->
-          raise (FoundVar v)*)
       | _ -> raise Not_found
   end
   | _ -> DoChildren
@@ -628,21 +626,6 @@ class markCps = fun file -> object(self)
 
     (* Cpc constructs *)
 
-    (* In a regular function *)
-    (*| CpcCut _ when not c.cps_fun ->
-        E.s (E.error "CPC construct not allowed here: %a" d_stmt s)
-    (* In a cps function: *)
-    (* 1. with no cps instruction before *)
-    | CpcCut _ when not c.cps_con ->
-        s.cps <- true;
-        c.cps_con <- true;
-        self#set_next s;
-        SkipChildren
-    (* 2. with cps instructions before: this can't be done directly, we
-          have to split it. *)
-    | CpcCut _ ->
-        raise (AddGoto c)
-    *)
     (* cpc_spawn must NOT appear in cps context *)
     | CpcSpawn _ when c.cps_con ->
         raise (AddGoto c)
@@ -778,50 +761,6 @@ class cpsConverter = fun file ->
       Lval(Var cc, NoOffset);
       context
       ],locUnknown)] in
-  (*let cpc_yield = find_function "cpc_prim_yield" file in
-  let yield cc =
-    (* cpc_prim_yield(cc); *)
-    [Call(None,Lval(Var cpc_yield, NoOffset),
-      [Lval(Var cc, NoOffset)],locUnknown)] in
-  let cpc_continuation_free = find_function "cpc_continuation_free" file in
-  let continuation_free cc =
-    (* cpc_continuation_free(cc); *)
-    [Call(None,Lval(Var cpc_continuation_free, NoOffset),
-      [Lval(Var cc, NoOffset)],locUnknown)] in
-  let cpc_sleep = find_function "cpc_prim_sleep" file in
-  let sleep x y condvar cc =
-    (* cpc_prim_sleep(x, y, condvar, cc); *)
-    [Call(None,Lval(Var cpc_sleep, NoOffset), [
-      x; y; check_null condvar;
-      Lval(Var cc, NoOffset)],
-      locUnknown)] in
-  let cpc_wait = find_function "cpc_prim_wait" file in
-  let wait condvar cc =
-    (* cpc_prim_wait(condvar, cc); *)
-    [Call(None,Lval(Var cpc_wait, NoOffset), [
-      condvar;
-      Lval(Var cc, NoOffset)],
-      locUnknown)] in
-  let cpc_io_wait = find_function "cpc_prim_io_wait" file in
-  let io_wait x y condvar cc =
-    (* cpc_prim_io_wait(x, y, condvar, cc); *)
-    [Call(None,Lval(Var cpc_io_wait, NoOffset), [
-      x; y; check_null condvar;
-      Lval(Var cc, NoOffset)],
-      locUnknown)] in
-  let cpc_attach = find_function "cpc_prim_attach" file in
-  let attach scheduler cc =
-    (* cpc_prim_attach(cc) *)
-    [Call(None,Lval(Var cpc_attach, NoOffset), [
-      Lval(Var cc, NoOffset)],
-      locUnknown)] in
-  let cpc_detach = find_function "cpc_prim_detach" file in
-  let detach pool cc =
-    (* cpc_prim_detach(pool, cc) *)
-    [Call(None,Lval(Var cpc_detach, NoOffset), [
-      pool;
-      Lval(Var cc, NoOffset)],
-      locUnknown)] in*)
   (* XXX DEBUGING *)
   let debug =
     if !E.debugFlag then
@@ -912,30 +851,6 @@ class cpsConverter = fun file ->
       (debug ("patching before exiting "^ef.svar.vname) @
       patch current_continuation ret_exp ef) in
     mkStmt (Instr (
-    (* The stack should be a list of cps calls and might end with a
-       cpc_construct. *)
-    (*match List.rev stack with
-    | {skind=CpcCut (None, Yield, _)} :: l ->
-        convert l @ debug "cpc_yield" @ yield current_continuation
-    | {skind=CpcCut (None, Done, _)} :: l ->
-        if (l <> []) then
-          E.s (E.bug "cpc_done must be followed by a return.\n");
-        (* XXX DEBUGING *)
-        debug "cpc_done: discarding continuation" @
-        continuation_free current_continuation
-    | {skind=CpcCut (None, Attach e, _)} :: l ->
-        convert l @ attach e current_continuation
-    | {skind=CpcCut (None, Detach e, _)} :: l ->
-        convert l @ detach e current_continuation
-    | {skind=CpcCut (None, Wait condvar, _)} :: l ->
-        convert l @ wait condvar current_continuation
-    | {skind=CpcCut (None, Sleep (x, y, condvar), _)} :: l ->
-        convert l @ sleep x y condvar current_continuation
-    | {skind=CpcCut (None, IoWait (x, y, condvar), _)} :: l ->
-        convert l @ io_wait x y condvar current_continuation
-    | {skind=CpcCut (Some _, _, _)} as s :: _ ->
-        E.s (E.bug "This cpc construct should not return anything: %a\n" d_stmt
-        s)*)
     convert (List.rev stack) @
     patch_instr @
     (* cpc_invoke(current_continuation); *)
@@ -957,7 +872,7 @@ class cpsConverter = fun file ->
   | _ -> DoChildren
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
-  (*| CpcCut _ *)| Instr _ when s.cps ->
+  | Instr _ when s.cps ->
       (* If the labels are not empty, this must be first cps statement,
          so the stack has to be empty. *)
       assert(s.labels = [] || stack = []);
@@ -974,7 +889,6 @@ class cpsConverter = fun file ->
           mkStmt (Return (None, loc))]);
       stack <- [];
       SkipChildren
-  (* | CpcCut _ -> assert false *)
   | CpcSpawn (f, args, _) ->
       s.skind <- Instr (self#convert_instr ~apply_later:true
         (Call(None,f,args,locUnknown)));
@@ -1347,22 +1261,6 @@ class insertGotos = object(self)
   | Instr il ->
       s.skind <- Block (mkBlock (compactStmts (insert_gotos il)));
       SkipChildren
-  (*  | CpcCut (Some v, cut, loc) ->
-      let dst = {(mkEmptyStmt()) with labels = [Label (make_label(), loc, false)]} in
-      (* XXX DO NOT USE copyClearStmt HERE --- we want to keep the labels *)
-      let s' = {(mkEmptyStmt()) with skind=s.skind; cps = s.cps} in
-      s.skind <- Block (mkBlock ([
-        s';
-        mkStmt (Goto (ref dst, loc));
-        dst
-      ]));
-      SkipChildren
-  | CpcCut (_, Done, loc) ->
-      (* copyClearStmt is needlessly expensive here, just copy *)
-      let copy = mkStmt s.skind in
-      let return = mkStmt (Return (None, loc)) in
-      s.skind <- Block (mkBlock [copy; return]);
-      SkipChildren *)
   | _ -> DoChildren
 
 end
@@ -1668,8 +1566,7 @@ let rec stmtFallsThrough (s: stmt) : bool =
   | Block b -> blockFallsThrough b
   | TryFinally (b, h, _) -> blockFallsThrough h
   | TryExcept (b, _, h, _) -> true (* Conservative *)
-  (*| CpcCut (_, Done, _) -> false
-  | CpcCut _*) | CpcSpawn _ | CpcFun _ -> true
+  | CpcSpawn _ | CpcFun _ -> true
 and blockFallsThrough b = 
   let rec fall = function
       [] -> true
@@ -1703,7 +1600,7 @@ and stmtCanBreak (s: stmt) : bool =
   | Block b -> blockCanBreak b
   | TryFinally (b, h, _) -> blockCanBreak b || blockCanBreak h
   | TryExcept (b, _, h, _) -> blockCanBreak b || blockCanBreak h
-  (*| CpcCut _*) | CpcSpawn _ | CpcFun _ -> false
+  | CpcSpawn _ | CpcFun _ -> false
 and blockCanBreak b = 
   List.exists stmtCanBreak b.bstmts
 (***** End of code from cabs2cil.ml *****)
@@ -1833,17 +1730,6 @@ end
 
 exception BreakContinue of stmt
 
-(*exception LiveStmt of stmt
-
-let rec choose_stmt set start =
-  try
-    let ((_,s) as x) = LabelSet.choose set in
-    if s == start
-    then choose_stmt (LabelSet.remove x set) start
-    else Some s
-  with Not_found -> None
-*)
-
 (* Look for break/continue in statements to be functionalized ---
 XXX code must be kept in sync with functionalizeGotos !!! ---
 and return the nearest enclosing loop/switch statement *)
@@ -1881,13 +1767,7 @@ let rec functionalize start f =
           let seen = seen_start in
           let cl = check_loops in
           ChangeDoChildrenPost(b, fun b ->
-            (*let live_stmt =
-              if seen_start
-              then choose_stmt (live_labels b) start
-              else None in
-    match live_stmt with
-    | Some s -> raise (LiveStmt s)
-          | None ->*) (seen_start <- seen; check_loops <- cl; b))
+              (seen_start <- seen; check_loops <- cl; b))
 
       end
     in  visitCilFileSameGlobals findEnclosing f;
@@ -1898,9 +1778,6 @@ let rec functionalize start f =
       trace (dprintf "found escaping break or continue: trivializing\n%a\n" d_stmt s);
       eliminate_switch_loop s;
       trace (dprintf "***\nresult:\n%a\n" d_stmt s);
-      (*| LiveStmt s ->
-        trace (dprintf "found a live label: functionalizing it\n%a\n" d_stmt s);
-        functionalize s f*)
   | Not_found -> E.s (E.bug "no enclosing function found\n")
       end
 
@@ -2013,7 +1890,6 @@ let stages = [
 ]
 
 let rec doit (f: file) =
-  (*lineDirectiveStyle := None;*)
   try
     ignore(List.fold_left (fun n (descr,step) ->
         if !stage < n then raise Exit;
