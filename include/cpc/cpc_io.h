@@ -20,6 +20,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+typedef struct cpc_timeout cpc_timeout;
+
+cps cpc_timeout *cpc_timeout_get(int secs, int usecs);
+cpc_condvar *cpc_timeout_condvar(cpc_timeout *timeout);
+int cpc_timeout_expired(cpc_timeout *timeout);
+cps void cpc_timeout_destroy(cpc_timeout *timeout);
+
 int cpc_setup_descriptor(int fd, int nonagle);
 cps int cpc_write(int fd, void *buf, size_t count);
 cps int

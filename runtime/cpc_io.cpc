@@ -32,6 +32,85 @@ THE SOFTWARE.
 #include "cpc_barrier.h"
 #include "cpc_io.h"
 
+#define _TIMEOUT_EXPIRED 1
+#define _TIMEOUT_CANCELLED 2
+
+struct cpc_timeout {
+    cpc_condvar *cancel, *expire;
+    int flags;
+};
+
+cps cpc_timeout *
+cpc_timeout_get(int secs, int usecs)
+{
+    cpc_timeout *timeout;
+
+    timeout = calloc(1, sizeof(cpc_timeout));
+    if(timeout == NULL)
+        return NULL;
+
+    timeout->cancel = cpc_condvar_get();
+    if(timeout->cancel == NULL) {
+        free(timeout);
+        return NULL;
+    }
+
+    timeout->expire = cpc_condvar_get();
+    if(timeout->expire == NULL) {
+        cpc_condvar_release(timeout->cancel);
+        free(timeout);
+        return NULL;
+    }
+
+    cpc_spawn {
+        cpc_sleep(secs, usecs, timeout->cancel);
+        /* This is only necessary because cpc_sleep doesn't return a value. */
+        if(!(timeout->flags & _TIMEOUT_CANCELLED)) {
+            //assert(!timeout->flags);
+            timeout->flags |= _TIMEOUT_EXPIRED;
+            cpc_signal_all(timeout->expire);
+        }
+    }
+
+    cpc_yield();                  /* Enter the sleep. */
+    return timeout;
+}
+
+cpc_condvar *
+cpc_timeout_condvar(cpc_timeout *timeout)
+{
+    return timeout->expire;
+}
+
+int
+cpc_timeout_expired(cpc_timeout *timeout)
+{
+    return !!(timeout->flags & _TIMEOUT_EXPIRED);
+}
+
+void
+cpc_timeout_cancel(cpc_timeout *timeout)
+{
+    if(!timeout->flags) {
+        timeout->flags |= _TIMEOUT_CANCELLED;
+        cpc_signal(timeout->cancel);
+    }
+}
+
+cps void
+cpc_timeout_destroy(cpc_timeout *timeout)
+{
+    if(!timeout->flags)
+        cpc_timeout_cancel(timeout);
+    /* This is in a separate continuation, which is scheduled after the
+       sleeping thread exits. */
+    cpc_spawn {
+        cpc_condvar_release(timeout->cancel);
+        cpc_condvar_release(timeout->expire);
+        free(timeout);
+    }
+}
+
 int
 cpc_setup_descriptor(int fd, int nonagle)
 {
