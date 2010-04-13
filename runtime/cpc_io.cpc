@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/tcp.h>
+#include <assert.h>
 
 #include "cpc_barrier.h"
 #include "cpc_io.h"
@@ -63,10 +64,8 @@ cpc_timeout_get(int secs, int usecs)
     }
 
     cpc_spawn {
-        cpc_sleep(secs, usecs, timeout->cancel);
-        /* This is only necessary because cpc_sleep doesn't return a value. */
-        if(!(timeout->flags & _TIMEOUT_CANCELLED)) {
-            //assert(!timeout->flags);
+        if(cpc_sleep(secs, usecs, timeout->cancel) == CPC_TIMEOUT) {
+            assert(!timeout->flags);
             timeout->flags |= _TIMEOUT_EXPIRED;
             cpc_signal_all(timeout->expire);
         }
