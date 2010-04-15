@@ -1186,8 +1186,13 @@ cpc_main_loop(void)
 
 }
 
+cpc_sched *
+cpc_get_sched(cpc_continuation *c) {
+  return c->sched;
+}
+
 int
-cpc_gettimeofday(struct timeval *tv, cpc_continuation *c)
+cpc_gettimeofday(cpc_continuation *c, struct timeval *tv)
 {
   if(c->state == STATE_DETACHED) {
     assert(IS_DETACHED);
@@ -1199,7 +1204,7 @@ cpc_gettimeofday(struct timeval *tv, cpc_continuation *c)
 }
 
 time_t
-cpc_time(time_t *t, cpc_continuation *c)
+cpc_time(cpc_continuation *c, time_t *t)
 {
   if(c->state == STATE_DETACHED) {
     assert(IS_DETACHED);

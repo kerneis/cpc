@@ -715,7 +715,6 @@ class cpsConverter = fun file ->
   let cpc_cont_ptr =
     TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
   let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
-  let sched_field = find_field "cpc_continuation" "sched" file in
   let cpc_alloc = find_function "cpc_alloc" file in
   let cpc_dealloc =  find_function "cpc_dealloc" file in
   let cpc_push = find_function "cpc_continuation_push" file in
@@ -849,16 +848,12 @@ class cpsConverter = fun file ->
 
   method vinst = function
   (* Special case: some functions need to be given the current continuation *)
-  | Call(r, Lval (Var {vname = "cpc_get_sched" }, NoOffset), [], loc) ->
-      (match r with
-      | None -> ChangeTo []
-      | Some v -> ChangeTo [Set(v, Lval(Mem (Lval (Var current_continuation,
-      NoOffset)),
-        Field(sched_field, NoOffset)), loc)])
-  | Call(r, (Lval (Var {vname = "cpc_gettimeofday" }, NoOffset) as l), [tv], loc)
-  | Call(r, (Lval (Var {vname = "cpc_time" }, NoOffset) as l), [tv], loc) ->
-      ChangeTo [Call(r, l, [tv; Lval (Var current_continuation, NoOffset)], loc)] 
-  | _ -> DoChildren
+  | Call(r, e, args, loc) -> begin match typeOf e with
+      | TFun (_, _, _, attr) when hasAttribute "cpc_need_cont" attr ->
+         ChangeTo [Call(r, e, Lval (Var current_continuation, NoOffset) :: args, loc)] 
+      | _ -> SkipChildren
+        end
+  | _ -> SkipChildren
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
   | Instr _ when s.cps ->
@@ -886,6 +881,10 @@ class cpsConverter = fun file ->
   | _ -> DoChildren
 
   method vglob = function
+  | (GVarDecl ({vtype=TFun(ret, Some args,va,attr)} as v, l)) when
+      hasAttribute "cpc_need_cont" attr ->
+        v.vtype <- TFun(ret, Some (("c", cpc_cont_ptr, [])::args), va, attr);
+        DoChildren
   | (GVarDecl ({vtype=TFun(_,args,va,attr) ; vcps = true} as v, _) as g) ->
       (* do not deal with a declaration twice *)
       if List.mem_assq v struct_map then ChangeTo [] else begin
