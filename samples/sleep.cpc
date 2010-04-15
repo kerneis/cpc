@@ -1,17 +1,22 @@
 /* EXPECTED OUTPUT
 A1
 B1
+OK
 B2
 A2
 * END OF OUTPUT */
 
 #include <stdio.h>
+#include <time.h>
 
 int
 main()
 {
+    time_t t;
+
     cpc_spawn { printf("A1\n"); cpc_sleep(1); printf("A2\n"); }
     cpc_spawn { printf("B1\n"); cpc_sleep(0, 500000); printf("B2\n"); }
+    cpc_spawn { cpc_time(&t); printf("%s\n", t == cpc_time(NULL) ? "OK" : "BAD"); }
     cpc_main_loop();
     return 0;
 }
