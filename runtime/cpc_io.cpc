@@ -96,7 +96,7 @@ cpc_timeout_cancel(cpc_timeout *timeout)
     }
 }
 
-cps void
+void
 cpc_timeout_destroy(cpc_timeout *timeout)
 {
     if(!timeout->flags)
