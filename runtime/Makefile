@@ -10,7 +10,7 @@ PREFIX=/usr/local
 
 .SUFFIXES: .cpc .cpi
 
-.PHONY: all install clean
+.PHONY: all clean
 
 all: libcpc.a libcpcfull.a
 
@@ -29,9 +29,6 @@ libcpcfull.a: cpc_runtime.o threadpool/threadpool.o cpc_barrier.o cpc_io.o
 	rm -f $@
 	ar rc $@ $^
 	ranlib $@
-
-install: all
-	cp -f cpc_runtime.a libcpc.a $(PREFIX)/lib/
 
 clean:
 	rm -f *~
