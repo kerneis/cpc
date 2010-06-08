@@ -23,6 +23,7 @@ THE SOFTWARE.
 typedef struct cpc_timeout cpc_timeout;
 
 cps cpc_timeout *cpc_timeout_get(int secs, int usecs);
+cps void cpc_timeout_restart(cpc_timeout *timeout);
 cpc_condvar *cpc_timeout_condvar(cpc_timeout *timeout);
 int cpc_timeout_expired(cpc_timeout *timeout);
 void cpc_timeout_destroy(cpc_timeout *timeout);

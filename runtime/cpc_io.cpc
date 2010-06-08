@@ -39,6 +39,8 @@ THE SOFTWARE.
 struct cpc_timeout {
     cpc_condvar *cancel, *expire;
     int flags;
+    int secs;
+    int usecs;
 };
 
 cps cpc_timeout *
@@ -49,6 +51,9 @@ cpc_timeout_get(int secs, int usecs)
     timeout = calloc(1, sizeof(cpc_timeout));
     if(timeout == NULL)
         return NULL;
+
+    timeout->secs = secs;
+    timeout->usecs = usecs;
 
     timeout->cancel = cpc_condvar_get();
     if(timeout->cancel == NULL) {
@@ -63,16 +68,24 @@ cpc_timeout_get(int secs, int usecs)
         return NULL;
     }
 
-    cpc_spawn {
-        if(cpc_sleep(secs, usecs, timeout->cancel) == CPC_TIMEOUT) {
-            assert(!timeout->flags);
-            timeout->flags |= _TIMEOUT_EXPIRED;
-            cpc_signal_all(timeout->expire);
-        }
-    }
-
-    cpc_yield();                  /* Enter the sleep. */
+    cpc_timeout_restart(timeout);
     return timeout;
+}
+
+cps void
+cpc_timeout_restart(cpc_timeout *timeout)
+{
+    if(!timeout->flags) {
+        cpc_signal(timeout->cancel);
+        cpc_spawn {
+            if(cpc_sleep(timeout->secs, timeout->usecs, timeout->cancel) == CPC_TIMEOUT) {
+                assert(!timeout->flags);
+                timeout->flags |= _TIMEOUT_EXPIRED;
+                cpc_signal_all(timeout->expire);
+            }
+        }
+        cpc_yield();                  /* Enter the sleep. */
+    }
 }
 
 cpc_condvar *
