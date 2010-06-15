@@ -802,7 +802,8 @@ void
 cpc_signal_fd(int fd, int direction)
 {
     assert(!IS_DETACHED);
-    requeue_io_ready(fd, direction);
+    if(fd < size_fds)
+        requeue_io_ready(fd, direction);
 }
 
 /*** cpc_attach ****/
