@@ -1041,9 +1041,19 @@ cpc_main_loop(void)
 
     cpc_default_pool = cpc_threadpool_get(MAX_THREADS);
 
-    rc = pipe2(p, O_NONBLOCK);
+    rc = pipe(p);
     if(rc < 0) {
         perror("pipe");
+        exit(1);
+    }
+    for(i=0; i < 2; i++) {
+        rc = fcntl(p[i], F_GETFL, 0);
+        if(rc < 0) goto fail;
+        rc = fcntl(p[i], F_SETFL, rc | O_NONBLOCK);
+        if(rc < 0) goto fail;
+        continue;
+      fail:
+        perror("fcntl");
         exit(1);
     }
 
