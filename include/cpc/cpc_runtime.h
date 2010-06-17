@@ -128,7 +128,7 @@ extern int (__attribute__((cpc_need_cont))cpc_gettimeofday)(struct timeval *tv);
 extern time_t (__attribute__((cpc_need_cont))cpc_time)(time_t *t);
 
 #define cpc_is_detached() (cpc_get_sched() != cpc_default_sched)
-#define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_default_pool : cpc_get_sched())
-#define cpc_detached cpc_attached(cpc_is_detached() ? cpc_default_pool : cpc_get_sched())
+#define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_get_sched() : cpc_default_pool)
+#define cpc_detached cpc_attached(cpc_is_detached() ? cpc_get_sched() : cpc_default_pool)
 
 #endif
