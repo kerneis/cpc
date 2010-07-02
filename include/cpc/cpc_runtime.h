@@ -100,7 +100,7 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
 }
 
 extern void cpc_main_loop(void);
-extern void print_continuation(struct cpc_continuation *c, char *s);
+extern void cpc_print_continuation(struct cpc_continuation *c, char *s);
 
 extern cpc_condvar *cpc_condvar_get(void);
 extern cpc_condvar *cpc_condvar_retain(cpc_condvar*);
