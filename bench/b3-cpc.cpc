@@ -1,0 +1,50 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+volatile int arg;
+volatile int res;
+
+cps void
+thread_routine(void)
+{
+    while(1) {
+        while(arg < 0) {
+            cpc_yield();
+        }
+        res = arg;
+        cpc_yield();
+    }
+}
+
+int
+main()
+{
+    int rc;
+    int i, j, s;
+
+    arg = -1;
+    res = -1;
+    cpc_spawn thread_routine();
+
+    cpc_spawn {
+    for(i = 0; i < 10; i++) {
+        s = 0;
+        for(j = 0; j < 10000; j++) {
+            res = -1;
+            arg = j;
+            cpc_yield();
+            while(res < 0) {
+                cpc_yield();
+            }
+            s += res;
+            arg = -1;
+        }
+    }
+    printf("%d\n", s);
+    exit(0);
+    }
+
+    cpc_main_loop();
+
+    return 0;
+}

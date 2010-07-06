@@ -1,0 +1,27 @@
+#include <stdio.h>
+
+int ret;
+
+cps void f(int x, int *ret) { *ret = x; }
+
+cps void
+cpsmain()
+{
+    int i, j, s;
+    for(i = 0; i < 100000; i++) {
+        s = 0;
+        for(j = 0; j < 1000; j++) {
+            f(j, &ret);
+            s += ret;
+        }
+    }
+    printf("%d\n", s);
+}
+
+int
+main()
+{
+    cpc_spawn cpsmain();
+    cpc_main_loop();
+    return 0;
+}

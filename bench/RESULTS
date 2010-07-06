@@ -1,0 +1,63 @@
+cpuinfo:
+  Intel(R) Core(TM)2 Duo CPU     E8500  @ 3.16GHz
+  cpu MHz   : 2000.000 (downclocked using acpi)
+  cache size  : 6144 KB
+
+ST, Pth and NPTL compiled from debian packages:
+  - libst-dev: 1.9-3
+  - libpth-dev: 2.0.7-16
+  - libc6-dev: 2.11.2-2
+$ uname -a
+Linux rhodium 2.6.35-rc3 #1 SMP Mon Jun 28 10:22:54 CEST 2010 x86_64 GNU/Linux
+
+Optimisation level: -O3
+Optimisations for the CPC runtime: -O3, disable assert()
+
+b1: two loops, 1e9 additions, 1ms
+
+b2: two loops, 1e8 additions using function calls
+  - native, direct:              3.0 ns/call
+  - native, return via pointer:  3.5 ns/call
+  - cps, direct:                32   ns/call
+  - cps, return via pointer:    36   ns/call
+
+b3: 1e5 additions using a single busy-waiting worker thread
+  - (BROKEN) nptl, one core:    1.5  µs/switch
+  - (BROKEN) nptl, two cores:   0.45 µs/switch (varies a lot)
+  - cpc, one and two cores:     0.06 µs/switch
+  - st, one and two cores:      0.56 µs/switch
+  - pth, one and two cores:     6.8  µs/switch
+
+  Notes: (BROKEN) means there is a race-condition when using preemptive
+  threads, yielding wrong results sometimes.
+  "per switch" is a round-trip time (so, two switches actually).
+
+b4: 1e5 additions using a new worker thread for each addition
+  - nptl, one core:       ~ 6000    µs/spawn (educated guess)
+  - nptl, two cores:          13    µs/spawn (varies a lot)
+  - cpc, one and two cores:    0.07 µs/spawn
+  - st, one and two cores:     0.67 µs/spawn
+  - pth, one and two cores:   11    µs/spawn
+
+  - nptl+join, one core:  ~ 6000    µs/spawn (educated guess)
+  - nptl+join, two cores:     17    µs/spawn (varies a lot)
+  - cpc+join, one/two cores:   0.39 µs/spawn
+  - st+join, one/two cores:    0.83 µs/spawn
+  - pth+join, one/two cores:  15    µs/spawn
+
+  Notes: on one core, spawning a thread and then calling sched_yield()
+  does NOT switch to the new thread, quite surprisingly. The busy-wait
+  then causes (?) each thread to take ages to launch... The provided
+  result is an educated guess based on 1e3 additions.
+  "per spawn" means spawning, then switching back and forth, and joining
+  (in the second series).
+
+b5: 1e6 additions using a single synchronised worker thread
+  - nptl, one core:            28   µs/condvar
+  - nptl, two cores:           52   µs/condvar
+  - cpc, one and two cores:     1.0 µs/condvar
+  - st, one and two cores:      0.8 µs/condvar
+  - pth, one and two cores:    84   µs/condvar
+
+  Note: "per condvar" is a round-trip time (so, two wait/signal
+  actually).
