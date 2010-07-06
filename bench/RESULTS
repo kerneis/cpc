@@ -61,3 +61,16 @@ b5: 1e6 additions using a single synchronised worker thread
 
   Note: "per condvar" is a round-trip time (so, two wait/signal
   actually).
+
+b6: maximum number of threads on a swapless machine
+  - pth:                   ??? (so slow...)
+  - nptl:               32,330
+  - st:                893,500
+  - st (4kB stack):    952,000
+  - cpc:            46,740,000
+
+$ free -m
+             total       used       free     shared    buffers     cached
+Mem:          3964        239       3725          0         15         81
+-/+ buffers/cache:        143       3821
+Swap:            0          0          0
