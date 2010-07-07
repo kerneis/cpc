@@ -63,14 +63,17 @@ b5: 1e6 additions using a single synchronised worker thread
   actually).
 
 b6: maximum number of threads on a swapless machine
+  - nptl:               32,319
   - pth:                   ??? (so slow...)
-  - nptl:               32,330
-  - st:                893,500
-  - st (4kB stack):    952,000
-  - cpc:            46,740,000
+  - st:                934,600
+  - st (4kB stack):    961,400
+  - cpc:            50,190,000
+
+  Notes: pth, probably 700,000 threads.
+  Threads created as non-joinable.
 
 $ free -m
              total       used       free     shared    buffers     cached
-Mem:          3964        239       3725          0         15         81
--/+ buffers/cache:        143       3821
+Mem:          3964        116       3847          0          1         17
+-/+ buffers/cache:         98       3865
 Swap:            0          0          0

@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <st.h>
 
+#ifndef STACK
+#define STACK 0
+#endif
+
 int n;
 
 static int
@@ -20,7 +24,7 @@ thread_routine(void *dummy)
     int k;
     while(1) {
         st_sleep(0);
-        thread = st_thread_create(thread_routine, NULL, 1, 4096);
+        thread = st_thread_create(thread_routine, NULL, 0, STACK);
         if(thread == NULL) {
             printf("%d\n", n);
             abort();
@@ -28,6 +32,7 @@ thread_routine(void *dummy)
         k = inc_n();
         if(k % 100 == 0) {
             printf("%d\n", k);
+            fflush(stdout); /* setbuf(stdout, NULL); causes a segfault! */
         }
     }
 }
@@ -40,7 +45,7 @@ main()
 
     st_init();
     n = 0;
-    thread = st_thread_create(thread_routine, NULL, 1, 4096);
+    thread = st_thread_create(thread_routine, NULL, 0, STACK);
     inc_n();
 
     while(1)

@@ -25,6 +25,8 @@ main()
     pthread_t thread;
     int rc;
 
+    setbuf(stdout, NULL);
+
     n = 0;
     cpc_spawn thread_routine();
     cpc_main_loop();

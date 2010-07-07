@@ -4,6 +4,7 @@
 #include <sched.h>
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_attr_t attr;
 volatile int n;
 
 static int
@@ -23,11 +24,11 @@ thread_routine(void *dummy)
     pthread_t thread;
     int rc, k;
     while(1) {
-        rc = pthread_create(&thread, NULL, thread_routine, NULL);
+        rc = pthread_create(&thread, &attr, thread_routine, NULL);
         k = inc_n();
         if(rc != 0) {
             printf("%d\n", k);
-            while(1) sched_yield();
+            abort();
         }
         if(k % 10000 == 0) {
             printf("%d\n", k);
@@ -39,11 +40,19 @@ int
 main()
 {
     pthread_t thread;
+    pthread_attr_init(&attr);
+#ifdef JOIN
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+#else
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+#endif
     int rc;
     int n;
 
+    setbuf(stdout, NULL);
+
     n = 0;
-    rc = pthread_create(&thread, NULL, thread_routine, NULL);
+    rc = pthread_create(&thread, &attr, thread_routine, NULL);
     inc_n();
     if(rc != 0) {
         abort();

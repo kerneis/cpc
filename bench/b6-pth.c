@@ -3,6 +3,7 @@
 #include <pth.h>
 
 int n;
+pth_attr_t attr;
 
 static int
 inc_n()
@@ -20,7 +21,7 @@ thread_routine(void *dummy)
     int k;
     while(1) {
         pth_yield(NULL);
-        thread = pth_spawn(PTH_ATTR_DEFAULT, thread_routine, NULL);
+        thread = pth_spawn(attr, thread_routine, NULL);
         if(thread == NULL) {
             printf("%d\n", n);
             abort();
@@ -37,10 +38,19 @@ main()
 {
     int n;
     pth_t thread;
+    attr = pth_attr_new();
+    pth_attr_init(attr);
+#ifdef JOIN
+    pth_attr_set(attr, PTH_ATTR_JOINABLE, 1);
+#else
+    pth_attr_set(attr, PTH_ATTR_JOINABLE, 0);
+#endif
+
+    setbuf(stdout, NULL);
 
     pth_init();
     n = 0;
-    thread = pth_spawn(PTH_ATTR_DEFAULT, thread_routine, NULL);
+    thread = pth_spawn(attr, thread_routine, NULL);
     inc_n();
 
     while(1)
