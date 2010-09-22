@@ -19,3 +19,5 @@
 * OPT: Return probably does not have to be split if there is no
   assignment before it
   => is it worth the trouble?
+* cpc_yield en mode détaché : se réattacher au threadpool s'il est
+  saturé, ne rien faire sinon.
