@@ -102,6 +102,105 @@ class initLabelTbl = object(self)
       DoChildren
 end
 
+module VS = Set.Make (struct
+  type t = varinfo
+  let compare v v' = compare v.vid v'.vid
+end)
+
+let ampSet = ref VS.empty
+let add_amp v = ampSet := VS.add v !ampSet
+let safe_functions = [
+  "writev";
+  "curl_easy_getinfo";
+  "snprintf";
+  "memcmp";
+  "getpeername";
+  "setsockopt";
+  "memset";
+  "bind";
+  "accept";
+]
+
+let is_safe f = match f.vtype with
+  | TFun (_, _, _, attr) ->
+      hasAttribute "cpc_no_retain" attr ||
+      List.mem f.vname safe_functions
+  | _ -> assert false
+
+class initAmpSet = object(self)
+    inherit mynopCilVisitor
+
+    val mutable record = false
+    val mutable call_name = ""
+
+    method vinst :  instr -> instr list visitAction = function
+    | Call(_, Lval(Var f, NoOffset), args, _) when not f.vcps && is_safe f ->
+        assert(not record && call_name = "");
+        call_name <- f.vname;
+        ignore(List.map (visitCilExpr (self:>cilVisitor)) args);
+        call_name <- "";
+        SkipChildren
+    | Call(_, Lval(Var f, NoOffset), args, _) when not f.vcps ->
+        assert(not record && call_name = "");
+        record <- true;
+        call_name <- f.vname;
+        ignore(List.map (visitCilExpr (self:>cilVisitor)) args);
+        call_name <- "";
+        record <- false;
+        SkipChildren
+    | Call(_, _, args, _) ->
+        assert(not record && call_name = "");
+        record <- true;
+        ignore(List.map (visitCilExpr (self:>cilVisitor)) args);
+        record <- false;
+        SkipChildren
+    | Set(_, e, _) ->
+        assert(not record);
+        record <- true;
+        ignore(visitCilExpr (self:>cilVisitor) e);
+        record <- false;
+        SkipChildren
+    | Asm _ as i ->
+        assert(not record);
+        record <- true;
+        ChangeDoChildrenPost([i], fun i ->
+          record <- false; i)
+
+    method vexpr = function
+    | StartOf(Var v, _) ->
+          trace(dprintf "[boxing] boxing array %s unconditionally (%t).\n"
+          v.vname d_thisloc);
+          add_amp v;
+          DoChildren
+    | AddrOf(Var v, _) when record && not v.vglob ->
+        if(not(call_name = "")) then
+          ignore(warn "boxing %s, consider making %s a safe function."
+          v.vname call_name);
+        add_amp v;
+        DoChildren
+    | AddrOf(Var v, _) ->
+        if v.vglob then
+          trace(dprintf "[boxing] skipped global variable %s (%t).\n"
+          v.vname d_thisloc)
+        else if(not(call_name = "")) then
+          trace(dprintf "[boxing] skipped %s, because %s is a safe function. (%t)\n"
+          v.vname call_name d_thisloc)
+        else
+          trace(dprintf "[boxing] skipped %s because it cannot be retained (%t).\n"
+          v.vname d_thisloc);
+        DoChildren
+    | _ -> DoChildren
+    
+    method vfunc fd =
+      (* No CpcFun thanks to initial lambda-lifting *)
+      if fd.svar.vcps then begin
+        trace(dprintf "[boxing] %s %d\n" fd.svar.vname (List.length fd.sformals + List.length
+        fd.slocals));
+        DoChildren
+      end
+      else SkipChildren
+end
+
 
 let rec xform_switch_stmt s = begin
   if not(!break_dest == dummyStmt) then
@@ -232,7 +331,7 @@ let sizeOf t = SizeOf(t)
 
 let addr_of v =
   v.vaddrof <- true;
-  mkAddrOf (Var v, NoOffset)
+  mkAddrOrStartOf (Var v, NoOffset)
 
 let cut_last l = let l' = List.rev l in
   List.rev (List.tl l'), List.hd l'
@@ -1019,7 +1118,7 @@ let free_vars fd =
   ignore(visitCilFunction collector fd);
   S.diff !vars bounded
 
-let must_be_boxed v = v.vaddrof && not v.vglob
+let must_be_boxed v = VS.mem v !ampSet && not v.vglob
 
 class avoidAmpersand f =
     let malloc = Lval(Var (findOrCreateFunc f "malloc" (TFun(voidPtrType, Some
@@ -1103,7 +1202,7 @@ class avoidAmpersand f =
         fv) in
       if oldnew <> [] then begin
         trace (dprintf "avoidAmpersand: %d\n" (List.length oldnew));
-        List.iter (fun (v, v') -> trace (dprintf "- %s(%d) -> %s (%d)\n"
+        List.iter (fun (v, v') -> trace (dprintf "[amp] %s(%d) -> %s (%d)\n"
           v.vname v.vid v'.vname v'.vid)) oldnew;
         fd.sbody <- {
           fd.sbody with bstmts =
@@ -1161,10 +1260,10 @@ let contains_nasty args =
     method vvrbl v =
       (* global variables are nasty *)
       if v.vglob then raise ContainsNasty;
-      (* if a local variable has it's address taken,
+      (* if a local variable has its address retained,
          avoidAmpersand has boxed it, and vlval has raised an exception
          before we get here, detecting the box. *)
-      assert(not v.vaddrof);
+      assert(not (must_be_boxed v));
       DoChildren
 
     method vlval = function
@@ -1190,6 +1289,7 @@ class removeNastyExpressions = object(self)
   | Call(ret, Lval(Var f, NoOffset), args, loc) when f.vcps ->
       (try contains_nasty args; SkipChildren
       with ContainsNasty ->
+        trace (dprintf "nasty variables in call to %s\n" f.vname);
         let (bind_list, args') = rebind ef f.vtype args in
         ChangeTo(bind_list @[Call(ret, Lval(Var f, NoOffset),args',loc)]))
   | _ -> SkipChildren
@@ -1492,7 +1592,7 @@ let remove_free_vars enclosing_fun loc =
       then iter tl
       else begin
         trace (dprintf "free variables in %s:\n" fd.svar.vname);
-        S.iter (fun v -> trace (dprintf "- %s(%d)\n" v.vname v.vid)) fv;
+        S.iter (fun v -> trace (dprintf "[fv] %s(%d)\n" v.vname v.vid)) fv;
         introduce_new_vars fd (S.elements fv);
         iter local_funs
       end
@@ -1843,6 +1943,8 @@ let rec cps_marking f =
 let stages = [
   ("Initialize label table\n", fun file ->
   visitCilFileSameGlobals (new initLabelTbl) file);
+  ("Initialize ampersand table\n", fun file ->
+  visitCilFileSameGlobals (new initAmpSet) file);
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
   ("Add defaults arguments\n", fun file ->
