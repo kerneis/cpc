@@ -5,8 +5,9 @@ cps int f(int x) { return x; }
 cps void
 cpsmain()
 {
-    int i, j, s;
-    for(i = 0; i < 100000; i++) {
+    int i, j;
+    volatile int s;
+    for(i = 0; i < 10000; i++) {
         s = 0;
         for(j = 0; j < 1000; j++)
             s += f(j);

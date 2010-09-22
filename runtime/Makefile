@@ -1,6 +1,6 @@
 CPC='../bin/cpc.asm.exe'
 
-CDEBUGFLAGS=-Wall -g
+CDEBUGFLAGS=-Wall -g -O2
 CLIBS=-I ../include/cpc
 CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
 

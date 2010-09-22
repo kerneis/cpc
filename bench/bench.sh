@@ -8,19 +8,27 @@ run_bench() {
   done
 }
 
+OPT_LEVEL=-O0
+
 export TIMEFORMAT="%3R"
 ulimit -t 10
 mkdir -p timing
-make all
+make clean all EXTRA_DEFINES=$OPT_LEVEL
 sudo invoke-rc.d cpufreqd stop
 sudo cpufreq-set -c 0 -g userspace
 sudo cpufreq-set -c 1 -g userspace
 sudo cpufreq-set -c 0 -f 2.0GHz
 sudo cpufreq-set -c 1 -f 2.0GHz
 
+# Recompile latest cpc runtime with asserts disabled
+cd ../runtime
+make clean all EXTRA_DEFINES="-DNDEBUG $OPT_LEVEL"
+cd ../bench
+
 PROC=0
 MEAN_FILE="timing/b2.mean"
-for PROG in b2 b2-cpc b2-manual-return b2-manual-return-cpc; do
+rm MEAN_FILE
+for PROG in b2 b2-indirect b2-cpc b2-manual-return b2-manual-return-cpc; do
   TIME_FILE="timing/$PROG.time"
   run_bench 10
   echo -n "$PROG " >> $MEAN_FILE

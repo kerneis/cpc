@@ -1,18 +1,21 @@
 CPC='../bin/cpc.asm.exe'
 
-CDEBUGFLAGS=-Wall -g -O3
+CDEBUGFLAGS=-Wall -g -O2
+
+
 CLIBS=-I ../include
 CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
 
 .PHONY: all clean
 
-BENCH=b1 b2  b2-manual-return b2-cpc b2-manual-return-cpc b3-nptl  b3-cpc b3-pth  b3-st \
+BENCH=b1 b2  b2-indirect b2-manual-return b2-cpc b2-manual-return-cpc b3-nptl  b3-cpc b3-pth  b3-st \
 			b4-nptl  b4-cpc  b4-pth  b4-st \
 			b5-nptl b5-cpc b5-pth b5-st b6-nptl  b6-cpc  b6-pth  b6-st-4kb b6-st
 
 all: $(BENCH)
 
 b2: b2.o b2b.o
+b2-indirect: b2-indirect.o b2b.o
 b2-manual-return: b2-manual-return.o b2b-manual-return.o
 
 b6-st-4kb:

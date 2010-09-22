@@ -1,13 +1,14 @@
 #include <stdio.h>
 
-int ret;
+volatile int ret;
 
-extern int f(int, int*);
+extern void f(int, volatile int*);
 
 int
 main()
 {
-    int i, j, s;
+    int i, j;
+    volatile int s;
     for(i = 0; i < 100000; i++) {
         s = 0;
         for(j = 0; j < 1000; j++) {
