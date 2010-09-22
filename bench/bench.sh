@@ -19,6 +19,9 @@ sudo cpufreq-set -c 0 -g userspace
 sudo cpufreq-set -c 1 -g userspace
 sudo cpufreq-set -c 0 -f 2.0GHz
 sudo cpufreq-set -c 1 -f 2.0GHz
+# "Strong" sched_yield() semantics
+# http://lkml.org/lkml/2007/9/19/409
+echo 1 | sudo tee  /proc/sys/kernel/sched_compat_yield
 
 # Recompile latest cpc runtime with asserts disabled
 cd ../runtime
