@@ -21,3 +21,6 @@
   => is it worth the trouble?
 * cpc_yield en mode détaché : se réattacher au threadpool s'il est
   saturé, ne rien faire sinon.
+* optimiser les boucles : 
+  f(i,j,k) { i++; g(k,i,j);} => g(k, i++, j);
+* variable locale volatile : qu'est-ce que ça veut dire ? faut-il boxer ?
