@@ -8,7 +8,7 @@ run_bench() {
   done
 }
 
-OPT_LEVEL=-O0
+OPT_LEVEL=-O2
 
 export TIMEFORMAT="%3R"
 ulimit -t 10
