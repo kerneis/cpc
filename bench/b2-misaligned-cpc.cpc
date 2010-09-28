@@ -1,0 +1,24 @@
+#include <stdio.h>
+
+cps int f(int x) { return x; }
+
+cps void
+cpsmain()
+{
+    unsigned short i; unsigned char j;
+    int s;
+    for(i = 0; i < 40000; i++) {
+        s = 0;
+        for(j = 0; j < 250; j++)
+            s += f(j);
+    }
+    printf("%d\n", s);
+}
+
+int
+main()
+{
+    cpc_spawn cpsmain();
+    cpc_main_loop();
+    return 0;
+}

@@ -30,8 +30,9 @@ cd ../bench
 
 PROC=0
 MEAN_FILE="timing/b2.mean"
-rm MEAN_FILE
-for PROG in b2 b2-indirect b2-cpc b2-manual-return b2-manual-return-cpc; do
+rm $MEAN_FILE
+for PROG in b2 b2-indirect b2-cpc b2-manual-return b2-manual-return-cpc\
+  b2-misaligned-cpc b2-aligned-cpc; do
   TIME_FILE="timing/$PROG.time"
   run_bench 10
   echo -n "$PROG " >> $MEAN_FILE
