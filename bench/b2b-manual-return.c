@@ -1,1 +1,2 @@
-void f(int x, int *ret) { *ret = x; }
+extern int ret;
+void f(int x) { ret = x; }
