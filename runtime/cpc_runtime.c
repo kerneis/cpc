@@ -1008,6 +1008,10 @@ cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
 
 /*** Executing continuations with trampolines ***/
 
+#if DEBUG
+long long int invoke_count = 0;
+#endif
+
 static void
 cpc_invoke_continuation(struct cpc_continuation *c)
 {
@@ -1022,6 +1026,9 @@ cpc_invoke_continuation(struct cpc_continuation *c)
       c->length -= sizeof(cpc_function*);
       f = *(cpc_function**)(c->c + c->length);
       c = (*f)(c);
+#if DEBUG
+      invoke_count++;
+#endif
     }
 }
 
@@ -1191,8 +1198,9 @@ cpc_main_loop(void)
 #ifdef DEBUG
     gettimeofday(&cpc_now, NULL);
     timeval_minus(&when, &cpc_now, &begin);
-    fprintf(stderr, "Time spent in cpc_main_loop: %ld.%06ld\n",
-        when.tv_sec, when.tv_usec);
+    fprintf(stderr, "Time spent in cpc_main_loop: %ld.%06ld\n"
+        "Continuation invocations: %lld\n",
+        when.tv_sec, when.tv_usec, invoke_count);
 #endif
 
 }
