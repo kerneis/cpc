@@ -31,8 +31,6 @@ typedef struct cpc_sched cpc_sched;
 extern cpc_sched *cpc_default_pool;
 #define cpc_default_sched NULL
 
-extern void *memcpy (void * __restrict dest, const void * __restrict src, size_t n);
-
 typedef struct cpc_continuation {
     struct cpc_continuation *next;
     struct cpc_condvar *condvar;
@@ -95,7 +93,7 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
   void *cpc_arg;
   cpc_arg =
     ((cont)->c + (cont)->length - sizeof(cpc_function*) - size);
-  memcpy(cpc_arg, value, size);
+  __builtin_memcpy(cpc_arg, value, size);
   return;
 }
 

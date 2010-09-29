@@ -831,7 +831,7 @@ class cpsConverter = fun file ->
         mkCast (addr_of temp) voidPtrType],
         locUnknown)]
     else
-      let memcpy = find_function "memcpy" file in
+      let memcpy = find_function "__builtin_memcpy" file in
       let cpc_arg = makeTempVar f ~name:"cpc_arg" voidPtrType in [
       (* cpc_arg = cont->c + cont->length - sizeof(cpc_function* ) - sizeof(typ) *)
         Set((Var cpc_arg, NoOffset),
