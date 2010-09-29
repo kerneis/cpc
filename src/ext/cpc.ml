@@ -167,15 +167,11 @@ class initAmpSet = object(self)
           record <- false; i)
 
     method vexpr = function
-    | StartOf(Var v, _) ->
-          trace(dprintf "[boxing] boxing array %s unconditionally (%t).\n"
-          v.vname d_thisloc);
-          add_amp v;
-          DoChildren
     | AddrOf(Var v, _) when record && not v.vglob ->
         if(not(call_name = "")) then
           ignore(warn "boxing %s, consider making %s a safe function."
           v.vname call_name);
+        trace (dprintf "[boxing] registering %s\n" v.vname);
         add_amp v;
         DoChildren
     | AddrOf(Var v, _) ->
@@ -196,9 +192,15 @@ class initAmpSet = object(self)
       if fd.svar.vcps then begin
         trace(dprintf "[boxing] %s %d\n" fd.svar.vname (List.length fd.sformals + List.length
         fd.slocals));
+        List.iter (fun v -> if isArrayType v.vtype then begin 
+          trace (dprintf "[boxing] boxing array %s unconditionnally\n" v.vname);
+          add_amp v
+        end) fd.slocals;
+        if(List.filter (fun v -> isArrayType v.vtype) fd.sformals != []) then
+          E.s (E.bug "Array found in function parameters, I'm lost!\n");
         DoChildren
-      end
-      else SkipChildren
+      end else
+        SkipChildren
 end
 
 
@@ -1941,10 +1943,6 @@ let rec cps_marking f =
       end
 
 let stages = [
-  ("Initialize label table\n", fun file ->
-  visitCilFileSameGlobals (new initLabelTbl) file);
-  ("Initialize ampersand table\n", fun file ->
-  visitCilFileSameGlobals (new initAmpSet) file);
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
   ("Add defaults arguments\n", fun file ->
@@ -1952,6 +1950,13 @@ let stages = [
   ("Lambda-lifting\n", fun file ->
   visitCilFile (new lambdaLifter) file;
   visitCilFileSameGlobals (new uniqueVarinfo) file);
+  ("Initialize label table\n", fun file ->
+  visitCilFileSameGlobals (new initLabelTbl) file);
+  ("Initialize ampersand table\n", fun file ->
+  visitCilFileSameGlobals (new initAmpSet) file);
+  (* WARNING: do not call uniqueVarinfo between building and using
+   * the ampersand table, since it will deprecate any recorded varinfo!
+   *)
   ("Avoid ampersand\n", fun file ->
   visitCilFileSameGlobals (new avoidAmpersand file) file);
   ("Remove nasty expressions\n", fun file ->
