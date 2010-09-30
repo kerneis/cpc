@@ -4283,6 +4283,8 @@ class defaultCilPrinterClass : cilPrinter = object (self)
     | "arraylen", [a] -> 
         (* text "/*[" ++ self#pAttrParam () a ++ text "]*/" *) nil, false
 
+    (* remove cpc attributes *)
+    | s, _ when Str.first_chars s 4 = "cpc_" -> text "", false
 
     | _ -> (* This is the dafault case *)
         (* Add underscores to the name *)
