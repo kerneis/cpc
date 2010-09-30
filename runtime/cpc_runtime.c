@@ -538,8 +538,8 @@ cpc_condvar_count(cpc_condvar *cond)
 
 /* cps int cpc_wait(cpc_condvar *cond) */
 struct cpc_wait_arglist {
-   cpc_condvar *cond ;
-} __attribute__((__packed__)) ;
+   cpc_condvar *cond __attribute__((__aligned__));
+} ;
 cpc_continuation *
 cpc_wait(struct cpc_continuation *cont)
 {
@@ -597,8 +597,8 @@ cpc_signal_all(cpc_condvar *cond)
 struct cpc_sleep_arglist {
    int sec ;
    int usec ;
-   cpc_condvar *cond ;
-} __attribute__((__packed__)) ;
+   cpc_condvar *cond  __attribute__((__aligned__));
+} ;
 cpc_continuation *
 cpc_sleep(struct cpc_continuation *cont)
 {
@@ -735,8 +735,8 @@ recompute_fdsets(int fd)
 struct cpc_io_wait_arglist {
    int fd ;
    int direction ;
-   cpc_condvar *cond ;
-} __attribute__((__packed__)) ;
+   cpc_condvar *cond __attribute__((__aligned__));
+} ;
 cpc_continuation *
 cpc_io_wait(struct cpc_continuation *cont)
 {
@@ -813,8 +813,8 @@ cpc_continuation *cpc_prim_detach(cpc_sched*, cpc_continuation*);
 
 /* cps cpc_sched *cpc_attach(cpc_sched *pool) */
 struct cpc_attach_arglist {
-   cpc_sched *sched;
-} __attribute__((__packed__)) ;
+   cpc_sched *sched  __attribute__((__aligned__)) ;
+} ;
 cpc_continuation *
 cpc_attach(struct cpc_continuation *cont)
 {

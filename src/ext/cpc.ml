@@ -811,6 +811,8 @@ let extract var name = match !var with
   | Some x -> x
   | None -> E.s (E.bug "couldn't find %s in the runtime\n" name)
 
+let biggest_alignment = !Machdep.theMachine.Machdep.alignof_aligned
+
 class cpsConverter = fun file ->
   (* Extraction of types, struct, and functions from runtime *)
   let cpc_cont_ptr =
@@ -835,12 +837,13 @@ class cpsConverter = fun file ->
     else
       let memcpy = find_function "__builtin_memcpy" file in
       let cpc_arg = makeTempVar f ~name:"cpc_arg" voidPtrType in [
-      (* cpc_arg = cont->c + cont->length - sizeof(cpc_function* ) - sizeof(typ) *)
+      (* cpc_arg = cont->c + cont->length - sizeof(cpc_function* ) - 
+                     (sizeof(typ) / __BIGGEST_ALIGNMENT__ + 1) * __BIGGEST_ALIGNMENT__ *)
         Set((Var cpc_arg, NoOffset),
         Formatcil.cExp
-          "cont->c + cont->length - %e:size - %e:anothersize"
-          [("cont", Fv cont); ("size", Fe (sizeOf cpc_fun_ptr));
-           ("anothersize", Fe (sizeOf typ))],
+        "cont->c + cont->length - %e:sizefp - (%e:sizetyp / %d:biggestalign + 1) * %d:biggestalign"
+          [("cont", Fv cont); ("sizefp", Fe (sizeOf cpc_fun_ptr));
+          ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)],
         locUnknown);
       (* memcpy(cpc_arg, &temp, sizeof(typ)) *)
         Call(None, Lval(Var memcpy, NoOffset), [
@@ -991,11 +994,16 @@ class cpsConverter = fun file ->
       if List.mem_assq v struct_map then ChangeTo [] else begin
       let args = argsToList args in
       (* XXX copy the attributes too? Should be empty anyway *)
-      let fields = Util.list_map (fun (name,typ, attr) ->
-        name, typ, None, attr, locUnknown ) args in
+      let rec build_struct = function
+        | [] -> []
+        | [name, typ, attr] -> (* alignment trick *)
+            [name, typ, None, [Attr("aligned",[])], locUnknown]
+        | (name, typ, attr) :: q ->
+            (name, typ, None, [], locUnknown) :: build_struct q in
+      let fields =  build_struct args in
       let arglist_struct =
         mkCompInfo true (v.vname^"_arglist")
-          (fun _ -> fields) [Attr("packed",[])] in
+          (fun _ -> fields) [] in
       let comptag = GCompTag (arglist_struct, locUnknown) in
       let new_arglist_fun = emptyFunction (v.vname^"_new_arglist") in
       let cont_name = Printf.sprintf "cpc__continuation_%d" (newVID()) in
