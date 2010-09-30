@@ -51,7 +51,7 @@ let is_label = function Label _ -> true | _ -> false
 exception FoundFun of fundec
 exception FoundVar of varinfo
 
-let external_patch = ref false
+let external_patch = ref true
 
 (* Avoid stack-overflow on recursive structures *)
 let (=) x y = (compare x y) = 0
@@ -2006,16 +2006,23 @@ let rec doit (f: file) =
   with Exit -> E.log "Exit\n"
 
 let feature : featureDescr =
+  let is_default = function
+    | true -> " (default)"
+    | false -> "" in
   { fd_name = "cpc";
     fd_enabled = ref true;
     fd_description = "cpc translation to C";
     fd_extraopt =
-      [("--stage",Arg.Int set_stage,"<n> how far you want to go");
+      [
+       ("--stage",Arg.Int set_stage,"<n> how far you want to go");
        ("--pause",Arg.Set pause," step by step execution");
        ("--dumpcfg",Arg.Set dumpcfg," dump the cfg of cps functions in cfg/");
        ("--goto", Arg.Int set_goto, "<n> how to convert gotos (0-2)");
        ("--external-patch",Arg.Set external_patch," call \
-       cpc_continuation_patch from the runtime library")];
+       cpc_continuation_patch from the runtime library" ^ is_default(!external_patch));
+       ("--noexternal-patch",Arg.Clear external_patch," generate inline \
+       patching" ^ is_default(not !external_patch));
+      ];
     fd_doit = doit;
     fd_post_check = true;
   }
