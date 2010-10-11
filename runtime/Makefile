@@ -22,13 +22,13 @@ threadpool/threadpool.o: threadpool/threadpool.c
 
 libcpc.a: cpc_runtime.o threadpool/threadpool.o
 	rm -f $@
-	ar rc $@ $^
-	ranlib $@
+	$(AR) rc $@ $^
+	$(RANLIB) $@
 
 libcpcfull.a: cpc_runtime.o threadpool/threadpool.o cpc_barrier.o cpc_io.o
 	rm -f $@
-	ar rc $@ $^
-	ranlib $@
+	$(AR) rc $@ $^
+	$(RANLIB) $@
 
 clean:
 	rm -f *~
