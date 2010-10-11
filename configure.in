@@ -54,6 +54,7 @@ AC_PROG_INSTALL
 # the autoconf distribution) in our source tree!)
 AC_CANONICAL_SYSTEM
 
+AC_PROG_RANLIB
 
 # ---------------- generic functions -----------------
 # debugging diagnostic; set to 'echo' to debug or 'true' for production
@@ -562,6 +563,7 @@ CIL_CONFIG_FILES(doc/header.html)
 CIL_CONFIG_FILES(ocamlutil/perfcount.c)
 CIL_CONFIG_FILES(test/llvm/Makefile)
 CIL_CONFIG_FILES(src/machdep-ml.c)
+CIL_CONFIG_FILES(runtime/Makefile)
 
 AC_OUTPUT()
 

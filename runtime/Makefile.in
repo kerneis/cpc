@@ -4,6 +4,8 @@ CDEBUGFLAGS=-Wall -g -O2
 CLIBS=-I ../include/cpc
 CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
 
+RANLIB=@RANLIB@
+
 LDLIBS=-pthread
 
 PREFIX=/usr/local
