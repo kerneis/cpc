@@ -23,4 +23,9 @@
   saturé, ne rien faire sinon.
 * optimiser les boucles : 
   f(i,j,k) { i++; g(k,i,j);} => g(k, i++, j);
+  => pas d'exemple dans Hekate
 * variable locale volatile : qu'est-ce que ça veut dire ? faut-il boxer ?
+  idem pour const, restrict, etc. En général, on fait quoi des attributs ?
+* aligner sur 8 bits plutôt que 16 (mais que faire des fonctions qui
+  contiennent des long double ?) ou intégrer le pointeur de fonction
+  à la fin de la struct (dans new_arglist, qu'on renommerait en push).
