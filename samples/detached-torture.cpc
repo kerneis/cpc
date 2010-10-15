@@ -3,15 +3,22 @@
 * END OF OUTPUT */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "cpc/cpc_lib.h"
-#define N 1000000
-#define N_THREADS 10
+
+int N=1000000;
+int N_THREADS=10;
 #define N_POOLS 10
 
 int n = 0;
 
-int main() {
+int
+main(int argc, char **argv)
+{
     int i;
+
+    if(argc > 1) N = atoi(argv[1]);
+    if(argc > 2) N_THREADS = atoi(argv[2]);
 
     cpc_sched *pools[N_POOLS];
     cpc_barrier *barrier = cpc_barrier_get(N + 1);

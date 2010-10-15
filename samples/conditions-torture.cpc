@@ -2,11 +2,12 @@
 1000000
 * END OF OUTPUT */
 
-#define N 10000
-#define N_ITER 100
+int N = 10000;
+int N_ITER=100;
 
 #include <stdio.h>
 #include "cpc/cpc_lib.h"
+#include <stdlib.h>
 
 int count = 0;
 
@@ -29,9 +30,12 @@ wait_and_die() {
 }
 
 int
-main()
+main(int argc, char **argv)
 {
     int i;
+
+    if(argc > 1) N = atoi(argv[1]);
+    if(argc > 2) N_ITER = atoi(argv[2]);
 
     cpc_spawn for(i = 0; i < N_ITER; i++) {
         wait_and_die();
