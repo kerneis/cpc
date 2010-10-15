@@ -135,13 +135,13 @@ ocamlbuild:
 
 cpc: $(BUILDER)
 	cp $(OBJDIR)/cilly$(EXE) bin/cpc$(EXE)
-	cd runtime; $(MAKE) all
+	cd runtime; $(MAKE) clean all
 
 samples: cpc
-	cd samples; $(MAKE) all
+	cd samples; $(MAKE) clean all
 
-testcpc: samples
-	cd samples; $(MAKE) test
+testcpc:
+	cd samples; $(MAKE) clean all test
 
 cilly: $(OBJDIR)/cilly$(EXE)
 $(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO)) \
