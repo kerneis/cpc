@@ -26,6 +26,16 @@ THE SOFTWARE.
 #include <stddef.h> // size_t
 #include <time.h>
 
+#ifdef __BIGGEST_ALIGNMENT__
+#define MAX_ALIGN __BIGGEST_ALIGNMENT__
+#else
+#define MAX_ALIGN __alignof(struct {char c; } __attribute__((__aligned__)))
+#endif
+
+// Size left for the function pointer in continuation.
+// sizeof(cpc_function*) is enough, but we want to be aligned
+#define PTR_SIZE MAX_ALIGN
+
 typedef struct cpc_condvar cpc_condvar;
 typedef struct cpc_sched cpc_sched;
 extern cpc_sched *cpc_default_pool;
@@ -79,11 +89,12 @@ cpc_dealloc(struct cpc_continuation *c, int s)
 static inline struct cpc_continuation *
 cpc_continuation_push(cpc_continuation *c, cpc_function *f)
 {
-    if(c == (void*)0 || sizeof(cpc_function*) > c->size - c->length)
-        c = cpc_continuation_expand(c, sizeof(cpc_function*));
+
+    if(c == (void*)0 || PTR_SIZE > c->size - c->length)
+        c = cpc_continuation_expand(c, PTR_SIZE);
 
     *(cpc_function**)(c->c + c->length) = f;
-    c->length += sizeof(cpc_function*);
+    c->length += PTR_SIZE;
     return c;
 }
 
@@ -92,7 +103,7 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
 {
   void *cpc_arg;
   cpc_arg =
-    ((cont)->c + (cont)->length - sizeof(cpc_function*) - (size / __BIGGEST_ALIGNMENT__ + 1) * __BIGGEST_ALIGNMENT__);
+    ((cont)->c + (cont)->length - PTR_SIZE - (size / MAX_ALIGN + 1) * MAX_ALIGN);
   __builtin_memcpy(cpc_arg, value, size);
   return;
 }

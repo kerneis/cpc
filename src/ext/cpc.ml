@@ -837,11 +837,11 @@ class cpsConverter = fun file ->
     else
       let memcpy = find_function "__builtin_memcpy" file in
       let cpc_arg = makeTempVar f ~name:"cpc_arg" voidPtrType in [
-      (* cpc_arg = cont->c + cont->length - sizeof(cpc_function* ) - 
+      (* cpc_arg = cont->c + cont->length - __BIGGEST_ALIGNMENT__ -
                      (sizeof(typ) / __BIGGEST_ALIGNMENT__ + 1) * __BIGGEST_ALIGNMENT__ *)
         Set((Var cpc_arg, NoOffset),
         Formatcil.cExp
-        "cont->c + cont->length - %e:sizefp - (%e:sizetyp / %d:biggestalign + 1) * %d:biggestalign"
+        "cont->c + cont->length - %d:biggestalign - (%e:sizetyp / %d:biggestalign + 1) * %d:biggestalign"
           [("cont", Fv cont); ("sizefp", Fe (sizeOf cpc_fun_ptr));
           ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)],
         locUnknown);

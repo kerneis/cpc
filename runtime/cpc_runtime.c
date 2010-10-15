@@ -1023,7 +1023,7 @@ cpc_invoke_continuation(struct cpc_continuation *c)
         return;
       }
 
-      c->length -= sizeof(cpc_function*);
+      c->length -= PTR_SIZE;
       f = *(cpc_function**)(c->c + c->length);
       c = (*f)(c);
 #if DEBUG
