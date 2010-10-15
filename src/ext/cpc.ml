@@ -1469,6 +1469,7 @@ let percolateLocals file =
     (* We need to make sure that we won't record any formal var, and to
     keep track of the function were locals are declared. *)
      method vvdec v =
+        if not (isFunctionType v.vtype) then begin
         (if List.memq v ef.sformals then
           try
             match List.assq v !l with
@@ -1477,8 +1478,10 @@ let percolateLocals file =
           with Not_found -> l := (v, None) :: !l);
         (if List.memq v ef.slocals then
           try
-            assert(List.assq v !decl == ef)
+            if not(List.assq v !decl == ef) then
+              E.s (E.bug "percolate: missmatching declaration for %s" v.vname)
           with Not_found -> decl := (v, ef) :: !decl);
+        end;
         SkipChildren
 
     end in
@@ -1487,7 +1490,9 @@ let percolateLocals file =
     | None -> ()
     | Some fd ->
       trace (dprintf "%s optimized\n" var.vname);
-      let fdecl = try List.assq var !decl with Not_found -> assert false in
+      let fdecl = try List.assq var !decl with Not_found ->
+       E.s (E.bug "percolate: cannot find variable %s, declared in function %s"
+        var.vname fd.svar.vname) in
       fdecl.slocals <- List.filter (fun v -> not(v == var)) fdecl.slocals;
       fd.slocals <- var :: fd.slocals) !l
 
