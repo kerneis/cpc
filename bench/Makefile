@@ -2,9 +2,8 @@ CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-Wall -g -O2
 
-
 CLIBS=-I ../include
-CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
+CFLAGS=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
 
 .PHONY: all clean
 
@@ -21,10 +20,10 @@ b2-indirect: b2-indirect.o b2b.o
 b2-manual-return: b2-manual-return.o b2b-manual-return.o
 
 b2-aligned-cpc.o: b2-misaligned-cpc.c
-	$(CC) $(CFLAGS) -D__packed__=  -c $< -o $@
+	$(CC) $(CFLAGS) $(CLIBS) -D__packed__=  -c $< -o $@
 
 b6-4kb-st.o: b6-st.c
-	$(CC) $(CFLAGS) -DSTACK=4096 -c $< -o $@
+	$(CC) $(CFLAGS) $(CLIBS) -DSTACK=4096 -c $< -o $@
 
 %-nptl: LDLIBS+=-pthread
 %-cpc: LDLIBS+=-L../runtime -lm -pthread -lcpcfull
@@ -38,7 +37,7 @@ clean:
 	rm -f $(BENCH)
 
 %.cpi: %.cpc
-	$(CPP) -x c $(CFLAGS) -include cpc/cpc_runtime.h \
+	$(CPP) -x c $(CFLAGS) $(CLIBS) -include cpc/cpc_runtime.h \
 	  -o $@ $<
 %.c: %.cpi
 	$(CPC) $(CPCOPTS) $< --out $@

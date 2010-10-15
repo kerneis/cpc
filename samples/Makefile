@@ -2,7 +2,7 @@ CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-Wall -g
 CLIBS=-I ../include
-CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
+CFLAGS=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
 
 LDLIBS=-L../runtime -lm -pthread -lcpcfull
 
@@ -29,26 +29,26 @@ test/%: % %.output
 	@ echo $@: SUCCESS
 
 static-httpd.cpi: trivial-httpd.cpc
-	$(CPP) -x c $(CFLAGS) -include cpc/cpc_runtime.h \
+	$(CPP) -x c $(CFLAGS) $(CLIBS) -include cpc/cpc_runtime.h \
 	-DSTATIC -o $@ $<
 
 static-httpd-fork.o: trivial-httpd-fork.c
-	$(CC) $(CFLAGS) -c -DSTATIC $< -o $@
+	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
 
 trivial-httpd-st: LDLIBS+=-lst
 static-httpd-st: LDLIBS+=-lst
 static-httpd-st.o: trivial-httpd-st.c
-	$(CC) $(CFLAGS) -c -DSTATIC $< -o $@
+	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
 
 trivial-httpd-nptl: LDLIBS+=-pthread
 static-httpd-nptl: LDLIBS+=-pthread
 static-httpd-nptl.o: trivial-httpd-nptl.c
-	$(CC) $(CFLAGS) -c -DSTATIC $< -o $@
+	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
 
 trivial-httpd-pth: LDLIBS+=`pth-config --libs --ldflags`
 static-httpd-pth: LDLIBS+=`pth-config --libs --ldflags`
 static-httpd-pth.o: trivial-httpd-pth.c
-	$(CC) $(CFLAGS) -c -DSTATIC $< -o $@
+	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
 
 clean:
 	rm -f *.o *~ *.cpi *.output core
@@ -56,7 +56,7 @@ clean:
 	rm -f $(BASICS) $(EXTENDED) $(SERVERS)
 
 %.cpi: %.cpc
-	$(CPP) -x c $(CFLAGS) -include cpc/cpc_runtime.h \
+	$(CPP) -x c $(CFLAGS) $(CLIBS) -include cpc/cpc_runtime.h \
 	  -o $@ $<
 %.c: %.cpi
 	$(CPC) $(CPCOPTS) $< --out $@

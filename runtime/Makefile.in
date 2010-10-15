@@ -2,7 +2,7 @@ CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-Wall -g -O2
 CLIBS=-I ../include/cpc
-CFLAGS=$(CDEBUGFLAGS) $(CLIBS) $(EXTRA_DEFINES)
+CFLAGS=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
 
 RANLIB=@RANLIB@
 
@@ -17,7 +17,7 @@ PREFIX=/usr/local
 all: libcpc.a libcpcfull.a
 
 cpc_runtime.o: cpc_runtime.c
-	$(CC) $(CFLAGS) -c $<
+	$(CC) $(CFLAGS) $(CLIBS) -c $<
 
 threadpool/threadpool.o: threadpool/threadpool.c
 	cd threadpool && $(MAKE) threadpool.o
@@ -41,9 +41,9 @@ clean:
 	rm -f cpc_barrier.c cpc_io.c
 
 .cpc.cpi:
-	$(CC) -E -x c $(CFLAGS) -include cpc_runtime.h \
+	$(CC) -E -x c $(CFLAGS) $(CLIBS) -include cpc_runtime.h \
 	  -o $@ $<
 
 .cpi.c:
-	$(CPC) $< --out $@
+	$(CPC) $(CPCOPTS) $< --out $@
 
