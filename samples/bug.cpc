@@ -3,12 +3,12 @@
 * END OF OUTPUT */
 
 #include <stdio.h>
-int glob = 8;
+long double glob = 8;
 cps void set_glob() { glob = 16; }
-cps int identity(int x) { return x; }
-cps void h(int x, int y, int z) { printf("%d %d %d ", x, y, z);return;}
+cps long double identity(long double x) { return x; }
+cps void h(int x, long double y, long double z) { printf("%d %d %d ", x, (int) y, (int) z);return;}
 cps int foo(int r){
-    int x = 100;
+    long double x = 100;
     set_glob();
     x = identity(glob);
     h(r, x+1, x);
