@@ -103,7 +103,7 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
 {
   void *cpc_arg;
   cpc_arg =
-    ((cont)->c + (cont)->length - PTR_SIZE - (size / MAX_ALIGN + 1) * MAX_ALIGN);
+    ((cont)->c + (cont)->length - PTR_SIZE - ((size - 1) / MAX_ALIGN + 1) * MAX_ALIGN);
   __builtin_memcpy(cpc_arg, value, size);
   return;
 }
