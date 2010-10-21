@@ -188,8 +188,7 @@ cpc_continuation_expand(struct cpc_continuation *c, int n)
 static void
 enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
 {
-    if(c == NULL)
-        c = cpc_continuation_expand(NULL, 0);
+    assert(c);
 
     c->next = NULL;
 
@@ -256,8 +255,7 @@ dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
 static void
 cond_enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
 {
-    if(c == NULL)
-        c = cpc_continuation_expand(NULL, 0);
+    assert(c);
 
     c->cond_next = NULL;
 
@@ -432,8 +430,7 @@ timed_enqueue(cpc_timed_continuation_queue *queue, cpc_continuation *c,
 {
     cpc_timed_continuation *tc;
 
-    if(c == NULL)
-        c = cpc_continuation_expand(NULL, 0);
+    assert(c);
 
     tc = malloc(sizeof(struct cpc_timed_continuation));
     tc->continuation = c;
@@ -614,8 +611,7 @@ cpc_sleep(struct cpc_continuation *cont)
 
     struct timeval when;
 
-    if(cont == NULL)
-        cont = cpc_continuation_expand(NULL, 0);
+    assert(cont);
 
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED && cond == NULL);
