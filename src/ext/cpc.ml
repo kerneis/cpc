@@ -53,6 +53,8 @@ exception FoundVar of varinfo
 
 let external_patch = ref true
 
+let aligned_continuations = ref true
+
 (* Avoid stack-overflow on recursive structures *)
 let (=) x y = (compare x y) = 0
 
@@ -840,10 +842,18 @@ class cpsConverter = fun file ->
       (* cpc_arg = cont->c + cont->length - __BIGGEST_ALIGNMENT__ -
                      ((sizeof(typ) - 1) / __BIGGEST_ALIGNMENT__ + 1) * __BIGGEST_ALIGNMENT__ *)
         Set((Var cpc_arg, NoOffset),
+        (if !aligned_continuations then
         Formatcil.cExp
         "cont->c + cont->length - %d:biggestalign - ((%e:sizetyp - 1) / %d:biggestalign + 1) * %d:biggestalign"
           [("cont", Fv cont); ("sizefp", Fe (sizeOf cpc_fun_ptr));
-          ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)],
+          ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)]
+        else
+        (* compact continuations *)
+        Formatcil.cExp
+        "cont->c + cont->length - %e:sizefp - %e:sizetyp"
+          [("cont", Fv cont); ("sizefp", Fe (sizeOf cpc_fun_ptr));
+          ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)]
+        ),
         locUnknown);
       (* memcpy(cpc_arg, &temp, sizeof(typ)) *)
         Call(None, Lval(Var memcpy, NoOffset), [
@@ -996,14 +1006,17 @@ class cpsConverter = fun file ->
       (* XXX copy the attributes too? Should be empty anyway *)
       let rec build_struct = function
         | [] -> []
-        | [name, typ, attr] -> (* alignment trick *)
-            [name, typ, None, [Attr("aligned",[])], locUnknown]
+        | [name, typ, attr] when !aligned_continuations ->
+            (* alignment trick *)
+            [name, typ, None, [Attr("aligned",[AInt biggest_alignment])], locUnknown]
         | (name, typ, attr) :: q ->
             (name, typ, None, [], locUnknown) :: build_struct q in
       let fields =  build_struct args in
       let arglist_struct =
         mkCompInfo true (v.vname^"_arglist")
-          (fun _ -> fields) [] in
+          (fun _ -> fields)
+          (if !aligned_continuations then []
+           else [Attr("packed",[])]) in
       let comptag = GCompTag (arglist_struct, locUnknown) in
       let new_arglist_fun = emptyFunction (v.vname^"_new_arglist") in
       let cont_name = Printf.sprintf "cpc__continuation_%d" (newVID()) in
@@ -2027,6 +2040,8 @@ let feature : featureDescr =
        cpc_continuation_patch from the runtime library" ^ is_default(!external_patch));
        ("--noexternal-patch",Arg.Clear external_patch," generate inline \
        patching" ^ is_default(not !external_patch));
+       ("--packed", Arg.Clear aligned_continuations, "compact continuations \
+       (BROKEN)");
       ];
     fd_doit = doit;
     fd_post_check = true;

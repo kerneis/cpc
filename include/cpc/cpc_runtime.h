@@ -26,15 +26,21 @@ THE SOFTWARE.
 #include <stddef.h> // size_t
 #include <time.h>
 
+#ifdef CPC_COMPACT_CONTINUATIONS
+
+#define MAX_ALIGN 1
+#define PTR_SIZE (sizeof(cpc_function *))
+
+#else
+
 #ifdef __BIGGEST_ALIGNMENT__
 #define MAX_ALIGN __BIGGEST_ALIGNMENT__
 #else
 #define MAX_ALIGN __alignof(struct {char c; } __attribute__((__aligned__)))
 #endif
-
-// Size left for the function pointer in continuation.
-// sizeof(cpc_function*) is enough, but we want to be aligned
 #define PTR_SIZE MAX_ALIGN
+
+#endif
 
 typedef struct cpc_condvar cpc_condvar;
 typedef struct cpc_sched cpc_sched;

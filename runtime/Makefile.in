@@ -2,7 +2,9 @@ CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-Wall -g -O2
 CLIBS=-I ../include/cpc
-CFLAGS=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
+
+# To build with compact continuations , disable the following line
+# CFLAGS += -DCPC_COMPACT_CONTINUATIONS
 
 RANLIB=@RANLIB@
 
@@ -12,7 +14,7 @@ PREFIX=/usr/local
 
 .SUFFIXES: .cpc .cpi
 
-.PHONY: all clean
+.PHONY: all clean compact
 
 all: libcpc.a libcpcfull.a
 
