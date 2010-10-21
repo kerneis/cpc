@@ -42,7 +42,6 @@ clean:
 	rm -f $(BENCH)
 
 %.cpi: %.cpc
-	$(CPP) -x c $(CFLAGS) $(CLIBS) -include cpc/cpc_runtime.h \
-	  -o $@ $<
+	$(CPP) -x c $(CFLAGS) $(CLIBS) -o $@ $<
 %.c: %.cpi
 	$(CPC) $(CPCOPTS) $< --out $@

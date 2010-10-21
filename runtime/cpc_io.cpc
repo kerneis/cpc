@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include <netinet/tcp.h>
 #include <assert.h>
 
+#include "cpc_runtime.h"
 #include "cpc_barrier.h"
 #include "cpc_io.h"
 

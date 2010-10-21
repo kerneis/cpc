@@ -2,6 +2,7 @@ CPC='../bin/cpc.asm.exe'
 
 CDEBUGFLAGS=-Wall -g -O2
 CLIBS=-I ../include/cpc
+CFLAGS += $(CDEBUGFLAGS)
 
 # To build with compact continuations , disable the following line
 # CFLAGS += -DCPC_COMPACT_CONTINUATIONS
@@ -22,7 +23,7 @@ cpc_runtime.o: cpc_runtime.c
 	$(CC) $(CFLAGS) $(CLIBS) -c $<
 
 threadpool/threadpool.o: threadpool/threadpool.c
-	cd threadpool && $(MAKE) threadpool.o
+	cd threadpool && $(MAKE) threadpool.o CFLAGS="$(CFLAGS)"
 
 libcpc.a: cpc_runtime.o threadpool/threadpool.o
 	rm -f $@
@@ -43,8 +44,7 @@ clean:
 	rm -f cpc_barrier.c cpc_io.c
 
 .cpc.cpi:
-	$(CC) -E -x c $(CFLAGS) $(CLIBS) -include cpc_runtime.h \
-	  -o $@ $<
+	$(CC) -E -x c $(CFLAGS) $(CLIBS) -o $@ $<
 
 .cpi.c:
 	$(CPC) $(CPCOPTS) $< --out $@

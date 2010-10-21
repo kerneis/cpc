@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <assert.h>
 
+#include "cpc_runtime.h"
 #include "cpc_barrier.h"
 
 struct cpc_barrier {
