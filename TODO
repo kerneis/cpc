@@ -19,13 +19,17 @@
 * OPT: Return probably does not have to be split if there is no
   assignment before it
   => is it worth the trouble?
-* cpc_yield en mode détaché : se réattacher au threadpool s'il est
-  saturé, ne rien faire sinon.
-* optimiser les boucles : 
+* cpc_yield in detached mode should reattach to the threadpool (if it is
+  saturated), or be a no-op otherwise.
+* loop optimisation:
   f(i,j,k) { i++; g(k,i,j);} => g(k, i++, j);
-  => pas d'exemple dans Hekate
-* variable locale volatile : qu'est-ce que ça veut dire ? faut-il boxer ?
-  idem pour const, restrict, etc. En général, on fait quoi des attributs ?
-* aligner sur 8 bits plutôt que 16 (mais que faire des fonctions qui
-  contiennent des long double ?) ou intégrer le pointeur de fonction
-  à la fin de la struct (dans new_arglist, qu'on renommerait en push).
+  => does not occurr in real-world code (Hekate)
+* what should we do with attributes, const, restrict, volatile, etc.?
+  => they are copied (are they?) in the struct definition.  Does that
+  make any sense?
+
+[runtime representation]
+* is there a way to avoid wasting space on x86-64?
+  => it's all about doubles (which are 16-bit aligned).
+  => more generally, reordering function parameters in (generated) cps
+  functions would be a good idea.
