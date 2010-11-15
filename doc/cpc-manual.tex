@@ -1,11 +1,11 @@
 \documentclass[a4paper]{report}
-\usepackage{stmaryrd} % \llbracket, \rrbracket
 \usepackage{url}
+\usepackage{hyphenat}
 
 \title{The CPC manual}
 \author{Juliusz Chroboczek, Gabriel Kerneis\\
 {\tt <jch@pps.jussieu.fr>, <kerneis@pps.jussieu.fr>}}
-\date{3 February 2010}
+\date{15 November 2010}
 
 \begin{document}
 \maketitle
@@ -78,7 +78,7 @@ Any instruction, declaration, or function definition in CPC can be in
 defined as follows:
 \begin{itemize}
 \item the body of a cps function is in cps context
-  (Sec.~\ref{sec:cpc-functions};
+  (Sec.~\ref{sec:cpc-functions});
 \item the body of a {\tt cpc\_spawn} statement is in cps context
   (Sec.~\ref{sec:cooperating});
 \item the body of a {\tt cpc\_attached} statement is in cps context
@@ -99,8 +99,7 @@ possible to use most of the CPC features.
 
 Functions can be defined within other functions, as in Algol-family
 languages; the inner function can access the variables bound by the
-outer one.  Only cps functions can be inner functions, and they must
-be within other cps functions.
+outer one.  Only cps functions can be inner functions.
 
 Free variables of inner functions are copies of the variables of the
 enclosing function; thus, a change to the value of the free variable
@@ -181,17 +180,15 @@ cpc\_threadpool\_get} returns a pointer to a new thread pool.  It takes
 one argument: the maximum number of threads in the pool (thread are
 created dynamically).  This argument is cropped to {\tt
 MAX\_THREADS}\footnote{{\tt MAX\_THREADS} is an internal constant of the
-CPC runtime, currently set to 20.} if it is outside the $\llbracket 1;
-\mbox{\tt MAX\_THREADS}\rrbracket$ interval.  This function shall not be
+CPC runtime, currently set to 20.} if it is outside the $[ 1; 
+\mbox{\tt MAX\_THREADS} ]$ interval.  This function shall not be
 called outside the main loop (it is not thread-safe).
 
 \paragraph{\tt cpc\_threadpool\_release} Conversely, {\tt
 cpc\_threadpool\_release} releases a given thread pool.  This function
 does not block.  It returns 0 if the pool has been released, -1
 otherwise (most notably when they are some threads still detached).  In
-that case, you shall retry later --- calling {\tt
-cpc\_yield(CPC\_OPPORTUNISTIC)} is recommended (but notice that the flag
-is ignored in the current implementation, leading to busy-waiting).
+that case, you shall retry later.
 This function can be called in any mode and context, but notice that it
 will always fail if you try to release the pool you are attached to.
 Conversely, it should always succeed when {\tt cpc\_main\_loop} has
@@ -220,9 +217,9 @@ they disrupt the flow of control: {\tt goto}, {\tt break}, {\tt
 continue} and labels.\\
 {\em Note:\/} it would be possible to allow the forbidden constructs,
 with a smart detection of when one jumps in or out of the body; CPC used
-to do this in the past.  But I believe this is ``too much of magic''
-with a potentially unhealthy semantics.  Therefore, the programmer has
-to take care of such tricky cases by himself.
+to do this in the past.  But I (Gabriel) believe this is ``too much of magic''
+with a potentially unhealthy semantics.  Therefore, the programmer has to take
+care of such tricky cases by himself.
 
 \paragraph{\tt cpc\_is\_detached, cpc\_detach, cpc\_detached} Attach to
 the default thread pool, if not already detached.
@@ -414,7 +411,7 @@ The functions in the CPC library are themselves written in CPC, using
 only the primitives documented in Chapter~\ref{chapter:language}.
 
 All the functions in the CPC core library are declared in the file
-{\tt cpc-lib.h}.
+{\tt cpc\_lib.h}.
 
 \section{Barriers}
 
@@ -477,6 +474,30 @@ they return -1 with \verb|errno| set.
 The versions with \verb|timeout| appended return after \verb|secs|
 seconds and \verb|micros| micreseconds if no I/O has been possible.
 In this case, they return -1 with \verb|errno| set to \verb|EAGAIN|.
+
+\subsection{Timeouts}
+
+\begin{verbatim}
+typedef struct cpc_timeout cpc_timeout;
+
+cps cpc_timeout *cpc_timeout_get(int secs, int usecs);
+cps void cpc_timeout_restart(cpc_timeout *timeout);
+cpc_condvar *cpc_timeout_condvar(cpc_timeout *timeout);
+int cpc_timeout_expired(cpc_timeout *timeout);
+void cpc_timeout_destroy(cpc_timeout *timeout);
+\end{verbatim}
+
+Timeouts are tiny data structures holding a condition variable, which is
+signaled after some time ({\tt cpc\_timeout\_get}).  A timeout might be reset
+({\tt cpc\_timeout\_restart}) or destroyed ({\tt cpc\_timeout\_destroy}).  To
+avoid race conditions, you cannot reset a timeout which has already expired:
+destroy it and create a new one instead.
+
+You can get the condition variable associated with the timeout using {\tt
+cpc\_timeout\_condvar}, and check if the timeout has already expired with {\tt
+cpc\_timeout\_expired}.  Beware race conditions: it is important to check if
+the timeout has already expired before waiting on the condition variable, since
+the latter is only signaled once.
 
 \chapter{Tips and tricks}
 
