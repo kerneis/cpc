@@ -108,8 +108,8 @@ let options : (string * Arg.spec * string) list =
 
     "--version",
     Arg.Unit (fun _ ->
-                print_endline ("CIL version " ^ Cil.cilVersion ^
-                                 "\nMore information at http://cil.sourceforge.net/\n");
+                print_endline ("CPC version " ^ Cil.cpcVersion ^
+                                 "\nMore information at http://www.pps.jussieu.fr/~kerneis/software/cpc\n");
                 exit 0),
     " Output version information and exit";
 

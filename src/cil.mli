@@ -60,6 +60,10 @@ val cilVersionMajor: int
 val cilVersionMinor: int
 val cilVersionRevision: int
 
+val cpcVersion: string
+val cpcVersionMajor: int
+val cpcVersionMinor: int
+val cpcVersionRevision: int
 (** This module defines the abstract syntax of CIL. It also provides utility 
  * functions for traversing the CIL data structures, and pretty-printing 
  * them. The parser for both the GCC and MSVC front-ends can be invoked as 

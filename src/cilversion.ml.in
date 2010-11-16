@@ -4,3 +4,8 @@ let cilVersionMajor = @CIL_VERSION_MAJOR@
 let cilVersionMinor = @CIL_VERSION_MINOR@
 let cilVersionRev   = @CIL_VERSION_REV@
 let cilVersion      = "@CIL_VERSION@"
+
+let cpcVersionMajor = @CPC_VERSION_MAJOR@
+let cpcVersionMinor = @CPC_VERSION_MINOR@
+let cpcVersionRev   = @CPC_VERSION_REV@
+let cpcVersion      = "@CPC_VERSION@"

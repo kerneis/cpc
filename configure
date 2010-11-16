@@ -599,6 +599,10 @@ THREAD_IS_KEYWORD
 HAVE_BUILTIN_VA_LIST
 HAS_PERFCOUNT
 CYCLES_PER_USEC
+CPC_VERSION
+CPC_VERSION_REV
+CPC_VERSION_MINOR
+CPC_VERSION_MAJOR
 CIL_VERSION
 CIL_VERSION_REV
 CIL_VERSION_MINOR
@@ -2165,6 +2169,11 @@ CIL_VERSION_MINOR=3
 CIL_VERSION_REV=7
 CIL_VERSION=$CIL_VERSION_MAJOR.$CIL_VERSION_MINOR.$CIL_VERSION_REV
 
+# Assign here the CPC version numbers
+CPC_VERSION_MAJOR=0
+CPC_VERSION_MINOR=1
+CPC_VERSION_REV=0
+CPC_VERSION=$CPC_VERSION_MAJOR.$CPC_VERSION_MINOR.$CPC_VERSION_REV
 
 # make sure I haven't forgotten to run autoconf
 if test configure -ot configure.in; then
@@ -5051,6 +5060,10 @@ chmod -w Makefile.features
 
 
 
+
+
+
+
 # finish the configure script and generate various files; ./configure
 # will apply variable substitutions to <filename>.in to generate <filename>;
 
@@ -6497,6 +6510,7 @@ CIL configuration:
   (optional) cl.exe found:    HAS_MSVC           $HAS_MSVC
   gcc to use                  CC                 $CC
   default compiler            DEFAULT_COMPILER   $DEFAULT_COMPILER
+  CPC version                 CPC_VERSION        $CPC_VERSION
   CIL version                 CIL_VERSION        $CIL_VERSION
   CIL features                CIL_FEATURES       $CIL_FEATURES
   Extra source directories    EXTRASRCDIRS       $EXTRASRCDIRS
