@@ -27,6 +27,8 @@
 * what should we do with attributes, const, restrict, volatile, etc.?
   => they are copied (are they?) in the struct definition.  Does that
   make any sense?
+* order parameters in functions resulting from goto elimination (except the
+  last one) to minize padding.
 
 [src/frontc/cabs2cil.ml]
 * if an inner cps function uses a free variable which has not been declared
