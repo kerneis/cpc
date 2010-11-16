@@ -46,9 +46,9 @@ struct cpc_sched {
     struct cpc_sched *next;
 };
 static pthread_t main_loop_id;
-#define IS_DETACHED (cpc_default_pool && !pthread_equal(main_loop_id,pthread_self()))
+#define IS_DETACHED (cpc_default_threadpool && !pthread_equal(main_loop_id,pthread_self()))
 #define MAX_THREADS 20
-cpc_sched *cpc_default_pool = NULL;
+cpc_sched *cpc_default_threadpool = NULL;
 static int p[2];
 
 const int cpc_pessimise_runtime = 0;
@@ -890,7 +890,7 @@ cpc_prim_detach(cpc_sched *sched, cpc_continuation *cont)
         assert(!IS_DETACHED);
         detached_count++;
         if(sched == NULL)
-            sched = cpc_default_pool;
+            sched = cpc_default_threadpool;
     }
     cont->sched = sched;
     rc = threadpool_schedule(sched->pool, perform_detach, (void *)cont);
@@ -1042,7 +1042,7 @@ cpc_main_loop(void)
 
     main_loop_id = pthread_self();
 
-    cpc_default_pool = cpc_threadpool_get(MAX_THREADS);
+    cpc_default_threadpool = cpc_threadpool_get(MAX_THREADS);
 
     rc = pipe(p);
     if(rc < 0) {
@@ -1187,7 +1187,7 @@ cpc_main_loop(void)
 #endif
     }
 
-    while(cpc_threadpool_release(cpc_default_pool) < 0);
+    while(cpc_threadpool_release(cpc_default_threadpool) < 0);
     close(p[0]);
     close(p[1]);
 

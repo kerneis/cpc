@@ -26,6 +26,11 @@ THE SOFTWARE.
 #include <stddef.h> // size_t
 #include <time.h>
 
+/* If you want to build with the --packed option, do not forget to set:
+#define CPC_COMPACT_CONTINUATIONS 1
+This is broken on some architectures.
+*/
+
 #ifdef CPC_COMPACT_CONTINUATIONS
 
 #define MAX_ALIGN 1
@@ -44,7 +49,7 @@ THE SOFTWARE.
 
 typedef struct cpc_condvar cpc_condvar;
 typedef struct cpc_sched cpc_sched;
-extern cpc_sched *cpc_default_pool;
+extern cpc_sched *cpc_default_threadpool;
 #define cpc_default_sched NULL
 
 typedef struct cpc_continuation {
@@ -143,7 +148,7 @@ extern int (__attribute__((cpc_need_cont))cpc_gettimeofday)(struct timeval *tv);
 extern time_t (__attribute__((cpc_need_cont,cpc_no_retain))cpc_time)(time_t *t);
 
 #define cpc_is_detached() (cpc_get_sched() != cpc_default_sched)
-#define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_get_sched() : cpc_default_pool)
-#define cpc_detached cpc_attached(cpc_is_detached() ? cpc_get_sched() : cpc_default_pool)
+#define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_get_sched() : cpc_default_threadpool)
+#define cpc_detached cpc_attached(cpc_is_detached() ? cpc_get_sched() : cpc_default_threadpool)
 
 #endif

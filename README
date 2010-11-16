@@ -1,4 +1,4 @@
-Cpc README
+CPC README
 **********
 
 CPC is a programming language designed for writing concurrent systems.
@@ -24,10 +24,9 @@ Installation:
 -------------
 To build cpc, you juste have to run from the root directory:
 
-    chmod u+x configure
     ./configure
     make
-    make samples (optional)
+    make testcpc (optional)
     make install (optional, as root)
 
 This will build the main executable, which is then copied to
@@ -47,9 +46,7 @@ be found in the bin/ directory).
 If you choose to install cpc, you should add:
     -I cpc
 to your compile flags and:
-    -pthread -lcpcfull
-to your link flags. You can replace -lcpcfull by -lcpc if you do not use
-the functions defined in <cpc_lib.h>.
+    -pthread -lcpc
 
 Options:
 --------
@@ -73,6 +70,12 @@ bin/cpc.asm.exe has the following useful options:
                     This is useful to remove some warnings if you use
                     --check (which checks the correctness of the CIL AST
                     after CPC transformations).
+                    This is now the default.  Use --noexternal-patch to inline
+                    patching code.
+--packed            build compact continuations.  This saves some memory but
+                    yields unaligned memory accesses.  It is broken on some
+                    architectures, and requires that every CPC code be compiled
+                    in packed mode (include the runtime, see cpc_runtime.h).
 
 and a gazillion useless ones, inherited from CIL, that you might
 discover through bin/cpc.asm.exe --help. Using some of them might break
@@ -86,19 +89,20 @@ cpc completely, so use at your own risk!
 
 Known bugs and limitations:
 ---------------------------
-Condition variables must not be used in detached mode.  cpc_signal_fd
-is not implemented in the current runtime.  Others limitations might be
-found in the CPC manual (doc/cpc-manual.tex), which you should read by
-the way.
+Condition variables must not be used in detached mode.  Others limitations
+might be found in the CPC manual (doc/cpc-manual.tex), which you should read
+anyway.
 
-Cpc relies on CIL, which makes a number of assumptions about
+CPC relies on CIL, which makes a number of assumptions about
 the underlying C machine and compiler. These assumptions are defined
 when ./configure is executed. As a result:
 - if you move on another machine/architecture/compiler, you should
   re-run ./configure.
 - if you want to cross-compile, you must use the CIL_MACHINE environment
   variable. See the CIL documentation and src/machdepenv.ml for further
-  details.
+  details.  Another way is to use qemu-user to run machdep-env; when cross-
+  compiling with the autotools, this is already done for mips-linux and 
+  mipsel-linux architectures.
 
 Please do not hesitate to report any bug at <kerneis@pps.jussieu.fr>.
 
@@ -106,7 +110,7 @@ Further details:
 ----------------
 Current information about cpc can be found on the cpc web page:
 
-    http://www.pps.jussieu.fr/~jch/software/cpc
+    http://www.pps.jussieu.fr/~kerneis/software/cpc
 
 The current version of cpc is built upon the CIL framework. Development
 version in kept in sync with CIL svn, but some CIL features have been

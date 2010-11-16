@@ -154,7 +154,7 @@ directly from one thread pool to another.
 
 \begin{verbatim}
     typedef cpc_sched;
-    cpc_sched *cpc_default_scheduler, *cpc_default_pool;
+    cpc_sched *cpc_default_scheduler, *cpc_default_threadpool;
 
     cpc_sched *cpc_threadpool_get(int);
     int cpc_threadpool_release(cpc_sched *);
@@ -194,7 +194,7 @@ will always fail if you try to release the pool you are attached to.
 Conversely, it should always succeed when {\tt cpc\_main\_loop} has
 returned.
 
-\paragraph{\tt cpc\_default\_pool} A pointer to the default thread pool,
+\paragraph{\tt cpc\_default\_threadpool} A pointer to the default thread pool,
 initialised during the call to {\tt cpc\_main\_loop}.
 
 \paragraph{\tt cpc\_get\_sched} The function {\tt cpc\_get\_sched} returns
@@ -221,17 +221,18 @@ to do this in the past.  But I (Gabriel) believe this is ``too much of magic''
 with a potentially unhealthy semantics.  Therefore, the programmer has to take
 care of such tricky cases by himself.
 
-\paragraph{\tt cpc\_is\_detached, cpc\_detach, cpc\_detached} Attach to
-the default thread pool, if not already detached.
+\paragraph{\tt cpc\_is\_detached, cpc\_detach, cpc\_detached} Three macros to
+test if the current thread is detached, and attach to the default thread pool
+if not already detached.
 \begin{verbatim}
     #define cpc_is_detached() \
       (cpc_get_sched() != cpc_default_sched)
     #define cpc_detach() \
       cpc_attach(cpc_is_detached () ? \
-      cpc_default_pool : cpc_get_sched())
+      cpc_get_sched() : cpc_default_threadpool)
     #define cpc_detached \
       cpc_attached(cpc_is_detached () ? \
-      cpc_default_pool : cpc_get_sched())
+      cpc_get_sched() : cpc_default_threadpool)
 \end{verbatim}
 \section{Cooperating: yielding, spawning} \label{sec:cooperating}
 
