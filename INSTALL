@@ -1,3 +1,13 @@
+CPC Installation Instructions
+=============================
+Please see the README file for installation instructions.
+
+Instructions below are a verbatim copy of CIL's INSTALL file.  They might be
+useful to Windows users (note that CPC has never been tested on Windows).
+Linux users should stick with the instructions contained in the README file.
+
+CIL Installation Instructions
+=============================
 
  (For more complete installation instructions see the documentation in
   doc/html.)
