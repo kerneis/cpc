@@ -704,8 +704,8 @@ let cpc_set_sched () =
     try fst(lookupGlobalVar "cpc_attach")
     with Not_found -> E.s (error "cpc_attach not found")
 let cpc_default_pool () =
-    try fst(lookupGlobalVar "cpc_default_pool")
-    with Not_found -> E.s (error "cpc_default_pool not found")
+    try fst(lookupGlobalVar "cpc_default_threadpool")
+    with Not_found -> E.s (error "cpc_default_threadpool not found")
 
 let setSched new_sched =
     let sched_type = (cpc_default_pool()).vtype in
