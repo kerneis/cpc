@@ -121,6 +121,7 @@ let safe_functions = [
   "memset";
   "bind";
   "accept";
+  "memcpy";
 ]
 
 let is_safe f = match f.vtype with
