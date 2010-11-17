@@ -140,7 +140,7 @@ cpc: $(BUILDER)
 samples: cpc
 	cd samples; $(MAKE) clean all
 
-testcpc:
+testcpc: cpc
 	cd samples; $(MAKE) clean all test
 
 cilly: $(OBJDIR)/cilly$(EXE)
