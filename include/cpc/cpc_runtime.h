@@ -143,12 +143,17 @@ extern cps void cpc_yield(void);
 extern cps void cpc_done(void);
 extern cps cpc_sched *cpc_attach(cpc_sched *pool);
 
-extern cpc_sched *(__attribute__((cpc_need_cont))cpc_get_sched)(void);
-extern int (__attribute__((cpc_need_cont))cpc_gettimeofday)(struct timeval *tv);
-extern time_t (__attribute__((cpc_need_cont,cpc_no_retain))cpc_time)(time_t *t);
+extern cpc_sched *cpc_get_sched(void) __attribute__((cpc_need_cont));
+extern int cpc_gettimeofday(struct timeval *tv) __attribute__((cpc_need_cont));
+extern time_t cpc_time(time_t *t) __attribute__((cpc_need_cont,cpc_no_retain));
 
 #define cpc_is_detached() (cpc_get_sched() != cpc_default_sched)
 #define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_get_sched() : cpc_default_threadpool)
 #define cpc_detached cpc_attached(cpc_is_detached() ? cpc_get_sched() : cpc_default_threadpool)
 
 #endif
+
+/* Safe functions */
+
+#pragma cpc_no_retain("writev", "curl_easy_getinfo", "snprintf", "memcmp",  "memcpy")
+#pragma cpc_no_retain("getpeername", "setsockopt", "memset", "bind", "accept")

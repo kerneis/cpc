@@ -109,26 +109,33 @@ module VS = Set.Make (struct
   let compare v v' = compare v.vid v'.vid
 end)
 
+module StringSet = Set.Make (struct
+  type t = string
+  let compare = compare
+end)
+
 let ampSet = ref VS.empty
 let add_amp v = ampSet := VS.add v !ampSet
-let safe_functions = [
-  "writev";
-  "curl_easy_getinfo";
-  "snprintf";
-  "memcmp";
-  "getpeername";
-  "setsockopt";
-  "memset";
-  "bind";
-  "accept";
-  "memcpy";
-]
+let safe_functions = ref StringSet.empty
+let add_safe f = safe_functions := StringSet.add f !safe_functions
 
-let is_safe f = match f.vtype with
-  | TFun (_, _, _, attr) ->
-      hasAttribute "cpc_no_retain" attr ||
-      List.mem f.vname safe_functions
-  | _ -> assert false
+
+class initSafeFunctions = object(self)
+    inherit nopCilVisitor
+    method vglob = function
+    | GPragma(Attr("cpc_no_retain", l), _) ->
+        let sf = String.concat ", " (List.map (function
+          | AStr f -> add_safe f; f
+          | p -> E.s (E.error "wrong parameter in cpc_no_retain: %a" d_attrparam p))
+          l) in
+        ChangeTo [GText (Printf.sprintf "/* safe functions: %s*/" sf)]
+    | _ -> SkipChildren
+end
+
+
+let is_safe f =
+      hasAttribute "cpc_no_retain" f.vattr ||
+      StringSet.mem f.vname !safe_functions
 
 class initAmpSet = object(self)
     inherit mynopCilVisitor
@@ -963,11 +970,9 @@ class cpsConverter = fun file ->
 
   method vinst = function
   (* Special case: some functions need to be given the current continuation *)
-  | Call(r, e, args, loc) -> begin match typeOf e with
-      | TFun (_, _, _, attr) when hasAttribute "cpc_need_cont" attr ->
+  | Call(r, (Lval (Var f, NoOffset) as e), args, loc)
+      when hasAttribute "cpc_need_cont" f.vattr ->
          ChangeTo [Call(r, e, Lval (Var current_continuation, NoOffset) :: args, loc)] 
-      | _ -> SkipChildren
-        end
   | _ -> SkipChildren
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
@@ -996,8 +1001,9 @@ class cpsConverter = fun file ->
   | _ -> DoChildren
 
   method vglob = function
+  (* Special case: some functions need to be given the current continuation *)
   | (GVarDecl ({vtype=TFun(ret, Some args,va,attr)} as v, l)) when
-      hasAttribute "cpc_need_cont" attr ->
+      hasAttribute "cpc_need_cont" v.vattr ->
         v.vtype <- TFun(ret, Some (("c", cpc_cont_ptr, [])::args), va, attr);
         DoChildren
   | (GVarDecl ({vtype=TFun(_,args,va,attr) ; vcps = true} as v, _) as g) ->
@@ -1972,6 +1978,8 @@ let rec cps_marking f =
 let stages = [
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
+  ("Initialize safe functions\n", fun file ->
+  visitCilFile (new initSafeFunctions) file);
   ("Add defaults arguments\n", fun file ->
   visitCilFileSameGlobals (new addDefaultArgs file) file);
   ("Lambda-lifting\n", fun file ->
