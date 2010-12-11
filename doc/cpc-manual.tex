@@ -502,6 +502,23 @@ the latter is only signaled once.
 
 \chapter{Tips and tricks}
 
+\paragraph{Compiling on Mac OS X}
+
+Apple has implemented a non-standard extension to the C language, known
+as ``blocks'' (which are really just closures).  Blocks are not
+supported in CPC.
+
+The header \texttt{cpc\_runtime.h} therefore disables blocks.  Be
+careful to include it before any other header (in particular
+\texttt{stdlib.h}) or add \texttt{\#undef \_\_BLOCKS\_\_} at the
+beginning of your CPC files.
+
+Note that CPC provides a similar mechanism with inner cps functions
+(although the semantics is not exactly the same, see
+Section~\ref{sec:cpc-functions}).  If you really need to use blocks (for
+instance with Grand Central Dispatch), isolate them in separate pure C
+files.
+
 \paragraph{Using ctags}
 \begin{verbatim}
 ctags -R --langmap=c:+.cpc *
