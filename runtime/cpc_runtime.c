@@ -24,6 +24,10 @@ THE SOFTWARE.
 */
 
 #define _GNU_SOURCE
+
+#define NO_CPS_PROTO
+#include "cpc_runtime.h"
+
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -33,9 +37,6 @@ THE SOFTWARE.
 #include <pthread.h>
 #include <sys/time.h>
 #include <fcntl.h>
-
-#define NO_CPS_PROTO
-#include "cpc_runtime.h"
 
 #include <poll.h> /* cpc_d_io_wait */
 

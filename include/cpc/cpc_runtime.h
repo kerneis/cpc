@@ -23,6 +23,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+/* CPC cannot parse anonymous functions (aka Apple's "blocks") */
+#undef __BLOCKS__
+
 #include <stddef.h> // size_t
 #include <time.h>
 
