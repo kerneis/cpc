@@ -644,8 +644,8 @@ cpc_d_io_wait(int fd, int direction)
     int pollevent = 0;
     int rc;
 
-    pollevent |= (direction | CPC_IO_OUT) ? POLLOUT : 0;
-    pollevent |= (direction | CPC_IO_IN) ? POLLIN : 0;
+    pollevent |= (direction & CPC_IO_OUT) ? POLLOUT : 0;
+    pollevent |= (direction & CPC_IO_IN) ? POLLIN : 0;
 
     pfd[0].fd = fd;
     pfd[0].events = pollevent;
