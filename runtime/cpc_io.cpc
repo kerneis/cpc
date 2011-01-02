@@ -82,7 +82,9 @@ cpc_timeout_get(int secs, int usecs)
 cps void
 cpc_timeout_restart(cpc_timeout *timeout)
 {
-    if(!timeout->flags) {
+    /* Do not restart an expired timeout
+     * to avoid race-conditions. */
+    if(!(timeout->flags & _TIMEOUT_EXPIRED)) {
         cpc_signal(timeout->cancel);
         cpc_spawn {
             if(cpc_sleep(timeout->secs, timeout->usecs, timeout->cancel) == CPC_TIMEOUT) {
@@ -91,6 +93,7 @@ cpc_timeout_restart(cpc_timeout *timeout)
                 cpc_signal_all(timeout->expire);
             }
         }
+        timeout->flags = 0;
         cpc_yield();                  /* Enter the sleep. */
     }
 }
