@@ -247,15 +247,6 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
   | CpcFun (fd, _) ->
       E.warn "usedef: shall we really dive into CpcFun?\n";
       handle_block fd.sbody
-  (*| CpcCut (ret, cut, _) ->
-      (match ret with
-      | None -> ()
-      | Some v -> ignore(useDefVisitor#vvrbl v));
-      match cut with
-      | Yield | Done -> !varUsed, !varDefs
-      | Attach e | Detach e | Wait e -> let _ = ve e in !varUsed, !varDefs
-      | IoWait (e, e', e'') | Sleep (e, e', e'') ->
-          let _ = ve e; ve e'; ve e'' in !varUsed, !varDefs*)
 
 let computeUseLocalTypes ?(acc_used=VS.empty)
                          (fd : fundec)
