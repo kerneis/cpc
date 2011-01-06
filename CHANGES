@@ -1,3 +1,14 @@
+Current version: cpc 0.2
+
+  * Fix build with OCaml 3.12
+  * Fix build on MacOS X (no blocks support)
+  * Fix build on BSD systems (IPPROTO_TCP)
+  * Fix cpc_io_wait in detached mode
+  * Use #pragma and name attributes for safe functions
+  * Use name attributes for cpc_need_cont (internal use)
+  * Allow to restart a cancelled timeout
+  * Fix cpc_condvar_count
+
 16 November 2010: cpc 0.1
 
   * Initial public release.

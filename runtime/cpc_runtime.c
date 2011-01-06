@@ -529,7 +529,7 @@ cpc_condvar_count(cpc_condvar *cond)
     cont = cond->queue.head;
     while(cont) {
         i++;
-        cont = cont->next;
+        cont = cont->cond_next;
     }
     return i;
 }
