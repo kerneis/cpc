@@ -39,3 +39,6 @@
   => it's all about doubles (which are 16-bit aligned).
   => more generally, reordering function parameters in (generated) cps
   functions would be a good idea.
+
+[bin/cpc.in]
+* Fix paths
