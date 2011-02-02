@@ -11,12 +11,11 @@ set -e
 
 defobject=a.out
 
-while getopts cgOto: f; do
+while getopts cgOo: f; do
     case $f in
         c) nolink=-c; unset defobject;;
         g) debug=-g; cildebug="--debug debug";;
         O) optimise=-O3;;
-        t) tail=-t; taildef=-DCPC_TAIL_RECURSIVE_COMPILER;;
         o) object="$OPTARG";;
     esac
 done
@@ -33,7 +32,7 @@ source="$1"
 defobject="${defobject:-"${source%.cpc}.o"}"
 object=${object:-"$defobject"}
 
-gcc -E -x c $LOCAL_INC -include cpc/cpc_runtime.h -Wall \
+gcc -E -x c $LOCAL_INC -Wall \
   $taildef  -o "$source.i" "$source"
 $CPC "$source.i" $cildebug --out "$source.i.c"
 gcc -Wall $nolink $debug $optimise $taildef $LOCAL_LIB -lm -pthread -o "$object" \

@@ -40,5 +40,3 @@
   => more generally, reordering function parameters in (generated) cps
   functions would be a good idea.
 
-[bin/cpc.in]
-* Fix paths
