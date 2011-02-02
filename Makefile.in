@@ -139,7 +139,7 @@ ocamlbuild:
 
 cpc: $(BUILDER)
 	cp $(OBJDIR)/cilly$(EXE) bin/cpc$(EXE)
-	cd runtime; $(MAKE) clean all
+	cd runtime; $(MAKE) all
 
 samples: cpc
 	cd samples; $(MAKE) clean all
