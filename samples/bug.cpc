@@ -1,3 +1,4 @@
+#include <cpc/cpc_runtime.h>
 /* EXPECTED OUTPUT
 0 17 16 33
 * END OF OUTPUT */

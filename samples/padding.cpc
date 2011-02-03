@@ -1,3 +1,4 @@
+#include <cpc/cpc_runtime.h>
 /* EXPECTED OUTPUT (42^2=1764)
 1764
 * END OF OUTPUT */

@@ -28,8 +28,7 @@ test/%: % %.output
 	@ echo $@: SUCCESS
 
 static-httpd.cpi: trivial-httpd.cpc
-	$(CPP) -x c $(CFLAGS) $(CLIBS) -include cpc/cpc_runtime.h \
-	-DSTATIC -o $@ $<
+	$(CPP) -x c $(CFLAGS) $(CLIBS) -DSTATIC -o $@ $<
 
 static-httpd-fork.o: trivial-httpd-fork.c
 	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
@@ -55,8 +54,7 @@ clean:
 	rm -f $(BASICS) $(EXTENDED) $(SERVERS)
 
 %.cpi: %.cpc
-	$(CPP) -x c $(CFLAGS) $(CLIBS) -include cpc/cpc_runtime.h \
-	  -o $@ $<
+	$(CPP) -x c $(CFLAGS) $(CLIBS) -o $@ $<
 %.c: %.cpi
 	$(CPC) $(CPCOPTS) $< --out $@
 

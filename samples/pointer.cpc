@@ -1,3 +1,4 @@
+#include <cpc/cpc_runtime.h>
 // should print: 42
 cps void set_point(int *p) { *p = 42; }
 cps void print(int i) { printf("%d\n", i); }
