@@ -12,6 +12,10 @@
 #include <pthread.h>
 #include <signal.h>
 
+#ifndef SOL_TCP
+# define SOL_TCP IPPROTO_TCP
+#endif
+
 void *accept_connection(void *fd);
 void *handle_connection(void *fd2);
 
