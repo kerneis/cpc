@@ -8,8 +8,8 @@ LDLIBS=-L../runtime -lm -pthread -lcpcfull
 .PHONY: all clean servers test
 
 BASICS=barrier boxing bug conditions done loops patch padding sleep\
-    sleep_cond detached-torture sleep-torture conditions-torture
-EXTENDED=ampersand nontailcall pointer tcat tcat_fd trivial-httpd
+    sleep_cond detached-torture sleep-torture conditions-torture pointer
+EXTENDED=ampersand nontailcall tcat tcat_fd trivial-httpd
 SERVERS=trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
 	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
 	 trivial-httpd-pth static-httpd-pth
