@@ -30,7 +30,7 @@ THE SOFTWARE.
 
 #ifndef USE_ATOMIC_INTRINSICS
 
-/* This should be safe, since every lock will ack as a memory barrier. */
+/* This should be safe, since every lock will act as a memory barrier. */
 
 typedef volatile int atomic_bool;
 
