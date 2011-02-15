@@ -78,10 +78,10 @@ atomic_reset(atomic_bool *a)
 
 #endif
 
-struct threadpool_queue {
+typedef struct threadpool_queue {
     threadpool_item_t *first;
     threadpool_item_t *last;
-};
+} threadpool_queue_t;
 
 struct threadpool {
     int maxthreads, threads, idle;

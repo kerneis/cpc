@@ -28,8 +28,6 @@ typedef struct threadpool_item {
     struct threadpool_item *next;
 } threadpool_item_t;
 
-typedef struct threadpool_queue threadpool_queue_t;
-
 typedef struct threadpool threadpool_t;
 
 /* Create a new thread pool.  The wake up callback will be called often
