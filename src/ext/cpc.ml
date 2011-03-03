@@ -137,6 +137,7 @@ let is_safe f =
       hasAttribute "cpc_no_retain" f.vattr ||
       StringSet.mem f.vname !safe_functions
 
+
 class initAmpSet = object(self)
     inherit mynopCilVisitor
 
@@ -212,7 +213,6 @@ class initAmpSet = object(self)
       end else
         SkipChildren
 end
-
 
 let rec xform_switch_stmt s = begin
   if not(!break_dest == dummyStmt) then
@@ -1247,6 +1247,160 @@ class avoidAmpersand f =
     SkipChildren (* No CpcFun thanks to initial lambda-lifting *)
 end
 
+
+
+(******************************************************************************)
+(*                                                                            *)
+(*                            Creating environment                            *)
+(*                                                                            *)
+(******************************************************************************)
+
+class createEnv f =
+  (* malloc function declaration *)
+  let malloc : Cil.exp =
+    let fun_type =
+      let fun_args_type = Some ["size", !typeOfSizeOf, []]
+      and fun_ret_type = voidPtrType in
+      TFun (fun_ret_type, fun_args_type, false, [])
+    in
+    Lval( Var(findOrCreateFunc f "malloc" fun_type), NoOffset)
+  in
+  (* free function declaration *)
+  let free : Cil.exp =
+    let fun_type =
+      let fun_args_type = Some ["ptr", voidPtrType, []]
+      and fun_ret_type = voidType in
+      TFun (fun_ret_type, fun_args_type, false, [])
+    in
+    Lval( Var(findOrCreateFunc f "free" fun_type), NoOffset)
+  in
+  (* avoid "Not Found" without any other information ! *)
+  let safeGetCompField comp_info vname =
+    try
+      getCompField comp_info vname
+    with
+      | e -> E.s (E.bug "getCompField %s %s failed (%s)\n" comp_info.cname vname
+        (if e = Not_found then "not found" else "unknown error"))
+  in
+
+
+object (self)
+  inherit mynopCilVisitor
+
+  method vglob = function
+    | GFun ({svar     = {vtype = TFun(ret_typ, _, va, attr);
+                         vcps  = true};
+             sformals = args} as fd,
+            _) as g ->
+      (* get all variables and params (locals and formals), reset locals *)
+      let vars : Cil.varinfo list = args @ fd.slocals in
+      let vars_id = List.map (fun v -> v.vid) vars in
+      let is_var vid = List.mem vid vars_id in
+      fd.slocals <- [];
+
+      (* create the structure*)
+      let rec build_struct = function
+        | [] -> []
+        | var :: q ->
+            (var.vname, var.vtype, None, [], locUnknown) :: build_struct q
+      in
+      let fields = build_struct vars in
+      let env_struct =
+        mkCompInfo
+          true
+          (fd.svar.vname ^ "_env")
+          (fun _ -> fields)
+          []
+      in
+
+      (* create the structure declaration and local variable *)
+      let comptag = GCompTag (env_struct, locUnknown) in
+      let cpc_env =
+        makeLocalVar fd "cpc_env" (TPtr(TComp(env_struct, []),[]))
+      in
+
+
+      (* create the allocation statement *)
+      (* TODO use cpc_alloc; keeping it simple to begin with *)
+      (* malloc instruction *)
+      let malloc_instr =
+        let starEnv = mkMem (Lval (Var cpc_env, NoOffset)) NoOffset in
+        let ret_val = Some(Var cpc_env, NoOffset) in
+        (* env = malloc(sizeof(typeof( *env ))) *)
+        Call(ret_val, malloc, [sizeOf (typeOfLval starEnv)], locUnknown)
+      in
+      (* inits statement (for each args) *)
+      let fieldnames = List.map (fun x -> x.vname) args in
+      let fieldinfos = List.map (fun x -> safeGetCompField env_struct x) fieldnames
+      in
+      let make_init v f =
+        (* f_env -> field = field *)
+        Set(
+          mkMem (Lval (Var cpc_env, NoOffset)) (Field (f, NoOffset)),
+          Lval (Var v, NoOffset),
+          locUnknown
+        )
+      in
+      let init_instrs = List.map2 make_init args fieldinfos in
+      let instructions = Instr (malloc_instr :: init_instrs) in
+
+      (* put some derefs *)
+      let add_struct_access stmt =
+        let asa_visitor = (
+          object (self)
+            inherit nopCilVisitor
+
+            method vlval = function
+              | (Var v, _) when is_var (v.vid) ->
+                  let v_field = safeGetCompField env_struct v.vname in
+                  let env_lval = Lval (Var cpc_env, NoOffset) in
+                  let v' = mkMem env_lval (Field (v_field, NoOffset)) in
+                  ChangeTo v'
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt asa_visitor stmt
+      in
+      let bstmt_with_struct_access =
+        List.map add_struct_access fd.sbody.bstmts in
+
+      (* add free statements *)
+      let free_instr =
+        let arg = [mkCast (Lval (Var cpc_env, NoOffset)) voidPtrType] in
+        Instr [Call (None, free, arg, locUnknown)]
+      in
+      let add_free stmt =
+        let free_visitor = (
+          object (self)
+            inherit mynopCilVisitor
+
+            method vstmt s = match s.skind with
+              | Return (retval, loc) ->
+                  let free_stmt = mkStmt free_instr in
+                  s.skind <- Block (mkBlock [free_stmt]);
+                  SkipChildren
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt free_visitor stmt
+      in
+      let bstmt_with_frees =
+        List.map add_free bstmt_with_struct_access in
+
+      (* complete function *)
+      fd.sbody.bstmts <- (mkStmt instructions :: bstmt_with_frees);
+      fd.slocals <- [cpc_env];
+
+      (* Complete global déclarations *)
+        ChangeTo [comptag; g]
+
+    | _ -> SkipChildren
+
+end
+
+
 (********************* Assignment of cps return values ***********************)
 
 class cpsReturnValues = object(self)
@@ -1295,7 +1449,7 @@ let contains_nasty args =
       (* if a local variable has its address retained,
          avoidAmpersand has boxed it, and vlval has raised an exception
          before we get here, detecting the box. *)
-      assert(not (must_be_boxed v));
+      (* assert(not (must_be_boxed v)); XXX No more true with environments *)
       DoChildren
 
     method vlval = function
@@ -1989,6 +2143,7 @@ let stages = [
   visitCilFileSameGlobals (new uniqueVarinfo) file);
   ("Initialize label table\n", fun file ->
   visitCilFileSameGlobals (new initLabelTbl) file);
+  (*
   ("Initialize ampersand table\n", fun file ->
   visitCilFileSameGlobals (new initAmpSet) file);
   (* WARNING: do not call uniqueVarinfo between building and using
@@ -1996,6 +2151,9 @@ let stages = [
    *)
   ("Avoid ampersand\n", fun file ->
   visitCilFileSameGlobals (new avoidAmpersand file) file);
+  *)
+  ("creating environment\n", fun file ->
+     visitCilFile (new createEnv file) file);
   ("Remove nasty expressions\n", fun file ->
   visitCilFileSameGlobals (new removeNastyExpressions) file);
   ("Handle assignment cps return values\n", fun file ->
