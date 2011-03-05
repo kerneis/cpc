@@ -1399,7 +1399,6 @@ object (self)
 
       (* complete function *)
       fd.sbody.bstmts <- (mkStmt instructions :: bstmt_with_frees);
-      fd.slocals <- [cpc_env];
 
       (* Complete global déclarations *)
         ChangeTo [comptag; g]
