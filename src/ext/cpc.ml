@@ -1344,7 +1344,7 @@ object (self)
       let init_instrs = List.map2 make_init args fieldinfos in
       let instructions = Instr (malloc_instr :: init_instrs) in
 
-      (* put some derefs *)
+      (* put some indirections *)
       let add_struct_access stmt =
         let asa_visitor = (
           object (self)
@@ -1368,7 +1368,7 @@ object (self)
       (* add free statements *)
       let free_instr =
         let arg = [mkCast (Lval (Var cpc_env, NoOffset)) voidPtrType] in
-        Instr [Call (None, free, arg, locUnknown)]
+        Call (None, free, arg, locUnknown)
       in
       let add_free stmt =
         let free_visitor = (
@@ -1377,8 +1377,16 @@ object (self)
 
             method vstmt s = match s.skind with
               | Return (retval, loc) ->
-                  let free_stmt = mkStmt free_instr in
-                  s.skind <- Block (mkBlock [free_stmt]);
+                  let ret_val, assign_and_free_instr = match retval with
+                    | None -> None, [free_instr]
+                    | Some rval ->
+                        let r = make_ret_var fd ret_typ in
+                        (Some (Lval (Var r, NoOffset)),
+                         [Set((Var r, NoOffset), rval, loc); free_instr])
+                  in
+                  let free_stmt = mkStmt (Instr (assign_and_free_instr))
+                  and return_stmt = mkStmt (Return(ret_val, loc)) in
+                  s.skind <- Block (mkBlock [free_stmt; return_stmt]);
                   SkipChildren
               | _ -> DoChildren
 
