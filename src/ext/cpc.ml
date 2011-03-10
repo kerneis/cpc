@@ -1255,16 +1255,13 @@ end
 (*                                                                            *)
 (******************************************************************************)
 
-class createEnv f =
-  (* malloc function declaration *)
-  let malloc : Cil.exp =
-    let fun_type =
-      let fun_args_type = Some ["size", !typeOfSizeOf, []]
-      and fun_ret_type = voidPtrType in
-      TFun (fun_ret_type, fun_args_type, false, [])
-    in
-    Lval( Var(findOrCreateFunc f "malloc" fun_type), NoOffset)
-  in
+(*** First step ***)
+(* Some global variables to be used between passes *)
+
+(* [f, f_env] *)
+let envList (* : (fundec, varinfo) list ref *) = ref []
+
+class addEnvStruct f =
   (* free function declaration *)
   let free : Cil.exp =
     let fun_type =
@@ -1274,16 +1271,9 @@ class createEnv f =
     in
     Lval( Var(findOrCreateFunc f "free" fun_type), NoOffset)
   in
-  (* avoid "Not Found" without any other information ! *)
-  let safeGetCompField comp_info vname =
-    try
-      getCompField comp_info vname
-    with
-      | e -> E.s (E.bug "getCompField %s %s failed (%s)\n" comp_info.cname vname
-        (if e = Not_found then "not found" else "unknown error"))
-  in
 
 
+(* We will just create a void pointer. His type will be change in the future. *)
 object (self)
   inherit mynopCilVisitor
 
@@ -1291,82 +1281,13 @@ object (self)
     | GFun ({svar     = {vtype = TFun(ret_typ, _, va, attr);
                          vcps  = true};
              sformals = args} as fd,
-            _) as g ->
-      (* get all variables and params (locals and formals), reset locals *)
-      let vars : Cil.varinfo list = args @ fd.slocals in
-      let vars_id = List.map (fun v -> v.vid) vars in
-      let is_var vid = List.mem vid vars_id in
-      fd.slocals <- [];
-
-      (* create the structure*)
-      let rec build_struct = function
-        | [] -> []
-        | var :: q ->
-            (var.vname, var.vtype, None, [], locUnknown) :: build_struct q
-      in
-      let fields = build_struct vars in
-      let env_struct =
-        mkCompInfo
-          true
-          (fd.svar.vname ^ "_env")
-          (fun _ -> fields)
-          []
-      in
-
-      (* create the structure declaration and local variable *)
-      let comptag = GCompTag (env_struct, locUnknown) in
-      let cpc_env =
-        makeLocalVar fd "cpc_env" (TPtr(TComp(env_struct, []),[]))
-      in
-
-
-      (* create the allocation statement *)
-      (* TODO use cpc_alloc; keeping it simple to begin with *)
-      (* malloc instruction *)
-      let malloc_instr =
-        let starEnv = mkMem (Lval (Var cpc_env, NoOffset)) NoOffset in
-        let ret_val = Some(Var cpc_env, NoOffset) in
-        (* env = malloc(sizeof(typeof( *env ))) *)
-        Call(ret_val, malloc, [sizeOf (typeOfLval starEnv)], locUnknown)
-      in
-      (* inits statement (for each args) *)
-      let fieldnames = List.map (fun x -> x.vname) args in
-      let fieldinfos = List.map (fun x -> safeGetCompField env_struct x) fieldnames
-      in
-      let make_init v f =
-        (* f_env -> field = field *)
-        Set(
-          mkMem (Lval (Var cpc_env, NoOffset)) (Field (f, NoOffset)),
-          Lval (Var v, NoOffset),
-          locUnknown
-        )
-      in
-      let init_instrs = List.map2 make_init args fieldinfos in
-      let instructions = Instr (malloc_instr :: init_instrs) in
-
-      (* put some indirections *)
-      let add_struct_access stmt =
-        let asa_visitor = (
-          object (self)
-            inherit nopCilVisitor
-
-            method vlval = function
-              | (Var v, _) when is_var (v.vid) ->
-                  let v_field = safeGetCompField env_struct v.vname in
-                  let env_lval = Lval (Var cpc_env, NoOffset) in
-                  let v' = mkMem env_lval (Field (v_field, NoOffset)) in
-                  ChangeTo v'
-              | _ -> DoChildren
-
-          end)
-        in
-        visitCilStmt asa_visitor stmt
-      in
-      let bstmt_with_struct_access =
-        List.map add_struct_access fd.sbody.bstmts in
+            _) ->
+      (* create the structure local variable *)
+      let cpc_env = makeLocalVar fd "cpc_env" (TPtr(voidPtrType,[])) in
+      envList := (fd, cpc_env) :: !envList;
 
       (* add free statements *)
-      let free_instr =
+      let free_instr = (* free((void* ) env); *)
         let arg = [mkCast (Lval (Var cpc_env, NoOffset)) voidPtrType] in
         Call (None, free, arg, locUnknown)
       in
@@ -1394,18 +1315,241 @@ object (self)
         in
         visitCilStmt free_visitor stmt
       in
-      let bstmt_with_frees =
-        List.map add_free bstmt_with_struct_access in
+      let bstmt_with_frees = List.map add_free fd.sbody.bstmts in
 
       (* complete function *)
-      fd.sbody.bstmts <- (mkStmt instructions :: bstmt_with_frees);
+      fd.sbody.bstmts <- bstmt_with_frees;
 
-      (* Complete global déclarations *)
-        ChangeTo [comptag; g]
+      (* ok, next job... *)
+      SkipChildren
 
     | _ -> SkipChildren
 
 end
+
+(*** Second step ***)
+class createEnv2 f =
+  (* malloc function declaration *)
+  let malloc : Cil.exp =
+    let fun_type =
+      let fun_args_type = Some ["size", !typeOfSizeOf, []]
+      and fun_ret_type = voidPtrType in
+      TFun (fun_ret_type, fun_args_type, false, [])
+    in
+    Lval( Var(findOrCreateFunc f "malloc" fun_type), NoOffset)
+  in
+  (* provide a solution to remplace a variable by another in a statement.
+     (used for cpc_env) *)
+  let variable_remplacer old_var new_var stmt =
+    let vr_visitor = (
+      object (self)
+        inherit mynopCilVisitor
+
+        method vstmt s = match s.skind with
+          | CpcFun _ -> SkipChildren
+          | _ -> DoChildren
+
+        method vvrbl v =
+          if v.vid = old_var.vid
+          then ChangeTo new_var
+          else SkipChildren
+      end)
+    in
+    visitCilStmt vr_visitor stmt
+  in
+  (* avoid "Not Found" without any other information ! *)
+  let safeGetCompField comp_info vname =
+    try
+      getCompField comp_info vname
+    with
+      | e -> E.s (E.bug "getCompField %s %s failed (%s)\n" comp_info.cname vname
+        (if e = Not_found then "not found" else "unknown error"))
+  in
+
+object (self)
+  inherit mynopCilVisitor
+
+  method vglob = function
+    | GFun ({svar     = {vtype = TFun(ret_typ, _, va, attr);
+                         vcps  = true};
+             sformals = args} as fd,
+            _) as g ->
+      (* retreive environment from Env1's step *)
+      let cpc_env =
+        try List.assoc fd !envList
+        with Not_found ->
+          E.s (E.bug "Env2: missmatching env for function %s" fd.svar.vname)
+      in
+
+      (* get all variables (locals and formals), reset locals *)
+      (* TODO: il faut mieux sélectionner les variables... et comme je ne
+         descends pas dans les sous-fonctions, j'en oublie sans aucun doute
+         ici. *)
+      let filter_cpc_env lst v = if v.vid = cpc_env.vid then lst else v::lst in
+      let vars : Cil.varinfo list =
+        List.fold_left filter_cpc_env args fd.slocals
+      in
+      let vars_id = List.map (fun v -> v.vid) vars in
+      let is_var vid = List.mem vid vars_id in
+      fd.slocals <- [cpc_env];
+
+      (* create the structure*)
+      let rec build_struct = function
+        | [] -> []
+        | var :: q ->
+            (var.vname, var.vtype, None, [], locUnknown) :: build_struct q
+      in
+      let fields = build_struct vars in
+      let env_struct : Cil.compinfo =
+        mkCompInfo
+          true
+          (fd.svar.vname ^ "_env")
+          (fun _ -> fields)
+          []
+      in
+      (* create the structure declaration and local variable *)
+      let comptag = GCompTag (env_struct, locUnknown) in
+      cpc_env.vtype <- TPtr(TComp(env_struct, []),[]);
+
+      (* malloc and inits the environment structure *)
+      (* create the malloc instruction *)
+      let malloc_instr =
+        let starEnv = mkMem (Lval (Var cpc_env, NoOffset)) NoOffset in
+        let ret_val = Some(Var cpc_env, NoOffset) in
+        (* env = malloc(sizeof(typeof( *env ))) *)
+        Call(ret_val, malloc, [sizeOf (typeOfLval starEnv)], locUnknown)
+      in
+
+      (* create the initialisation instructions *)
+      let fieldnames = List.map (fun x -> x.vname) args in
+      let fieldinfos = List.map (fun x -> safeGetCompField env_struct x) fieldnames
+      in
+      let make_init v f =
+        (* f_env -> field = field *)
+        Set(
+          mkMem (Lval (Var cpc_env, NoOffset)) (Field (f, NoOffset)),
+          Lval (Var v, NoOffset),
+          locUnknown
+        )
+      in
+      let init_instrs = List.map2 make_init args fieldinfos in
+      let instructions = Instr (malloc_instr::init_instrs) in
+
+      (* put some indirections *)
+      let add_struct_access stmt =
+        let asa_visitor = (
+          object (self)
+            inherit nopCilVisitor
+
+            method vlval = function
+              | (Var v, _) when is_var (v.vid) ->
+                  let v_field = safeGetCompField env_struct v.vname in
+                  let env_lval = Lval (Var cpc_env, NoOffset) in
+                  let v' = mkMem env_lval (Field (v_field, NoOffset)) in
+                  ChangeTo v'
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt asa_visitor stmt
+      in
+      let bstmt_with_struct_access =
+        List.map add_struct_access fd.sbody.bstmts in
+
+      (* replace sub-functions cpc_env, and add it as argument. *)
+      (* find sub-functions ID *)
+      let funId_list = ref [] in
+      let funId_finder stmt =
+        let funId_visitor = (
+          object (self)
+            inherit mynopCilVisitor
+
+            method vstmt s = match s.skind with
+              | CpcFun (local_fd, _) ->
+                  funId_list := local_fd.svar.vid :: !funId_list;
+                  DoChildren
+              | _ -> DoChildren
+          end)
+        in
+        visitCilStmt funId_visitor stmt
+      in
+      (* now, just update the mutable variable *)
+      let _ = List.map funId_finder bstmt_with_struct_access in
+
+
+      (* add env arguments to sub-functions-call *)
+      let add_args stmt =
+        let isOurFunction nfos = (* is a sub-function *)
+          let varFromLhost = function
+            | Var v -> List.mem v.vid !funId_list
+            | _ -> false
+          in
+          match nfos with
+          | Lval l -> varFromLhost (fst l)
+          | _ -> assert false
+        in
+        let fun_visitor = (
+          object (self)
+            inherit mynopCilVisitor
+
+            method vinst i = match i with
+              | Call (ret, nfos, args, loc) ->
+                  if isOurFunction nfos
+                  then begin
+                    assert (args = []); (* because i'm sad if not *)
+                    let new_args = [Lval (Var cpc_env, NoOffset)] in
+                    ChangeTo [Call (ret, nfos, new_args, loc)]
+                  end else SkipChildren
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt fun_visitor stmt
+      in
+      let bstmt_with_env_in_args = List.map add_args bstmt_with_struct_access in
+
+
+      (* replace... *)
+      let add_params stmt =
+        let fun_visitor = (
+          object (self)
+            inherit mynopCilVisitor
+
+            method vstmt s = match s.skind with
+              | CpcFun (local_fd, _) ->
+                  (* I think that it's true: *)
+                  assert (local_fd.sformals = []);
+                  (* create the new env param *)
+                  let local_cpc_env =
+                    makeFormalVar
+                      local_fd
+                      cpc_env.vname
+                      (TPtr(TComp(env_struct, []),[]));
+                  in
+                  (* replace the old env var by the new *)
+                  let replace = variable_remplacer cpc_env local_cpc_env in
+                  let new_stmts = List.map replace local_fd.sbody.bstmts in
+                  local_fd.sbody.bstmts <- new_stmts;
+                  DoChildren
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt fun_visitor stmt
+      in
+      let bstmt_with_params = List.map add_params bstmt_with_env_in_args in
+
+
+      (* complete function *)
+      fd.sbody.bstmts <- (mkStmt instructions :: bstmt_with_params);
+
+      (* Complete global déclarations *)
+      ChangeTo [comptag; g]
+
+    | _ -> SkipChildren
+
+end
+
 
 
 (********************* Assignment of cps return values ***********************)
@@ -2159,8 +2303,8 @@ let stages = [
   ("Avoid ampersand\n", fun file ->
   visitCilFileSameGlobals (new avoidAmpersand file) file);
   *)
-  ("creating environment\n", fun file ->
-     visitCilFile (new createEnv file) file);
+  ("adding an empty environment with frees and mallocs\n", fun file ->
+     visitCilFileSameGlobals (new addEnvStruct file) file);
   ("Remove nasty expressions\n", fun file ->
   visitCilFileSameGlobals (new removeNastyExpressions) file);
   ("Handle assignment cps return values\n", fun file ->
@@ -2169,6 +2313,8 @@ let stages = [
   fun file -> visitCilFileSameGlobals (new insertGotos) file);
   ("Cps marking\n", fun file ->
   cps_marking file);
+  ("fill environment, indirect...\n", fun file ->
+     visitCilFile (new createEnv2 file) file);
   ("Percolating local variables\n", fun file ->
   percolateLocals file);
   ("Lambda-lifting\n", fun file ->
