@@ -1271,6 +1271,14 @@ class addEnvStruct f =
     in
     Lval( Var(findOrCreateFunc f "free" fun_type), NoOffset)
   in
+  let modified_functions = ref [] in
+  let setAsModified vid = modified_functions := vid::!modified_functions in
+  let hasBeenModified vid = List.mem vid !modified_functions in
+  let null_ptr = mkCast (integer 0) voidPtrType in
+  let notVoid ret_typ = match ret_typ with
+    | TVoid _ -> false
+    | _ -> true
+  in
 
 
 (* We will just create a void pointer. His type will be change in the future. *)
@@ -1278,15 +1286,61 @@ object (self)
   inherit mynopCilVisitor
 
   method vglob = function
-    | GFun ({svar     = {vtype = TFun(ret_typ, _, va, attr);
+    (* special case for extern functions *)
+    | (GVarDecl ({vtype=TFun(ret_typ, param_type, va, attr);
+                  vcps = true;
+                  vstorage = Extern;} as v,
+                 _)) when notVoid ret_typ ->
+      let new_ret_type = TPtr (ret_typ, []) in
+      let new_param_type : (string * Cil.typ * Cil.attributes) list option =
+        let params = match param_type with
+          | None -> []
+          | Some lst -> lst
+        in
+        Some (("cpc_ret_addr", new_ret_type, []) :: params)
+      in
+      let new_fun_type = TFun (voidType, new_param_type, va, attr) in
+      v.vtype <- new_fun_type;
+      setAsModified v.vid;
+      SkipChildren
+
+
+    (* change function body *)
+    | GFun ({svar     = {vtype = TFun(ret_typ, param_type, va, attr);
                          vcps  = true};
              sformals = args} as fd,
             _) ->
       (* create the structure local variable *)
       let cpc_env = makeLocalVar fd "cpc_env" (TPtr(voidPtrType,[])) in
+      (* XXX would voidPtrType be enough? *)
       envList := (fd, cpc_env) :: !envList;
 
-      (* add free statements *)
+      (* add return arg *)
+      let (lazy_FRV, lazy_SFRV) = if notVoid ret_typ then begin
+        (* remove return value type *)
+        let new_ret_type = TPtr (ret_typ, []) in
+        let new_param_type : (string * Cil.typ * Cil.attributes) list option =
+          let params = match param_type with
+            | None -> []
+            | Some lst -> lst
+          in
+          Some (("cpc_ret_addr", new_ret_type, []) :: params)
+        in
+        let new_fun_type = TFun (voidType, new_param_type, va, attr) in
+        fd.svar.vtype <- new_fun_type;
+        setAsModified fd.svar.vid;
+
+        (* add new return value as first argument *)
+        let fd_ret_val =
+          makeFormalVar fd ~where:"^" "cpc_ret_addr" new_ret_type
+        in
+        let star_fd_ret_val=mkMem (Lval (Var fd_ret_val, NoOffset)) NoOffset in
+        (lazy fd_ret_val, lazy star_fd_ret_val)
+      end else let lazy_false = lazy (assert false) in (lazy_false, lazy_false)
+      in
+
+
+      (* add free statements and convert Returns *)
       let free_instr = (* free((void* ) env); *)
         let arg = [mkCast (Lval (Var cpc_env, NoOffset)) voidPtrType] in
         Call (None, free, arg, locUnknown)
@@ -1298,16 +1352,39 @@ object (self)
 
             method vstmt s = match s.skind with
               | Return (retval, loc) ->
-                  let ret_val, assign_and_free_instr = match retval with
-                    | None -> None, [free_instr]
+                  let return_stmt = mkStmt (Return(None, loc))
+                  and free_stmt = mkStmt (Instr [free_instr]) in
+                  let stmts = match retval with
+                    | None -> [free_stmt; return_stmt]
+                        (* return; yields:
+                           free(cpc_env);
+                           return;
+                        *)
                     | Some rval ->
-                        let r = make_ret_var fd ret_typ in
-                        (Some (Lval (Var r, NoOffset)),
-                         [Set((Var r, NoOffset), rval, loc); free_instr])
+                        (* return x; yields:
+                           if(cpc_ret != NULL) {
+                               *cpc_ret = rval;
+                           }
+                           free(cpc_env);
+                           return;
+                        *)
+                        let retval_assign_instr =
+                          Set(Lazy.force lazy_SFRV, rval, loc)
+                        in
+                        let if_stmt =
+                          let if_cond =
+                            BinOp (Ne,
+                                   Lval (Var (Lazy.force lazy_FRV), NoOffset),
+                                   null_ptr,
+                                   intType)
+                          and if_then =
+                            mkBlock [mkStmt (Instr [retval_assign_instr])]
+                          and if_else = mkBlock [] in
+                          mkStmt (If (if_cond, if_then, if_else, locUnknown))
+                        in
+                        [if_stmt; free_stmt; return_stmt]
                   in
-                  let free_stmt = mkStmt (Instr (assign_and_free_instr))
-                  and return_stmt = mkStmt (Return(ret_val, loc)) in
-                  s.skind <- Block (mkBlock [free_stmt; return_stmt]);
+                  s.skind <- Block (mkBlock stmts);
                   SkipChildren
               | _ -> DoChildren
 
@@ -1321,9 +1398,32 @@ object (self)
       fd.sbody.bstmts <- bstmt_with_frees;
 
       (* ok, next job... *)
-      SkipChildren
+      DoChildren
 
-    | _ -> SkipChildren
+    | _ -> DoChildren
+
+
+  method vinst = function
+    | Call (lval_opt,
+            (Lval(Var({vtype=TFun(ret_typ, arg_lst_typ,_,_);
+                       vcps = true;} as vinfo),_)as f),
+            arg_lst,
+            loc) ->
+        (* y = f(x); with f a cps function, yields:
+           f(&y, x);
+        *)
+        let change retVal = ChangeTo [Call(None, f, retVal::arg_lst, loc)] in
+        begin match lval_opt, ret_typ with
+          | None, TVoid _ ->
+              if hasBeenModified vinfo.vid
+              then change null_ptr
+              else DoChildren
+          | None, _       ->
+              change null_ptr
+          | Some v, _     ->
+              change (mkAddrOf v)
+        end
+    | _ -> DoChildren
 
 end
 
