@@ -1091,6 +1091,7 @@ class cpsConverter = fun file ->
         | [x] -> x
         | _ -> assert false end;
       cps_function <- true;
+
       fd.sbody.bstmts <-
         mkStmt(Instr (
           (* XXX DEBUGING *)
@@ -1766,7 +1767,7 @@ end
 
 let rec insert_gotos il =
   let rec split acc l = match l with
-  | Call(Some(Var _, NoOffset), Lval(Var f, NoOffset), _, _)::_ when f.vcps ->
+  | Call(_, Lval(Var f, NoOffset), _, _)::_ when f.vcps ->
       (mkStmt (Instr (List.rev (List.hd l :: acc))), List.tl l, true)
   | hd :: tl -> split (hd :: acc) tl
   | [] -> (mkStmt (Instr (List.rev acc)), [], false) in
