@@ -2406,8 +2406,10 @@ let stages = [
   *)
   ("adding an empty environment with frees and mallocs\n", fun file ->
      visitCilFileSameGlobals (new addEnvStruct file) file);
+  (*
   ("Remove nasty expressions\n", fun file ->
   visitCilFileSameGlobals (new removeNastyExpressions) file);
+  *)
   ("Handle assignment cps return values\n", fun file ->
   visitCilFileSameGlobals (new cpsReturnValues) file);
   ("Insert gotos after cps assignments and returns after cpc_done\n",
