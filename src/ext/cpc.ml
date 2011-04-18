@@ -2049,8 +2049,7 @@ let feature : featureDescr =
        cpc_continuation_patch from the runtime library" ^ is_default(!external_patch));
        ("--noexternal-patch",Arg.Clear external_patch," generate inline \
        patching" ^ is_default(not !external_patch));
-       ("--packed", Arg.Clear aligned_continuations, " compact continuations \
-       (BROKEN)");
+       ("--packed", Arg.Clear aligned_continuations, " compact continuations");
       ];
     fd_doit = doit;
     fd_post_check = true;

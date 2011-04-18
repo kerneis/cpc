@@ -534,20 +534,41 @@ cpc_condvar_count(cpc_condvar *cond)
     return i;
 }
 
+#ifdef CPC_COMPACT_CONTINUATIONS
+#define LAST_ARG(type, arg) type arg;}__attribute((packed))
+#else
+#define LAST_ARG(type, arg) type arg __attribute((aligned));}
+#endif
+
+#define cps_expand1(name,type,arg)\
+    struct name##_arglist {\
+        LAST_ARG(type,arg);\
+    cpc_continuation *\
+    name(struct cpc_continuation *cont)\
+    {\
+        struct name##_arglist *cpc_arguments ;\
+        cpc_arguments = (struct name##_arglist *) cpc_dealloc(cont,\
+                        (int )sizeof(struct name##_arglist ));\
+        type arg = cpc_arguments -> arg;
+
+#define cps_expand3(name,type1,arg1,type2,arg2,type3,arg3) \
+    struct name##_arglist {\
+        type1 arg1;\
+        type2 arg2;\
+        LAST_ARG(type3,arg3);\
+    cpc_continuation *\
+    name(struct cpc_continuation *cont)\
+    {\
+        struct name##_arglist *cpc_arguments ;\
+        cpc_arguments = (struct name##_arglist *) cpc_dealloc(cont,\
+                        (int )sizeof(struct name##_arglist ));\
+        type1 arg1 = cpc_arguments -> arg1;\
+        type2 arg2 = cpc_arguments -> arg2;\
+        type3 arg3 = cpc_arguments -> arg3;
+
+
 /* cps int cpc_wait(cpc_condvar *cond) */
-struct cpc_wait_arglist {
-   cpc_condvar *cond __attribute__((__aligned__));
-} ;
-cpc_continuation *
-cpc_wait(struct cpc_continuation *cont)
-{
-    cpc_condvar *cond;
-    struct cpc_wait_arglist *cpc_arguments ;
-
-    cpc_arguments = (struct cpc_wait_arglist *) cpc_dealloc(cont,
-                    (int )sizeof(struct cpc_wait_arglist ));
-    cond = cpc_arguments->cond;
-
+cps_expand1(cpc_wait, cpc_condvar *, cond)
     assert(!IS_DETACHED && cont->condvar == NULL && cont->state == STATE_UNKNOWN);
     cont->condvar = cond;
     cond_enqueue(&cond->queue, cont);
@@ -591,25 +612,8 @@ cpc_signal_all(cpc_condvar *cond)
 
 /*** cpc_sleep ***/
 
-/* cps int cpc_sleep(int sec, int usec, cpc_condvar *c) */
-struct cpc_sleep_arglist {
-   int sec ;
-   int usec ;
-   cpc_condvar *cond  __attribute__((__aligned__));
-} ;
-cpc_continuation *
-cpc_sleep(struct cpc_continuation *cont)
-{
-    int sec, usec;
-    cpc_condvar *cond;
-    struct cpc_sleep_arglist *cpc_arguments ;
-
-    cpc_arguments = (struct cpc_sleep_arglist *) cpc_dealloc(cont,
-                    (int )sizeof(struct cpc_sleep_arglist ));
-    sec = cpc_arguments->sec;
-    usec = cpc_arguments->usec;
-    cond = cpc_arguments->cond;
-
+/* cps int cpc_sleep(int sec, int usec, cpc_condvar *cond) */
+cps_expand3(cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
     struct timeval when;
 
     assert(cont);
@@ -728,25 +732,9 @@ recompute_fdsets(int fd)
     }
 }
         
-/* cps int cpc_io_wait(int fd, int direction, cpc_condvar *c) */
-struct cpc_io_wait_arglist {
-   int fd ;
-   int direction ;
-   cpc_condvar *cond __attribute__((__aligned__));
-} ;
-cpc_continuation *
-cpc_io_wait(struct cpc_continuation *cont)
-{
-    int fd, direction, rc;
-    cpc_condvar *cond;
-    struct cpc_io_wait_arglist *cpc_arguments ;
-
-    cpc_arguments = (struct cpc_io_wait_arglist *) cpc_dealloc(cont,
-                    (int )sizeof(struct cpc_io_wait_arglist ));
-    fd = cpc_arguments->fd;
-    direction = cpc_arguments->direction;
-    cond = cpc_arguments->cond;
-
+/* cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond) */
+cps_expand3(cpc_io_wait, int, fd, int, direction, cpc_condvar *, cond)
+    int rc;
 
     if(cont->state == STATE_DETACHED) {
         assert(IS_DETACHED && cond == NULL);
@@ -808,20 +796,8 @@ cpc_signal_fd(int fd, int direction)
 cpc_continuation *cpc_prim_attach(cpc_continuation*);
 cpc_continuation *cpc_prim_detach(cpc_sched*, cpc_continuation*);
 
-/* cps cpc_sched *cpc_attach(cpc_sched *pool) */
-struct cpc_attach_arglist {
-   cpc_sched *sched  __attribute__((__aligned__)) ;
-} ;
-cpc_continuation *
-cpc_attach(struct cpc_continuation *cont)
-{
-    cpc_sched *sched;
-    struct cpc_attach_arglist *cpc_arguments ;
-
-    cpc_arguments = (struct cpc_attach_arglist *) cpc_dealloc(cont,
-                    (int )sizeof(struct cpc_attach_arglist ));
-    sched = cpc_arguments->sched;
-
+/* cps cpc_sched *cpc_attach(cpc_sched *sched) */
+cps_expand1(cpc_attach, cpc_sched *, sched)
     /* Return the previous scheduler */
     cpc_continuation_patch(cont, sizeof(cpc_sched *), &cont->sched);
 
