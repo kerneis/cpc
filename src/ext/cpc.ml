@@ -504,6 +504,8 @@ let find_struct name file =
     method vglob = function
       | GCompTag ({cname = n} as c,_) when n = name ->
           raise (FoundCompinfo c)
+      | GCompTagDecl ({cname = n} as c,_) when n = name ->
+          raise (FoundCompinfo c)
       | _ -> DoChildren
   end in
   try
