@@ -10,9 +10,10 @@ cps void foo(int *p){
     print(*p);
 }
 int main(){
-    int *p;
+    int *p = malloc(sizeof(int));
     *p = 0;
     cpc_spawn foo(p);
     cpc_main_loop();
+    free(p);
     return 0;
 }
