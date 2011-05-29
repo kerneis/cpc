@@ -1,8 +1,8 @@
 CPC='../bin/cpc.asm.exe'
 
-CDEBUGFLAGS=-Wall -g -O2
+CDEBUGFLAGS=-Wall -g -O2 -Wno-unknown-pragmas
 CLIBS=-I ../include/cpc
-CFLAGS += $(CDEBUGFLAGS)
+CFLAGS += $(CDEBUGFLAGS) $(EXTRA_DEFINES)
 
 # To build with compact continuations , disable the following line
 # CFLAGS += -DCPC_COMPACT_CONTINUATIONS
