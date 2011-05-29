@@ -142,10 +142,10 @@ cpc: $(BUILDER)
 	cd runtime; $(MAKE) all
 
 samples: cpc
-	cd samples; $(MAKE) clean all
+	$(MAKE) -C samples clean all
 
 testcpc: cpc
-	cd samples; $(MAKE) clean all test
+	$(MAKE) -C samples clean all test
 
 cilly: $(OBJDIR)/cilly$(EXE)
 $(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO)) \
@@ -584,6 +584,8 @@ cleancheck:
 	rm -f test/small1/wchar1
 
 clean: cleancaml cleancheck
+	$(MAKE) -C runtime clean
+	$(MAKE) -C samples clean
 
 
 # Now include the compiler specific stuff

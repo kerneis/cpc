@@ -603,7 +603,6 @@ CIL_CONFIG_FILES(doc/header.html)
 CIL_CONFIG_FILES(ocamlutil/perfcount.c)
 CIL_CONFIG_FILES(test/llvm/Makefile)
 CIL_CONFIG_FILES(src/machdep-ml.c)
-CIL_CONFIG_FILES(runtime/Makefile)
 
 AC_OUTPUT()
 

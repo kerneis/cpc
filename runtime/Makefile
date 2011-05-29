@@ -7,7 +7,8 @@ CFLAGS += $(CDEBUGFLAGS)
 # To build with compact continuations , disable the following line
 # CFLAGS += -DCPC_COMPACT_CONTINUATIONS
 
-RANLIB=@RANLIB@
+# Import $(RANLIB)
+include ../config.mk
 
 LDLIBS=-pthread
 
