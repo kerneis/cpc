@@ -37,10 +37,32 @@ THE SOFTWARE.
 #include <pthread.h>
 #include <sys/time.h>
 #include <fcntl.h>
+#include <stddef.h>
 
 #include <poll.h> /* cpc_d_io_wait */
 
 #include "threadpool/threadpool.h"
+
+typedef struct cpc_thread {
+    struct cpc_thread *next;
+    struct cpc_condvar *condvar;
+    struct cpc_thread *cond_next;
+    cpc_sched *sched;
+    int state;
+    struct cpc_continuation cont;
+} cpc_thread;
+
+static inline cpc_continuation *
+get_cont(cpc_thread *t)
+{
+    return (cpc_continuation *)(((char *)t) + offsetof(struct cpc_thread, cont));
+}
+
+static inline cpc_thread *
+get_thread(cpc_continuation *c)
+{
+    return (cpc_thread *)(((char *)c) - offsetof(struct cpc_thread, cont));
+}
 
 struct cpc_sched {
     threadpool_t *pool;
@@ -54,22 +76,22 @@ static int p[2];
 
 const int cpc_pessimise_runtime = 0;
 
-typedef struct cpc_continuation_queue {
-    struct cpc_continuation *head;
-    struct cpc_continuation *tail;
-} cpc_continuation_queue;
+typedef struct cpc_thread_queue {
+    struct cpc_thread *head;
+    struct cpc_thread *tail;
+} cpc_thread_queue;
 
-typedef struct cpc_timed_continuation {
-    cpc_continuation *continuation;
+typedef struct cpc_timed_thread {
+    cpc_thread *thread;
     struct timeval time;
     unsigned int heap_index;
-} cpc_timed_continuation;
+} cpc_timed_thread;
 
-typedef struct cpc_timed_continuation_queue {
-    cpc_timed_continuation **heap;
+typedef struct cpc_timed_thread_queue {
+    cpc_timed_thread **heap;
     unsigned int size;
     unsigned int length;
-} cpc_timed_continuation_queue;
+} cpc_timed_thread_queue;
 
 typedef struct cpc_sched_queue {
     struct cpc_sched *head;
@@ -78,17 +100,17 @@ typedef struct cpc_sched_queue {
 
 struct cpc_condvar {
     int refcount;
-    cpc_continuation_queue queue;
+    cpc_thread_queue queue;
 };
 
 #define STATE_UNKNOWN -1
 #define STATE_SLEEPING -2
 #define STATE_DETACHED -3
 
-static cpc_continuation_queue ready = {NULL, NULL};
-static cpc_timed_continuation_queue sleeping = {NULL, 0, 0};
+static cpc_thread_queue ready = {NULL, NULL};
+static cpc_timed_thread_queue sleeping = {NULL, 0, 0};
 static cpc_sched_queue schedulers = {NULL, NULL};
-static cpc_continuation_queue *fd_queues = NULL;
+static cpc_thread_queue *fd_queues = NULL;
 static int num_fds = 0, size_fds = 0;
 static fd_set readfds, writefds, exceptfds;
 
@@ -110,12 +132,13 @@ cpc_print_continuation(struct cpc_continuation *c, char *s)
         fprintf(stderr, "(%s) NULL continuation\n", s);
         return;
     }
+    cpc_thread *t = get_thread(c);
     fprintf(stderr, "(%s) Continuation %p:\n"
         "  next: %p\tcondvar%p\tcond_next: %p\n"
         "  state: %d\tlength: %u\tsize: %u\n",
         s,c,
-        c->next,c->condvar,c->cond_next,
-        c->state,c->length,c->size);
+        t->next,t->condvar,t->cond_next,
+        t->state,c->length,c->size);
     while(i < c->length) {
         fprintf(stderr,"%.2x",(unsigned char)c->c[i]);
         i++;
@@ -123,13 +146,13 @@ cpc_print_continuation(struct cpc_continuation *c, char *s)
     }
 }
 
-struct cpc_continuation *
-cpc_continuation_get(int size)
+struct cpc_thread *
+cpc_thread_get(int size)
 {
-    struct cpc_continuation *c;
-    c = malloc(sizeof(struct cpc_continuation) + (size - 1));
-    c->size = size;
-    return c;
+    struct cpc_thread *t;
+    t = malloc(sizeof(struct cpc_thread) + (size - 1));
+    t->cont.size = size;
+    return t;
 }
 
 static void
@@ -141,165 +164,151 @@ free_detached_cb(void *closure)
 void
 cpc_continuation_free(struct cpc_continuation *c)
 {
-    assert((c->state == STATE_UNKNOWN || c->state == STATE_DETACHED) && c->condvar == NULL);
-    if(c->state == STATE_DETACHED)
-        threadpool_schedule_back(c->sched->pool, free_detached_cb, NULL);
-    free(c);
+    cpc_thread *t = get_thread(c);
+    assert((t->state == STATE_UNKNOWN || t->state == STATE_DETACHED) && t->condvar == NULL);
+    if(t->state == STATE_DETACHED)
+        threadpool_schedule_back(t->sched->pool, free_detached_cb, NULL);
+    free(t);
 }
 
 cpc_continuation *
 cpc_continuation_expand(struct cpc_continuation *c, int n)
 {
     int size;
-    cpc_continuation *d;
+    cpc_thread *d, *t;
 
     if(c == (void*)0)
         size = n + 20;
     else
         size = c->size * 2 + n;
 
-    d = cpc_continuation_get(size);
+    d = cpc_thread_get(size);
 
     if(c == (void*)0) {
-        d->length = 0;
+        d->cont.length = 0;
         d->condvar = NULL;
         d->cond_next = NULL;
         d->next = NULL;
         d->sched = cpc_default_sched;
         d->state = STATE_UNKNOWN;
-        return d;
+        return get_cont(d);
     }
 
-    memcpy(d->c, c->c, c->length);
+    t = get_thread(c);
 
-    d->length = c->length;
-    d->condvar = c->condvar;
-    d->cond_next = c->cond_next;
-    d->next = c->next;
-    d->sched = c->sched;
-    d->state = c->state;
+    memcpy(d->cont.c, c->c, c->length);
 
-    free(c);
+    d->cont.length = c->length;
+    d->condvar = t->condvar;
+    d->cond_next = t->cond_next;
+    d->next = t->next;
+    d->sched = t->sched;
+    d->state = t->state;
 
-    return d;
+    free(t);
+
+    return get_cont(d);
 }
 
 /*** Basic operations on queues ***/
 
 static void
-enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
+enqueue(cpc_thread_queue *queue, cpc_thread *t)
 {
-    assert(c);
+    assert(t);
 
-    c->next = NULL;
+    t->next = NULL;
 
     if(queue->head == NULL) {
-        queue->head = queue->tail = c;
+        queue->head = queue->tail = t;
     } else {
-        queue->tail->next = c;
-        queue->tail = c;
+        queue->tail->next = t;
+        queue->tail = t;
     }
 }
 
-/*
-static void
-enqueue_head(cpc_continuation_queue *queue, cpc_continuation *c)
+static cpc_thread *
+dequeue(cpc_thread_queue *queue)
 {
-    if(c == NULL)
-        c = cpc_continuation_expand(NULL, 0);
-
-    if(queue->head == NULL) {
-        c->next = NULL;
-        queue->head = queue->tail = c;
-    } else {
-        c->next = queue->head;
-        queue->head = c;
-    }
-}
-*/
-
-static cpc_continuation *
-dequeue(cpc_continuation_queue *queue)
-{
-    cpc_continuation *cont;
+    cpc_thread *t;
     if(queue->head == NULL)
         return NULL;
-    cont = queue->head;
-    queue->head = cont->next;
+    t = queue->head;
+    queue->head = t->next;
     if(queue->head == NULL)
         queue->tail = NULL;
-    cont->next = NULL;
-    return cont;
+    t->next = NULL;
+    return t;
 }    
 
 static void
-dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
+dequeue_1(cpc_thread_queue *queue, cpc_thread *thread)
 {
-    cpc_continuation *c, *target;
-    c = queue->head;
-    if(c == cont) {
+    cpc_thread *t, *target;
+    t = queue->head;
+    if(t == thread) {
         queue->head = queue->head->next;
-        cont->next = NULL;
+        thread->next = NULL;
         if(queue->head == NULL)
             queue->tail = NULL;
         return;
     }
-    while(c->next != cont)
-        c = c->next;
-    target = c->next;
-    c->next = target->next;
+    while(t->next != thread)
+        t = t->next;
+    target = t->next;
+    t->next = target->next;
     target->next = NULL;
-    if(c->next == NULL)
-        queue->tail = c;
+    if(t->next == NULL)
+        queue->tail = t;
 }
 
 static void
-cond_enqueue(cpc_continuation_queue *queue, cpc_continuation *c)
+cond_enqueue(cpc_thread_queue *queue, cpc_thread *t)
 {
-    assert(c);
+    assert(t);
 
-    c->cond_next = NULL;
+    t->cond_next = NULL;
 
     if(queue->head == NULL) {
-        queue->head = queue->tail = c;
+        queue->head = queue->tail = t;
     } else {
-        queue->tail->cond_next = c;
-        queue->tail = c;
+        queue->tail->cond_next = t;
+        queue->tail = t;
     }
 }
 
-static cpc_continuation *
-cond_dequeue(cpc_continuation_queue *queue)
+static cpc_thread *
+cond_dequeue(cpc_thread_queue *queue)
 {
-    cpc_continuation *cont;
+    cpc_thread *t;
     if(queue->head == NULL)
         return NULL;
-    cont = queue->head;
-    queue->head = cont->cond_next;
+    t = queue->head;
+    queue->head = t->cond_next;
     if(queue->head == NULL)
         queue->tail = NULL;
-    cont->cond_next = NULL;
-    return cont;
+    t->cond_next = NULL;
+    return t;
 }    
 
 static void
-cond_dequeue_1(cpc_continuation_queue *queue, cpc_continuation *cont)
+cond_dequeue_1(cpc_thread_queue *queue, cpc_thread *cont)
 {
-    cpc_continuation *c, *target;
-    c = queue->head;
-    if(c == cont) {
+    cpc_thread *t, *target;
+    t = queue->head;
+    if(t == cont) {
         queue->head = queue->head->cond_next;
         if(queue->head == NULL)
             queue->tail = NULL;
         return;
     }
-    while(c->cond_next != cont)
-        c = c->cond_next;
-    target = c->cond_next;
-    c->cond_next = target->cond_next;
+    while(t->cond_next != cont)
+        t = t->cond_next;
+    target = t->cond_next;
+    t->cond_next = target->cond_next;
     target->cond_next = NULL;
-    if(c->cond_next == NULL)
-        queue->tail = c;
+    if(t->cond_next == NULL)
+        queue->tail = t;
 }
 
 static int
@@ -347,14 +356,14 @@ timeval_minus(struct timeval *d, struct timeval *s1, struct timeval *s2)
 #define RIGHT(i) (2*(i)+2)
 
 static inline void
-heap_expand(cpc_timed_continuation_queue *heap)
+heap_expand(cpc_timed_thread_queue *heap)
 {
     int length;
-    cpc_timed_continuation **h;
+    cpc_timed_thread **h;
 
     length = 2 * heap->size;
 
-    h = realloc(heap->heap, length * sizeof(cpc_timed_continuation *));
+    h = realloc(heap->heap, length * sizeof(cpc_timed_thread *));
     if(h)
         heap->heap = h;
     else
@@ -363,11 +372,11 @@ heap_expand(cpc_timed_continuation_queue *heap)
 }
 
 static inline void
-heap_insert(cpc_timed_continuation_queue *heap,
-                cpc_timed_continuation *tc)
+heap_insert(cpc_timed_thread_queue *heap,
+                cpc_timed_thread *tt)
 {
-    int i = tc->heap_index;
-    struct timeval *time = &tc->time;
+    int i = tt->heap_index;
+    struct timeval *time = &tt->time;
 
     if(heap->size > heap->length)
         heap_expand(heap);
@@ -378,22 +387,22 @@ heap_insert(cpc_timed_continuation_queue *heap,
         assert(heap->heap[i]->heap_index == UP(i));
         heap->heap[i]->heap_index = i;
     }
-    heap->heap[i] = tc;
+    heap->heap[i] = tt;
     heap->heap[i]->heap_index = i;
 }
 
 /* Assume that heap[i]->time is infinite (hence it must end as a leaf of
  * the heap). */
 static inline void
-heapify_delete(cpc_timed_continuation_queue *heap, unsigned int i)
+heapify_delete(cpc_timed_thread_queue *heap, unsigned int i)
 {
     unsigned int l, r, min;
 
-    cpc_timed_continuation *tc = heap->heap[heap->size-1];
-    tc->heap_index = heap->heap[i]->heap_index;
+    cpc_timed_thread *tt = heap->heap[heap->size-1];
+    tt->heap_index = heap->heap[i]->heap_index;
     --heap->size;
-    heap_insert(heap, tc);
-    tc = heap->heap[i];
+    heap_insert(heap, tt);
+    tt = heap->heap[i];
 
     while(1) {
         l = LEFT(i);
@@ -408,82 +417,82 @@ heapify_delete(cpc_timed_continuation_queue *heap, unsigned int i)
                 min = l;
         else
             break;
-        if(timeval_cmp(&heap->heap[min]->time, &tc->time) > 0)
+        if(timeval_cmp(&heap->heap[min]->time, &tt->time) > 0)
             break;
         heap->heap[i] = heap->heap[min];
         heap->heap[i]->heap_index = i;
         i = min;
     }
-    heap->heap[i] = tc;
-    tc->heap_index = i;
+    heap->heap[i] = tt;
+    tt->heap_index = i;
     heap->heap[heap->size] = NULL;
 }
 
 static inline void
-heap_delete(cpc_timed_continuation_queue *heap,
-                cpc_timed_continuation *tc) {
-    assert(heap->size > 0 && tc->heap_index <= heap->size);
-    heapify_delete(heap, tc->heap_index);
+heap_delete(cpc_timed_thread_queue *heap,
+                cpc_timed_thread *tt) {
+    assert(heap->size > 0 && tt->heap_index <= heap->size);
+    heapify_delete(heap, tt->heap_index);
 }
 static void
-timed_enqueue(cpc_timed_continuation_queue *queue, cpc_continuation *c,
+timed_enqueue(cpc_timed_thread_queue *queue, cpc_thread *t,
               struct timeval *time)
 {
-    cpc_timed_continuation *tc;
+    cpc_timed_thread *tt;
 
-    assert(c);
+    assert(t);
 
-    tc = malloc(sizeof(struct cpc_timed_continuation));
-    tc->continuation = c;
+    tt = malloc(sizeof(struct cpc_timed_thread));
+    tt->thread = t;
 
-    tc->time = *time;
+    tt->time = *time;
 
-    tc->heap_index = queue->size++;
-    heap_insert(queue, tc);
-    /* Trick: store a pointer to tc in the unused "next" field of c.
+    tt->heap_index = queue->size++;
+    heap_insert(queue, tt);
+    /* Trick: store a pointer to tt in the unused "next" field of t.
      * This is essential in timed_dequeue_1. */
-    c->next = (cpc_continuation *) tc;
+    t->next = (cpc_thread *) tt;
 }
 
-static cpc_continuation*
-timed_dequeue(cpc_timed_continuation_queue *queue, struct timeval *time)
+static cpc_thread*
+timed_dequeue(cpc_timed_thread_queue *queue, struct timeval *time)
 {
-    cpc_timed_continuation *tc;
-    cpc_continuation *cont;
+    cpc_timed_thread *tt;
+    cpc_thread *thread;
 
     if(queue->size == 0 || timeval_cmp(time, &queue->heap[0]->time) < 0)
         return NULL;
 
-    tc = queue->heap[0];
-    heap_delete(queue, tc);
+    tt = queue->heap[0];
+    heap_delete(queue, tt);
 
-    cont = tc->continuation;
-    free(tc);
-    return cont;
+    thread = tt->thread;
+    free(tt);
+    return thread;
 }
 
 void
-timed_dequeue_1(cpc_timed_continuation_queue *queue,
-                cpc_continuation *cont)
+timed_dequeue_1(cpc_timed_thread_queue *queue,
+                cpc_thread *thread)
 {
     /* See trick in timed_enqueue. */
-    cpc_timed_continuation *tc = (cpc_timed_continuation *) cont->next;
-    cont->next = NULL;
-    heap_delete(queue, tc);
-    free(tc);
+    cpc_timed_thread *tt = (cpc_timed_thread *) thread->next;
+    thread->next = NULL;
+    heap_delete(queue, tt);
+    free(tt);
 }
 
 static void
-dequeue_other(cpc_continuation *cont)
+dequeue_other(cpc_thread *thread)
 {
-    if(cont->state == STATE_SLEEPING)
-        timed_dequeue_1(&sleeping, cont);
-    else if(cont->state >= 0 && (cont->state & ((1 << 29) - 1)) <= size_fds) {
-        dequeue_1(&fd_queues[cont->state & ((1 << 29) - 1)], cont);
-        recompute_fdsets(cont->state & ((1 << 29) - 1));
+    if(thread->state == STATE_SLEEPING)
+        timed_dequeue_1(&sleeping, thread);
+    else if(thread->state >= 0 && (thread->state & ((1 << 29) - 1)) <= size_fds) {
+        dequeue_1(&fd_queues[thread->state & ((1 << 29) - 1)], thread);
+        recompute_fdsets(thread->state & ((1 << 29) - 1));
     } else
-        assert(cont->state == STATE_UNKNOWN);
-    cont->state = STATE_UNKNOWN;
+        assert(thread->state == STATE_UNKNOWN);
+    thread->state = STATE_UNKNOWN;
 }
 
 /*** Condition variables ***/
@@ -523,13 +532,13 @@ cpc_condvar_count(cpc_condvar *cond)
 {
     assert(!IS_DETACHED);
 
-    cpc_continuation *cont = cond->queue.head;
+    cpc_thread *thread = cond->queue.head;
     int i = 0;
 
-    cont = cond->queue.head;
-    while(cont) {
+    thread = cond->queue.head;
+    while(thread) {
         i++;
-        cont = cont->cond_next;
+        thread = thread->cond_next;
     }
     return i;
 }
@@ -549,7 +558,8 @@ cpc_condvar_count(cpc_condvar *cond)
         struct name##_arglist *cpc_arguments ;\
         cpc_arguments = (struct name##_arglist *) cpc_dealloc(cont,\
                         (int )sizeof(struct name##_arglist ));\
-        type arg = cpc_arguments -> arg;
+        type arg = cpc_arguments -> arg;\
+        cpc_thread *thread = get_thread(cont);
 
 #define cps_expand3(name,type1,arg1,type2,arg2,type3,arg3) \
     struct name##_arglist {\
@@ -564,14 +574,15 @@ cpc_condvar_count(cpc_condvar *cond)
                         (int )sizeof(struct name##_arglist ));\
         type1 arg1 = cpc_arguments -> arg1;\
         type2 arg2 = cpc_arguments -> arg2;\
-        type3 arg3 = cpc_arguments -> arg3;
+        type3 arg3 = cpc_arguments -> arg3;\
+        cpc_thread *thread = get_thread(cont);
 
 
 /* cps int cpc_wait(cpc_condvar *cond) */
 cps_expand1(cpc_wait, cpc_condvar *, cond)
-    assert(!IS_DETACHED && cont->condvar == NULL && cont->state == STATE_UNKNOWN);
-    cont->condvar = cond;
-    cond_enqueue(&cond->queue, cont);
+    assert(!IS_DETACHED && thread->condvar == NULL && thread->state == STATE_UNKNOWN);
+    thread->condvar = cond;
+    cond_enqueue(&cond->queue, thread);
     return NULL;
 }
 
@@ -580,33 +591,32 @@ cpc_signal(cpc_condvar *cond)
 {
     int rc = CPC_CONDVAR;
     assert(!IS_DETACHED);
-    cpc_continuation *cont;
-    cont = cond_dequeue(&cond->queue);
-    if(cont == NULL)
+    cpc_thread *thread = cond_dequeue(&cond->queue);
+    if(thread == NULL)
         return;
-    assert(cont->condvar == cond);
-    cont->condvar = NULL;
-    cpc_continuation_patch(cont, sizeof(int), &rc);
-    dequeue_other(cont);
-    enqueue(&ready, cont);
+    assert(thread->condvar == cond);
+    thread->condvar = NULL;
+    cpc_continuation_patch(get_cont(thread), sizeof(int), &rc);
+    dequeue_other(thread);
+    enqueue(&ready, thread);
 }
 
 void
 cpc_signal_all(cpc_condvar *cond)
 {
     int rc = CPC_CONDVAR;
-    cpc_continuation *cont;
+    cpc_thread *thread;
 
     assert(!IS_DETACHED);
     while(1) {
-        cont = cond_dequeue(&cond->queue);
-        if(cont == NULL)
+        thread = cond_dequeue(&cond->queue);
+        if(thread == NULL)
             break;
-        assert(cont->condvar == cond);
-        cont->condvar = NULL;
-        cpc_continuation_patch(cont, sizeof(int), &rc);
-        dequeue_other(cont);
-        enqueue(&ready, cont);
+        assert(thread->condvar == cond);
+        thread->condvar = NULL;
+        cpc_continuation_patch(get_cont(thread), sizeof(int), &rc);
+        dequeue_other(thread);
+        enqueue(&ready, thread);
     }
 }
 
@@ -618,7 +628,7 @@ cps_expand3(cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
 
     assert(cont);
 
-    if(cont->state == STATE_DETACHED) {
+    if(thread->state == STATE_DETACHED) {
         assert(IS_DETACHED && cond == NULL);
         when.tv_sec = sec;
         when.tv_usec = usec;
@@ -628,14 +638,14 @@ cps_expand3(cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
         return cont;
     }
 
-    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
+    assert(thread->condvar == NULL && thread->state == STATE_UNKNOWN);
     if(cond) {
-        cont->condvar = cond;
-        cond_enqueue(&cond->queue, cont);
+        thread->condvar = cond;
+        cond_enqueue(&cond->queue, thread);
     }
-    cont->state = STATE_SLEEPING;
+    thread->state = STATE_SLEEPING;
     timeval_plus(&when, &cpc_now, sec, usec);
-    timed_enqueue(&sleeping, cont, &when);
+    timed_enqueue(&sleeping, thread, &when);
     return NULL;
 }
 
@@ -669,13 +679,13 @@ cpc_d_io_wait(int fd, int direction)
 static void
 fd_queues_expand(int n)
 {
-    cpc_continuation_queue *new;
+    cpc_thread_queue *new;
 
     assert(n >= size_fds && n <= FD_SETSIZE);
-    new = malloc(n * sizeof(struct cpc_continuation_queue));
+    new = malloc(n * sizeof(struct cpc_thread_queue));
     if(size_fds > 0) {
         memcpy(new, fd_queues,
-               size_fds * sizeof(struct cpc_continuation_queue));
+               size_fds * sizeof(struct cpc_thread_queue));
     } else {
         FD_ZERO(&readfds);
         FD_ZERO(&writefds);
@@ -683,7 +693,7 @@ fd_queues_expand(int n)
     }
 
     memset(new + size_fds, 0,
-           (n - size_fds) * sizeof(struct cpc_continuation_queue));
+           (n - size_fds) * sizeof(struct cpc_thread_queue));
     free(fd_queues);
     fd_queues = new;
     size_fds = n;
@@ -693,17 +703,17 @@ static void
 recompute_fdsets(int fd)
 {
     int r = 0, w = 0;
-    cpc_continuation *cont;
+    cpc_thread *thread;
 
-    cont = fd_queues[fd].head;
-    while(cont) {
-        if(((cont->state >> 29) & CPC_IO_IN))
+    thread = fd_queues[fd].head;
+    while(thread) {
+        if(((thread->state >> 29) & CPC_IO_IN))
             r = 1;
-        if(((cont->state >> 29) & CPC_IO_OUT))
+        if(((thread->state >> 29) & CPC_IO_OUT))
             w = 1;
         if(r && w)
             break;
-        cont = cont->next;
+        thread = thread->next;
     }
     if(r)
         FD_SET(fd, &readfds);
@@ -736,28 +746,27 @@ recompute_fdsets(int fd)
 cps_expand3(cpc_io_wait, int, fd, int, direction, cpc_condvar *, cond)
     int rc;
 
-    if(cont->state == STATE_DETACHED) {
+    assert(cont);
+
+    if(thread->state == STATE_DETACHED) {
         assert(IS_DETACHED && cond == NULL);
         rc = cpc_d_io_wait(fd, direction);
         cpc_continuation_patch(cont, sizeof(int), &rc);
         return cont;
     }
 
-    if(cont == NULL)
-        return NULL;
-
-    assert(cont->condvar == NULL && cont->state == STATE_UNKNOWN);
+    assert(thread->condvar == NULL && thread->state == STATE_UNKNOWN);
     assert((fd & (7 << 29)) == 0);
 
     if(cond) {
-        cont->condvar = cond;
-        cond_enqueue(&cond->queue, cont);
+        thread->condvar = cond;
+        cond_enqueue(&cond->queue, thread);
     }
     if(size_fds <= fd)
         fd_queues_expand(fd + 10);
 
-    cont->state = fd | ((direction & 3) << 29);
-    enqueue(&fd_queues[fd], cont);
+    thread->state = fd | ((direction & 3) << 29);
+    enqueue(&fd_queues[fd], thread);
     recompute_fdsets(fd);
     return NULL;
 }
@@ -765,20 +774,20 @@ cps_expand3(cpc_io_wait, int, fd, int, direction, cpc_condvar *, cond)
 static void
 requeue_io_ready(int fd, int direction)
 {
-    cpc_continuation *c;
-    c = fd_queues[fd].head;
-    while(c) {
-        if((c->state >> 29) & direction) {
-            dequeue_1(&fd_queues[fd], c); /* XXX */
-            c->state = STATE_UNKNOWN;
-            cpc_continuation_patch(c, sizeof(int), &direction);
-            if(c->condvar) {
-                cond_dequeue_1(&c->condvar->queue, c);
+    cpc_thread *thread;
+    thread = fd_queues[fd].head;
+    while(thread) {
+        if((thread->state >> 29) & direction) {
+            dequeue_1(&fd_queues[fd], thread); /* XXX */
+            thread->state = STATE_UNKNOWN;
+            cpc_continuation_patch(get_cont(thread), sizeof(int), &direction);
+            if(thread->condvar) {
+                cond_dequeue_1(&thread->condvar->queue, thread);
             }
-            c->condvar = NULL;
-            enqueue(&ready, c);
+            thread->condvar = NULL;
+            enqueue(&ready, thread);
         }
-        c = c->next;
+        thread = thread->next;
     }
     recompute_fdsets(fd);
 }
@@ -793,84 +802,84 @@ cpc_signal_fd(int fd, int direction)
 
 /*** cpc_attach ****/
 
-cpc_continuation *cpc_prim_attach(cpc_continuation*);
-cpc_continuation *cpc_prim_detach(cpc_sched*, cpc_continuation*);
+cpc_continuation *cpc_prim_attach(cpc_thread*);
+cpc_continuation *cpc_prim_detach(cpc_sched*, cpc_thread*);
 
 /* cps cpc_sched *cpc_attach(cpc_sched *sched) */
 cps_expand1(cpc_attach, cpc_sched *, sched)
     /* Return the previous scheduler */
-    cpc_continuation_patch(cont, sizeof(cpc_sched *), &cont->sched);
+    cpc_continuation_patch(cont, sizeof(cpc_sched *), &thread->sched);
 
     if(sched == cpc_default_sched)
-        return cpc_prim_attach(cont);
+        return cpc_prim_attach(thread);
     else
-        return cpc_prim_detach(sched, cont);
+        return cpc_prim_detach(sched, thread);
 }
 
 static inline void
-spawn_cb(void *cont)
+spawn_cb(void *closure)
 {
-    struct cpc_continuation *c = (struct cpc_continuation *)cont;
+    struct cpc_thread *thread = (struct cpc_thread *)closure;
 
     /* If the state is UNKNOWN, then the continuation comes from a
      * cpc_spawn. */
-    assert((c->state == STATE_UNKNOWN || c->state == STATE_DETACHED)
-        && c->condvar == NULL);
-    if(c->state == STATE_DETACHED)
-        c->state = STATE_UNKNOWN;
-    c->sched = cpc_default_sched;
-    enqueue(&ready, c); // XXX
+    assert((thread->state == STATE_UNKNOWN || thread->state == STATE_DETACHED)
+        && thread->condvar == NULL);
+    if(thread->state == STATE_DETACHED)
+        thread->state = STATE_UNKNOWN;
+    thread->sched = cpc_default_sched;
+    enqueue(&ready, thread); // XXX
 }
 
 static void
-attach_cb(void *cont)
+attach_cb(void *closure)
 {
-    spawn_cb(cont);
+    spawn_cb(closure);
     detached_count--;
 }
 
 cpc_continuation *
-cpc_prim_attach(cpc_continuation *cont)
+cpc_prim_attach(cpc_thread *thread)
 {
-    if(cont->state == STATE_UNKNOWN) {
-        assert(!IS_DETACHED && cont->condvar == NULL);
-        assert(cont->sched == cpc_default_sched);
-        return cont;
+    if(thread->state == STATE_UNKNOWN) {
+        assert(!IS_DETACHED && thread->condvar == NULL);
+        assert(thread->sched == cpc_default_sched);
+        return get_cont(thread);
     }
 
-    assert(cont->state == STATE_DETACHED);
-    threadpool_schedule_back(cont->sched->pool, attach_cb, cont);
+    assert(thread->state == STATE_DETACHED);
+    threadpool_schedule_back(thread->sched->pool, attach_cb, thread);
     return NULL;
 }
 
 static void
-perform_detach(void *cont)
+perform_detach(void *closure)
 {
-    struct cpc_continuation *c = (struct cpc_continuation *)cont;
-    c->state = STATE_DETACHED;
-    cpc_invoke_continuation(c);
+    cpc_thread *thread = (cpc_thread *)closure;
+    thread->state = STATE_DETACHED;
+    cpc_invoke_continuation(get_cont(thread));
 }
 
 cpc_continuation *
-cpc_prim_detach(cpc_sched *sched, cpc_continuation *cont)
+cpc_prim_detach(cpc_sched *sched, cpc_thread *thread)
 {
     int rc;
 
-    if(cont->state == STATE_DETACHED) {
+    if(thread->state == STATE_DETACHED) {
         assert(IS_DETACHED);
         /* Already in the good threadpool. */
-        if(cont->sched == sched) {
-            return cont;
+        if(thread->sched == sched) {
+            return get_cont(thread);
         }
     } else {
-        assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+        assert(thread->state == STATE_UNKNOWN && thread->condvar == NULL);
         assert(!IS_DETACHED);
         detached_count++;
         if(sched == NULL)
             sched = cpc_default_threadpool;
     }
-    cont->sched = sched;
-    rc = threadpool_schedule(sched->pool, perform_detach, (void *)cont);
+    thread->sched = sched;
+    rc = threadpool_schedule(sched->pool, perform_detach, (void *)thread);
     if (rc < 0) {
       perror("threadpool_schedule");
       exit(1);
@@ -937,15 +946,16 @@ cpc_threadpool_release(cpc_sched *sched)
 cpc_continuation *
 cpc_yield(struct cpc_continuation *cont)
 {
-    if(cont->state == STATE_DETACHED) {
+    cpc_thread *thread = get_thread(cont);
+    if(thread->state == STATE_DETACHED) {
         assert(IS_DETACHED);
         return cont;
     }
 
-    assert(!IS_DETACHED && cont->state == STATE_UNKNOWN &&
-        cont->condvar == NULL);
+    assert(!IS_DETACHED && thread->state == STATE_UNKNOWN &&
+        thread->condvar == NULL);
 
-    enqueue(&ready, cont);
+    enqueue(&ready, thread);
     return NULL;
 }
 
@@ -961,21 +971,23 @@ cpc_done(struct cpc_continuation *cont)
 void
 cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
 {
-    assert(cont->state == STATE_UNKNOWN && cont->condvar == NULL);
+    cpc_thread *thread = get_thread(cont);
+
+    assert(thread->state == STATE_UNKNOWN && thread->condvar == NULL);
  
     /* If context is NULL, we have to perform a syscall to know if we
      * are detached or not */
     if(context == NULL && IS_DETACHED) {
-        threadpool_schedule_back(cont->sched->pool, spawn_cb, cont);
+        threadpool_schedule_back(thread->sched->pool, spawn_cb, thread);
     }
     /* Otherwise, trust the context */
-    else if (context && context->state == STATE_DETACHED) {
+    else if (context && get_thread(context)->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        threadpool_schedule_back(cont->sched->pool, spawn_cb, cont);
+        threadpool_schedule_back(thread->sched->pool, spawn_cb, thread);
     }
     else {
         assert(!IS_DETACHED);
-        enqueue(&ready, cont);
+        enqueue(&ready, thread);
     }
 }
 
@@ -1010,8 +1022,8 @@ cpc_invoke_continuation(struct cpc_continuation *c)
 void
 cpc_main_loop(void)
 {
-    struct cpc_continuation *c;
-    struct cpc_continuation_queue q;
+    struct cpc_thread *thread;
+    struct cpc_thread_queue q;
     struct timeval when;
     int rc, i, done;
     fd_set r_readfds, r_writefds, r_exceptfds;
@@ -1049,10 +1061,10 @@ cpc_main_loop(void)
         q = ready;
         ready.head = ready.tail = NULL;
         while(1) {
-            c = dequeue(&q);
-            if(c == NULL) break;
-            assert(c->state == STATE_UNKNOWN && c->condvar == NULL);
-            cpc_invoke_continuation(c);
+            thread = dequeue(&q);
+            if(thread == NULL) break;
+            assert(thread->state == STATE_UNKNOWN && thread->condvar == NULL);
+            cpc_invoke_continuation(get_cont(thread));
         }
         if(ready.head && sleeping.size == 0 && num_fds == 0 &&
            detached_count == 0 && !cpc_pessimise_runtime)
@@ -1063,15 +1075,16 @@ cpc_main_loop(void)
         rc = CPC_TIMEOUT;
         if(sleeping.size > 0) {
             while(1) {
-                c = timed_dequeue(&sleeping, &cpc_now);
-                if(c == NULL) break;
-                assert(c->state == STATE_SLEEPING);
-                if(c->condvar)
-                    cond_dequeue_1(&c->condvar->queue, c);
-                c->condvar = NULL;
-                c->state = STATE_UNKNOWN;
-                cpc_continuation_patch(c, sizeof(int), &rc);
-                cpc_invoke_continuation(c);
+                thread = timed_dequeue(&sleeping, &cpc_now);
+                if(thread == NULL) break;
+                assert(thread->state == STATE_SLEEPING);
+                if(thread->condvar)
+                    cond_dequeue_1(&thread->condvar->queue, thread);
+                thread->condvar = NULL;
+                thread->state = STATE_UNKNOWN;
+                cpc_continuation *cont = get_cont(thread);
+                cpc_continuation_patch(cont, sizeof(int), &rc);
+                cpc_invoke_continuation(cont);
             }
         }
 
@@ -1179,31 +1192,34 @@ cpc_main_loop(void)
 }
 
 cpc_sched *
-cpc_get_sched(cpc_continuation *c) {
-  return c->sched;
+cpc_get_sched(cpc_continuation *cont) {
+  return get_thread(cont)->sched;
 }
 
 int
-cpc_gettimeofday(cpc_continuation *c, struct timeval *tv)
+cpc_gettimeofday(cpc_continuation *cont, struct timeval *tv)
 {
-  if(c->state == STATE_DETACHED) {
-    assert(IS_DETACHED);
-    return gettimeofday(tv, NULL); /* XXX */
-  }
-  assert(c->state == STATE_UNKNOWN && !IS_DETACHED);
-  *tv = cpc_now;
-  return 0;
+    cpc_thread *thread = get_thread(cont);
+    if(thread->state == STATE_DETACHED) {
+        assert(IS_DETACHED);
+        return gettimeofday(tv, NULL); /* XXX */
+    }
+    assert(thread->state == STATE_UNKNOWN && !IS_DETACHED);
+    *tv = cpc_now;
+    return 0;
 }
 
 time_t
-cpc_time(cpc_continuation *c, time_t *t)
+cpc_time(cpc_continuation *cont, time_t *t)
 {
-  if(c->state == STATE_DETACHED) {
-    assert(IS_DETACHED);
-    return time(t); /* XXX */
-  }
-  assert(c->state == STATE_UNKNOWN && !IS_DETACHED);
-  if(t)
-    *t = cpc_now.tv_sec;
-  return cpc_now.tv_sec;
+    cpc_thread *thread = get_thread(cont);
+
+    if(thread->state == STATE_DETACHED) {
+        assert(IS_DETACHED);
+        return time(t); /* XXX */
+    }
+    assert(thread->state == STATE_UNKNOWN && !IS_DETACHED);
+    if(t)
+        *t = cpc_now.tv_sec;
+    return cpc_now.tv_sec;
 }

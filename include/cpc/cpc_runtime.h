@@ -56,22 +56,17 @@ extern cpc_sched *cpc_default_threadpool;
 #define cpc_default_sched NULL
 
 typedef struct cpc_continuation {
-    struct cpc_continuation *next;
-    struct cpc_condvar *condvar;
-    struct cpc_continuation *cond_next;
-    cpc_sched *sched;
-    int state;
     unsigned short length;
     unsigned short size;
     char c[1];
 } cpc_continuation;
 
+extern void cpc_print_continuation(struct cpc_continuation *c, char *s);
+
 typedef cpc_continuation *cpc_function(void*);
 
-void cpc_continuation_free(struct cpc_continuation *c);
 struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);
-struct cpc_continuation *cpc_continuation_copy(struct cpc_continuation *c);
 
 static inline void* 
 cpc_alloc(struct cpc_continuation **cp, int s)
@@ -123,7 +118,6 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
 }
 
 extern void cpc_main_loop(void);
-extern void cpc_print_continuation(struct cpc_continuation *c, char *s);
 
 extern cpc_condvar *cpc_condvar_get(void);
 extern cpc_condvar *cpc_condvar_retain(cpc_condvar*);
