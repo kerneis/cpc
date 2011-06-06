@@ -18,15 +18,23 @@ PREFIX=/usr/local
 
 .PHONY: all clean compact
 
-all: libcpc.a libcpcfull.a
+all: libcpc.a libcpclibev.a libcpcfull.a
 
 cpc_runtime.o: cpc_runtime.c
 	$(CC) $(CFLAGS) $(CLIBS) -c $<
+
+cpc_libev.o: cpc_libev.c
+	$(CC) $(CFLAGS) $(CLIBS) -I libev -c $<
 
 threadpool/threadpool.o: threadpool/threadpool.c
 	cd threadpool && $(MAKE) threadpool.o CFLAGS="$(CFLAGS)"
 
 libcpc.a: cpc_runtime.o threadpool/threadpool.o
+	rm -f $@
+	$(AR) rc $@ $^
+	$(RANLIB) $@
+
+libcpclibev.a: cpc_libev.o threadpool/threadpool.o  cpc_barrier.o cpc_io.o
 	rm -f $@
 	$(AR) rc $@ $^
 	$(RANLIB) $@
@@ -38,8 +46,8 @@ libcpcfull.a: cpc_runtime.o threadpool/threadpool.o cpc_barrier.o cpc_io.o
 
 clean:
 	rm -f *~
-	rm -f cpc_runtime.o threadpool/threadpool.o
-	rm -f libcpc.a libcpcfull.a
+	rm -f cpc_runtime.o cpc_libev.o threadpool/threadpool.o
+	rm -f libcpc.a libcpcfull.a libcpclibev.a
 	rm -f cpc_barrier.o cpc_io.o
 	rm -f cpc_barrier.cpi cpc_io.cpi
 	rm -f cpc_barrier.c cpc_io.c
