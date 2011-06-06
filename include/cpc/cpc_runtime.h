@@ -108,7 +108,7 @@ cpc_continuation_push(cpc_continuation *c, cpc_function *f)
 }
 
 static inline void
-cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
+cpc_continuation_patch(cpc_continuation *cont, size_t size, const void *value)
 {
   void *cpc_arg;
   cpc_arg =
