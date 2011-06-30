@@ -1543,11 +1543,15 @@ object (self)
             inherit nopCilVisitor
 
             method vlval = function
-              | (Var v, voffset) when is_var (v.vid) ->
-                  let v_field = safeGetCompField env_struct v.vname in
-                  let env_lval = Lval (Var cpc_env, NoOffset) in
-                  let v' = mkMem env_lval (Field (v_field, voffset)) in
-                  ChangeTo v'
+              | (Var v, _) as varToChange when is_var (v.vid) ->
+                  let change_node = function
+                    | (Var v', voffset') ->
+                      let v_field = safeGetCompField env_struct v.vname in
+                      let env_lval = Lval (Var cpc_env, NoOffset) in
+                      mkMem env_lval (Field (v_field, voffset'))
+                    | _ -> assert false
+                  in
+                  ChangeDoChildrenPost(varToChange, change_node)
               | _ -> DoChildren
 
           end)
