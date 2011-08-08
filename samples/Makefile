@@ -5,7 +5,7 @@ CLIBS=-I ../include
 
 CFLAGS+=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
 
-LDLIBS=-L../runtime -lm -pthread -lcpclibev
+LDLIBS=-L../runtime -lm -pthread -lcpcfull
 
 .PHONY: all clean servers test
 
