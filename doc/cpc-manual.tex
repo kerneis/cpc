@@ -69,7 +69,7 @@ language; thus, the syntax of CPC is defined as a set of productions to be
 added to the grammar defined in the ISO C99 standard \cite{iso:c99}.
 
 In addition to the reserved words in C99, CPC reserves the words
-{\tt cps}, {\tt cpc\_spawn} and {\tt cpc\_attached}.
+{\tt cps}, {\tt cpc\_spawn} and {\tt cpc\_linked}.
 
 \section{CPS contexts} \label{sec:contexts}
 
@@ -81,7 +81,7 @@ defined as follows:
   (Sec.~\ref{sec:cpc-functions});
 \item the body of a {\tt cpc\_spawn} statement is in cps context
   (Sec.~\ref{sec:cooperating});
-\item the body of a {\tt cpc\_attached} statement is in cps context
+\item the body of a {\tt cpc\_linked} statement is in cps context
   (Sec.~\ref{sec:native-threads}).
 \end{itemize}
 Any construct that is not in cps context is said to be in native context.
@@ -136,7 +136,7 @@ to operate.  Since they are cps functions, they are valid only in cps
 context.
 
 In addition to these functions, CPC extends the C language with two
-statements -- \texttt{cpc\_spawn} and \texttt{cpc\_attached} -- and some
+statements -- \texttt{cpc\_spawn} and \texttt{cpc\_linked} -- and some
 syntactic sugar (\textit{e.g.} \texttt{cpc\_detached}), described in the
 following sections.
 
@@ -159,12 +159,12 @@ directly from one thread pool to another.
     cpc_sched *cpc_threadpool_get(int);
     int cpc_threadpool_release(cpc_sched *);
 
-    cps cpc_sched *cpc_attach(cpc_sched *pool);
+    cps cpc_sched *cpc_link(cpc_sched *pool);
     cpc_sched *cpc_get_sched();
 \end{verbatim}
 
 
-\paragraph{\tt cpc\_attach} The {\tt cpc\_attach} statement
+\paragraph{\tt cpc\_link} The {\tt cpc\_link} statement
 attaches the current continuation to the given scheduler.  If the
 scheduler is a thread pool, the following statements are executed in a
 dedicated native thread, within the thread pool.  If the scheduler is
@@ -203,16 +203,16 @@ be treated as such: this function is valid in cps context only, and no
 pointer to it should be taken.
 
 \subsection*{Syntactic sugar}
-\paragraph{\tt cpc\_attached}
+\paragraph{\tt cpc\_linked}
 \[ \mbox{cpc-statement} ::=
-   \mathtt{cpc\_attached}\ (\mbox{expression})\ \mbox{statement} \]
+   \mathtt{cpc\_linked}\ (\mbox{expression})\ \mbox{statement} \]
 
-The body of a {\tt cpc\_attached} statement is run attached to the
+The body of a {\tt cpc\_linked} statement is run attached to the
 scheduler given as its argument: an implicit {\tt s =
-cpc\_attach(expression)} is executed upon entering the body, and a {\tt
-cpc\_attach(s)} is executed when the end of the statement is reached,
+cpc\_link(expression)} is executed upon entering the body, and a {\tt
+cpc\_link(s)} is executed when the end of the statement is reached,
 and before any {\tt return} statement inside the body.  Some constructs
-are forbidden in the body of a {\tt cpc\_attached} statement because
+are forbidden in the body of a {\tt cpc\_linked} statement because
 they disrupt the flow of control: {\tt goto}, {\tt break}, {\tt
 continue} and labels.\\
 {\em Note:\/} it would be possible to allow the forbidden constructs,
@@ -224,16 +224,10 @@ care of such tricky cases by himself.
 \paragraph{\tt cpc\_is\_detached, cpc\_detach, cpc\_detached} Three macros to
 test if the current thread is detached, and attach to the default thread pool
 if not already detached.
-\begin{verbatim}
-    #define cpc_is_detached() \
-      (cpc_get_sched() != cpc_default_sched)
-    #define cpc_detach() \
-      cpc_attach(cpc_is_detached () ? \
-      cpc_get_sched() : cpc_default_threadpool)
-    #define cpc_detached \
-      cpc_attached(cpc_is_detached () ? \
-      cpc_get_sched() : cpc_default_threadpool)
-\end{verbatim}
+
+\paragraph{\tt cpc\_attach, cpc\_attached} Two macros to attach to the
+default loop if not already attached.
+
 \section{Cooperating: yielding, spawning} \label{sec:cooperating}
 
 \[ \mbox{cpc-statement} ::=
@@ -529,7 +523,8 @@ ctags -R --langmap=c:+.cpc *
 " CPC
 au BufNewFile,BufRead *.cpc setf c
 au BufNewFile,BufRead *.cpc syn keyword cType cps
-au BufNewFile,BufRead *.cpc syn keyword cStatement cpc_spawn cpc_detached cpc_attached
+au BufNewFile,BufRead *.cpc syn keyword cStatement cpc_spawn cpc_detached
+au BufNewFile,BufRead *.cpc syn keyword cStatement cpc_attached cpc_link cpc_linked
 \end{verbatim}
 
 \paragraph{Emacs setup} Put the following in your {\tt .emacs}:
