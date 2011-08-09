@@ -30,7 +30,7 @@ main(int argc, char **argv)
     for(i = 0; i < N; i++) {
       cpc_sched *p = pools[i % N_POOLS];
       cpc_spawn {
-        cpc_attached(p) __sync_fetch_and_add(&n, 1);
+        cpc_linked(p) __sync_fetch_and_add(&n, 1);
         cpc_barrier_await(barrier);
       }
     }

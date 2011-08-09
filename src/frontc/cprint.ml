@@ -717,7 +717,7 @@ and print_statement stat =
       print_block h
 
   (*** CPC ***)
-  | CPC_ATTACHED (exp, stat, loc) ->
+  | CPC_LINKED (exp, stat, loc) ->
       setLoc loc;
       printl ["cpc_attached";"("];
       print_expression exp;

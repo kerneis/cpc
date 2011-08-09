@@ -800,13 +800,13 @@ cpc_signal_fd(int fd, int direction)
         requeue_io_ready(fd, direction);
 }
 
-/*** cpc_attach ****/
+/*** cpc_link ****/
 
 cpc_continuation *cpc_prim_attach(cpc_thread*);
 cpc_continuation *cpc_prim_detach(cpc_sched*, cpc_thread*);
 
-/* cps cpc_sched *cpc_attach(cpc_sched *sched) */
-cps_expand1(cpc_attach, cpc_sched *, sched)
+/* cps cpc_sched *cpc_link(cpc_sched *sched) */
+cps_expand1(cpc_link, cpc_sched *, sched)
     /* Return the previous scheduler */
     cpc_continuation_patch(cont, sizeof(cpc_sched *), &thread->sched);
 

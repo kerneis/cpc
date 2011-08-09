@@ -138,15 +138,17 @@ extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_yield(void);
 extern cps void cpc_done(void);
-extern cps cpc_sched *cpc_attach(cpc_sched *pool);
+extern cps cpc_sched *cpc_link(cpc_sched *pool);
 
 extern cpc_sched *cpc_get_sched(void) __attribute__((cpc_need_cont));
 extern int cpc_gettimeofday(struct timeval *tv) __attribute__((cpc_need_cont));
 extern time_t cpc_time(time_t *t) __attribute__((cpc_need_cont,cpc_no_retain));
 
 #define cpc_is_detached() (cpc_get_sched() != cpc_default_sched)
-#define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_get_sched() : cpc_default_threadpool)
-#define cpc_detached cpc_attached(cpc_is_detached() ? cpc_get_sched() : cpc_default_threadpool)
+#define cpc_attach()  cpc_link  (cpc_is_detached() ? cpc_default_sched : cpc_get_sched())
+#define cpc_attached  cpc_linked(cpc_is_detached() ? cpc_default_sched : cpc_get_sched())
+#define cpc_detach()  cpc_link  (cpc_is_detached() ? cpc_get_sched()   : cpc_default_threadpool)
+#define cpc_detached  cpc_linked(cpc_is_detached() ? cpc_get_sched()   : cpc_default_threadpool)
 
 #endif
 

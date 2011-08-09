@@ -232,7 +232,7 @@ and statement =
 
    (** CPC **)
  | CPC_SPAWN of statement * cabsloc
- | CPC_ATTACHED of expression * statement * cabsloc
+ | CPC_LINKED of expression * statement * cabsloc
  | CPC_FUN of definition
  
 and for_clause = 

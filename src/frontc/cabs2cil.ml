@@ -697,12 +697,12 @@ let mkStartOfAndMark ((b, off) as lval) : exp =
   res
   
 
-(** Stack of variables storing the states returned by successive cpc_attached
- * and cpc_detached *)
+(** Stack of variables storing the states returned by successive cpc_linked
+ * calls *)
 let detachedVars = ref []
 let cpc_set_sched () =
-    try fst(lookupGlobalVar "cpc_attach")
-    with Not_found -> E.s (error "cpc_attach not found")
+    try fst(lookupGlobalVar "cpc_link")
+    with Not_found -> E.s (error "cpc_link not found")
 let cpc_default_pool () =
     try fst(lookupGlobalVar "cpc_default_threadpool")
     with Not_found -> E.s (error "cpc_default_threadpool not found")
@@ -6636,7 +6636,7 @@ and doStatement (s : A.statement) : chunk =
           mkSpawn (Lval (Var f.svar,NoOffset)) []
           ])))
         end
-      | CPC_ATTACHED (e, s, loc) ->
+      | CPC_LINKED (e, s, loc) ->
           (* setSched and resetSched update detachedVars *)
           let (c, e', _) = doExp false e (AExp None) in
           let attach = s2c (setSched e') in

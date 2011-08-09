@@ -467,10 +467,10 @@ and childrenStatement vis s =
       if b1' != b1 || e' != e || b2' != b2 then TRY_EXCEPT(b1', e', b2', l) else s
       
   (*** CPC ***)
-  | CPC_ATTACHED (e, stmt, l) ->
+  | CPC_LINKED (e, stmt, l) ->
       let e' = ve e in
       let s' = vs l stmt in
-      if e' != e || s' != stmt then CPC_ATTACHED (e', s', l) else s
+      if e' != e || s' != stmt then CPC_LINKED (e', s', l) else s
   | CPC_SPAWN (stmt, l) ->
       let s' = vs l stmt in
       if s' != stmt then CPC_SPAWN (s', l) else s

@@ -295,7 +295,7 @@ let transformOffsetOf (speclist, dtype) member =
 
 /* CPC */
 %token<Cabs.cabsloc> CPC_CPS
-%token<Cabs.cabsloc> CPC_FUN CPC_SPAWN CPC_ATTACHED
+%token<Cabs.cabsloc> CPC_FUN CPC_SPAWN CPC_LINKED
 
 %token<Cabs.cabsloc> ATTRIBUTE INLINE ASM TYPEOF FUNCTION__ PRETTY_FUNCTION__
 %token LABEL__
@@ -922,8 +922,8 @@ statement:
 
                           /* CPC */
 |   CPC_SPAWN statement   { CPC_SPAWN ($2, (*handleLoc*) $1) }
-|   CPC_ATTACHED LPAREN expression RPAREN statement
-                        { CPC_ATTACHED (fst $3, $5, (*handleLoc*) $1) }
+|   CPC_LINKED LPAREN expression RPAREN statement
+                        { CPC_LINKED (fst $3, $5, (*handleLoc*) $1) }
 |   function_def        { CPC_FUN $1 }
 |   error location   SEMICOLON   { (NOP $2)}
 ;
