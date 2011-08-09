@@ -1,5 +1,6 @@
 #include <cpc/cpc_runtime.h>
 #include <stdio.h>
+#include <stdlib.h>
 /* EXPECTED OUTPUT
 42
 * END OF OUTPUT */

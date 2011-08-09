@@ -62,4 +62,4 @@ clean:
 
 %.output: %.cpc
 	@grep -q "EXPECTED OUTPUT" $< || (echo $<: missing expected output; false)
-	@sed "0,/EXPECTED OUTPUT/ d ; /END OF OUTPUT/,$$ d" $< > $@
+	@sed "1,/EXPECTED OUTPUT/ d ; /END OF OUTPUT/,$$ d" $< > $@
