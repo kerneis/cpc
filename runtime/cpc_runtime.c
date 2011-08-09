@@ -983,7 +983,7 @@ cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
     /* Otherwise, trust the context */
     else if (context && get_thread(context)->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        threadpool_schedule_back(thread->sched->pool, spawn_cb, thread);
+        threadpool_schedule_back(get_thread(context)->sched->pool, spawn_cb, thread);
     }
     else {
         assert(!IS_DETACHED);

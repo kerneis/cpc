@@ -1,0 +1,25 @@
+#include <cpc/cpc_runtime.h>
+#include <cpc/cpc_lib.h>
+#include <stdio.h>
+/* EXPECTED OUTPUT
+1: attached
+2: detached
+3: attached
+* END OF OUTPUT */
+
+#define print_state(x) printf("%d: %s\n", x, cpc_is_detached() ? "detached" : "attached")
+
+int
+main()
+{
+    cpc_spawn {
+        print_state(1);
+        cpc_detached {
+            print_state(2);
+            cpc_spawn print_state(3);
+        }
+    }
+    cpc_main_loop();
+    return 0;
+}
+
