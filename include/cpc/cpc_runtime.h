@@ -155,4 +155,4 @@ extern time_t cpc_time(time_t *t) __attribute__((cpc_need_cont,cpc_no_retain));
 /* Safe functions */
 
 #pragma cpc_no_retain("writev", "curl_easy_getinfo", "snprintf", "memcmp",  "memcpy")
-#pragma cpc_no_retain("getpeername", "setsockopt", "memset", "bind", "accept")
+#pragma cpc_no_retain("getpeername", "setsockopt", "memset", "bind", "accept", "recvfrom")
