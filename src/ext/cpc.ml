@@ -2441,14 +2441,18 @@ let stages = [
 ]
 
 let rec doit (f: file) =
+  let do_stage n (descr,step) =
+    if !stage < n then raise Exit
+    else begin
+      trace (dprintf "Stage %d: %s" n descr);
+      Stats.time descr step f;
+      Stats.time "Cleaning things a bit\n"
+        (visitCilFileSameGlobals (new cleaner)) f;
+      n+1
+    end
+  in
   try
-    ignore(List.fold_left (fun n (descr,step) ->
-        if !stage < n then raise Exit;
-        trace (dprintf "Stage %d: %s" n descr);
-        Stats.time descr step f;
-        Stats.time "Cleaning things a bit\n"
-          (visitCilFileSameGlobals (new cleaner)) f;
-        n+1) 0 stages);
+    ignore(List.fold_left do_stage 0 stages);
     trace (dprintf "Finished\n")
   with Exit -> E.log "Exit\n"
 
