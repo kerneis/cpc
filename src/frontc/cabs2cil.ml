@@ -3150,6 +3150,8 @@ and preprocessCast (specs: A.specifier)
   (* If we are casting to a union type then we have to treat this as a 
    * constructor expression. This is to handle the gcc extension that allows 
    * cast from a type of a field to the type of the union  *)
+  (* However, it may just be casting of a whole union to its own type.  We 
+   * will resolve this later, when we'll convert casts to unions.  *)
   let ie' = 
     match unrollType typ, ie with
       TComp (c, _), A.SINGLE_INIT _ when not c.cstruct -> 
@@ -3802,7 +3804,7 @@ and doExp (asconst: bool)   (* This expression is used as a constant *)
              finishExp (se +++ (Set(lv, makeCastT result tresult t, 
                                     !currentLoc)))
                e'
-               tresult   (* Should this be t instead ??? *)
+               t
            end
         | _ -> E.s (error "Unexpected operand for prefix -- or ++")
     end
@@ -3850,7 +3852,7 @@ and doExp (asconst: bool)   (* This expression is used as a constant *)
                (se' +++ (Set(lv, makeCastT opresult tresult (typeOfLval lv), 
                              !currentLoc)))
                result
-               tresult   (* Should this be t instead ??? *)
+               t
            end
         | _ -> E.s (error "Unexpected operand for suffix ++ or --")
     end
@@ -5121,7 +5123,7 @@ and doInit
 
    (* We have a designator that tells us to select the matching union field. 
     * This is to support a GCC extension *)
-  | TComp(ci, _), [(A.NEXT_INIT,
+  | TComp(ci, _) as targ, [(A.NEXT_INIT,
                     A.COMPOUND_INIT [(A.INFIELD_INIT ("___matching_field", 
                                                      A.NEXT_INIT), 
                                       A.SINGLE_INIT oneinit)])] 
@@ -5136,10 +5138,17 @@ and doInit
            -> fi
         | _ :: rest -> findField rest
       in
-      let fi = findField ci.cfields in
-      (* Change the designator and redo *)
-      doInit isconst setone so acc [(A.INFIELD_INIT (fi.fname, A.NEXT_INIT),
-                                     A.SINGLE_INIT oneinit)]
+      (* If this is a cast from union X to union X *)
+      if Util.equals tsig (typeSigNoAttrs targ)
+      then
+        doInit isconst setone so acc [(A.NEXT_INIT, A.SINGLE_INIT oneinit)]
+      else
+        (* If this is a GNU extension with field-to-union cast find the field *)
+        let fi = findField ci.cfields in
+        let _ = ignore (E.log "REDO" ) in
+        (* Change the designator and redo *)
+        doInit isconst setone so acc [(A.INFIELD_INIT (fi.fname, A.NEXT_INIT),
+                                       A.SINGLE_INIT oneinit)]
         
 
         (* A structure with a composite initializer. We initialize the fields*)
