@@ -274,6 +274,7 @@ and ikind =
     IChar       (** [char] *)
   | ISChar      (** [signed char] *)
   | IUChar      (** [unsigned char] *)
+  | IBool       (** [_Bool (C99)] *)
   | IInt        (** [int] *)
   | IUInt       (** [unsigned int] *)
   | IShort      (** [short] *)
@@ -1523,7 +1524,7 @@ val setTypeSigAttrs: attributes -> typsig -> typsig
 val typeSigAttrs: typsig -> attributes
 
 (*********************************************************)
-(**  LVALUES *)
+(**  {b Lvalues} *)
 
 (** Make a varinfo. Use this (rarely) to make a raw varinfo. Use other 
  * functions to make locals ({!Cil.makeLocalVar} or {!Cil.makeFormalVar} or 
