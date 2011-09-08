@@ -428,7 +428,7 @@ let decfloat = (intnum? fraction)
 	      | (intnum '.') 
               | (intnum '.' exponent) 
 
-let hexfraction = hexdigit* '.' hexdigit+ | hexdigit+
+let hexfraction = hexdigit* '.' hexdigit+ | hexdigit+ '.'
 let binexponent = ['p' 'P'] ['+' '-']? decdigit+
 let hexfloat = hexprefix hexfraction binexponent
              | hexprefix hexdigit+   binexponent
