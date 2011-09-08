@@ -111,11 +111,11 @@ BEFOREDEPS += $(OBJDIR)/feature_config.ml
     # Include now the common set of rules for OCAML
 include ocamlutil/Makefile.ocaml
 
+OBEXEEXT = $(EXEEXT:asm=native)
 ocamlbuild:
-	ocamlbuild -no-links -Xs obj,runtime,samples src/main$(EXEEXT) src/cil.$(CMXA)
-	cp _build/src/main$(EXEEXT) $(OBJDIR)/cilly$(EXE)
+	ocamlbuild -no-links -Xs obj,runtime,samples,doc,test src/main$(OBEXEEXT) src/cil.$(CMXA)
+	cp _build/src/main$(OBEXEEXT) $(OBJDIR)/cilly$(EXE)
 	cp _build/src/cil.$(CMXA) $(OBJDIR)/
-
 
    # Now the rule to make cpc and cilly
 
@@ -344,7 +344,7 @@ odoc: $(OBJDIR)/pretty.cmi $(OBJDIR)/cil.cmi
              -t "CIL API Documentation (version @CIL_VERSION@)" \
 	     -I $(OBJDIR) -hide Pervasives $(ODOC_FILES)
 
-doc/cilpp.tex: doc/cilcode.pl doc/cil.tex 
+doc/cilpp.tex: doc/cilcode.pl doc/cil.tex lib/Cilly.pm
 	-rm -rf doc/html/cil
 	-mkdir doc/html/cil
 	-mkdir doc/html/cil/examples
@@ -398,7 +398,7 @@ distrib: distrib-nocheck checkdistrib
 TEMP_DIR = TEMP_cil-distrib
 
 # The tar archive members will be relative to this directory
-TOP_DIR = $(TEMP_DIR)/cil
+TOP_DIR = $(TEMP_DIR)/cil-@CIL_VERSION@
 
 DISTRIB_ROOT = README LICENSE INSTALL Makefile.in  \
                config.h.in config.mk.in Makefile.gcc Makefile.msvc \
@@ -407,13 +407,13 @@ DISTRIB_ROOT = README LICENSE INSTALL Makefile.in  \
 	       _tags \
 	       aclocal.m4 \
 	       cil.itarget \
-	       cil.odocl \
+	       doc/cil.odocl \
 	       myocamlbuild.ml
 
 DISTRIB_SRC = cilutil.ml cil.ml cil.mli check.ml check.mli \
 	      rmtmps.ml rmtmps.mli formatlex.mll formatparse.mly \
 	      formatcil.mli formatcil.ml testcil.ml \
-	      mergecil.ml mergecil.mli main.ml machdep-ml.c \
+	      mergecil.ml mergecil.mli main.ml machdep-ml.c.in machdepenv.ml \
 	      ciloptions.ml ciloptions.mli libmaincil.ml \
 	      escape.ml escape.mli cillower.mli cillower.ml \
 	      _tags \
@@ -447,7 +447,7 @@ DISTRIB_SRC_EXT = logcalls.ml logcalls.mli \
 	          stackoverflow.mli stackoverflow.ml \
 	          canonicalize.ml canonicalize.mli \
 	          oneret.ml oneret.mli sfi.ml \
-	          simplemem.ml simplify.ml \
+	          simplemem.ml simplify.ml simplify.mli \
 	          blockinggraph.ml blockinggraph.mli \
 		  dataslicing.ml dataslicing.mli \
 		  _tags \
@@ -456,7 +456,8 @@ DISTRIB_SRC_EXT = logcalls.ml logcalls.mli \
 		  liveness.ml \
 		  expcompare.ml \
 		  availexpslv.ml \
-		  predabst.ml simplify.mli
+		  predabst.ml \
+		  llvm.ml llvmgen.ml llvmssa.ml llvmutils.ml
 
 DISTRIB_SRC_EXT_PTA = setp.ml setp.mli golf.ml golf.mli \
                       ptranal.ml ptranal.mli \
@@ -509,10 +510,10 @@ distrib-nocheck: $(DISTRIB_ROOT) doc
 	cp debian/* $(TOP_DIR)/debian
 
 # Delete all Subversion metadata directories
-	find $(TEMP_DIR) -name .svn -print0 | xargs --null --no-run-if-empty rm -rf
+	find $(TEMP_DIR) -name .svn -print0 | xargs -0 rm -rf
 
 # Now make the TAR ball
-	cd $(TEMP_DIR); tar cfz $(CIL_TAR_GZ) cil
+	cd $(TEMP_DIR); tar cfz $(CIL_TAR_GZ) cil-@CIL_VERSION@
 	mv $(TEMP_DIR)/$(CIL_TAR_GZ) .
 
 #	rm -rf $(TEMP_DIR)
