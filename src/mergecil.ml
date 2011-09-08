@@ -192,7 +192,7 @@ let union (nd1: 'a node) (nd2: 'a node) : 'a node * (unit -> unit) =
                * some client source; I'm disabling the warning since it supposedly
                * is harmless anyway, so is useless noise *)
               (* sm: re-enabling on claim it now will probably not happen *)
-              ignore (warn "Merging two undefined elements in the same file: %s and %s\n" nd1.nname nd2.nname);
+              ignore (warn "Merging two undefined elements in the same file: %s and %s" nd1.nname nd2.nname);
               nd1, nd2
         end
       else (* One is defined, the other is not. Choose the defined one *)
@@ -419,6 +419,7 @@ let intEnumInfo =
     eitems = [];
     eattr = [];
     ereferenced = false;
+    ekind = IInt;
   }
 (* And add it to the equivalence graph *)
 let intEnumInfoNode =
@@ -1378,7 +1379,7 @@ let oneFilePass2 (f: file) =
               )
               else ( 
                 (* Both GVars have initializers. *)
-                (E.s (error "global var %s at %a has different initializer than %a\n"
+                (E.s (error "global var %s at %a has different initializer than %a"
                               vi'.vname  d_loc l  d_loc prevLoc));
               )
             with Not_found -> (
@@ -1543,7 +1544,7 @@ let oneFilePass2 (f: file) =
                     (* the checksums differ, so print a warning but keep the
                      * older one to avoid a link error later.  I think this is 
 		     * a reasonable approximation of what ld does. *)
-                    (ignore (warn "def'n of func %s at %a (sum %d) conflicts with the one at %a (sum %d); keeping the one at %a.\n"
+                    (ignore (warn "def'n of func %s at %a (sum %d) conflicts with the one at %a (sum %d); keeping the one at %a."
                                fdec'.svar.vname  d_loc l  curSum  d_loc prevLoc
 			       prevSum d_loc prevLoc))
                   end
@@ -1667,8 +1668,8 @@ let oneFilePass2 (f: file) =
     let globStr:string = (P.sprint 1000 (P.dprintf 
       "error when merging global %a: %s"
       d_global g  (Printexc.to_string e))) in
-    ignore (E.log "%s\n" globStr);
-    (*"error when merging global: %s\n" (Printexc.to_string e);*)
+    ignore (E.log "%s" globStr);
+    (*"error when merging global: %s" (Printexc.to_string e);*)
     mergePushGlobal (GText (P.sprint 80 
                               (P.dprintf "/* error at %t:" d_thisloc)));
     mergePushGlobal g;
@@ -1709,7 +1710,7 @@ let oneFilePass2 (f: file) =
     (* Now check if we have inlines that we could not remove
     H.iter (fun name _ -> 
       if not (H.mem inlinesRemoved name) then 
-        ignore (warn "Could not remove inline %s. I have no idea why!\n"
+        ignore (warn "Could not remove inline %s. I have no idea why!"
                   name))
       inlinesToRemove *)
   end

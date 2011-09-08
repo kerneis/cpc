@@ -31,7 +31,7 @@ AC_PREREQ(2.50)
 # Assign here the CIL version numbers
 CIL_VERSION_MAJOR=1
 CIL_VERSION_MINOR=3
-CIL_VERSION_REV=6
+CIL_VERSION_REV=7
 CIL_VERSION=$CIL_VERSION_MAJOR.$CIL_VERSION_MINOR.$CIL_VERSION_REV
 
 
@@ -478,7 +478,7 @@ AC_MSG_RESULT([done])
 
 
 # Give a space-separated list of features with the defaults
-features="blockinggraph=no zrapp=no"
+features="blockinggraph=no zrapp=no llvm=no"
 
 AC_ARG_WITH(blockinggraph,
     AC_HELP_STRING([--with-blockinggraph],
@@ -486,6 +486,10 @@ AC_ARG_WITH(blockinggraph,
 AC_ARG_WITH(zrapp,
     AC_HELP_STRING([--with-zrapp],
                    [enable the zrapp pretty-printer]))
+
+AC_ARG_WITH(llvm,
+    AC_HELP_STRING([--with-llvm],
+                   [enable the LLVM code generator]))
 
 # Now add any features specified in the command-line
 
@@ -555,6 +559,8 @@ CIL_CONFIG_FILES(bin/CilConfig.pm)
 CIL_CONFIG_FILES(doc/index.html)
 CIL_CONFIG_FILES(doc/header.html)
 CIL_CONFIG_FILES(ocamlutil/perfcount.c)
+CIL_CONFIG_FILES(test/llvm/Makefile)
+CIL_CONFIG_FILES(src/machdep-ml.c)
 
 AC_OUTPUT()
 

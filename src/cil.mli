@@ -49,7 +49,6 @@
  * set {!Cil.msvcMode}.  *)
 val initCIL: unit -> unit
 
-
 (** This are the CIL version numbers. A CIL version is a number of the form 
  * M.m.r (major, minor and release) *)
 val cilVersion: string
@@ -87,7 +86,7 @@ type file =
       mutable globinit: fundec option;  
       (** An optional global initializer function. This is a function where 
        * you can put stuff that must be executed before the program is 
-       * started. This function, is conceptually at the end of the file, 
+       * started. This function is conceptually at the end of the file, 
        * although it is not part of the globals list. Use {!Cil.getGlobInit} 
        * to create/get one. *)
       mutable globinitcalled: bool;     
@@ -422,6 +421,9 @@ and enuminfo = {
      * reference to this [enuminfo] using the [TEnum] type constructor. *)
     mutable ereferenced: bool;         
     (** True if used. Initially set to false*)
+    mutable ekind: ikind;
+    (** The integer kind used to represent this enum. Per ANSI-C, this
+      * should always be IInt, but gcc allows other integer kinds *)
 }
 
 (** {b Enumerations.} Information about an enumeration. This is shared by all 
@@ -507,7 +509,7 @@ and varinfo = {
 
     mutable vreferenced: bool;          
     (** True if this variable is ever referenced. This is computed by 
-     * [removeUnusedVars]. It is safe to just initialize this to False *)
+     * {!Rmtmps.removeUnusedTemps}. It is safe to just initialize this to False *)
 
     mutable vdescr: Pretty.doc;
     (** For most temporary variables, a description of what the var holds.
@@ -2009,6 +2011,13 @@ val msvcMode: bool ref
  * their operands *)
 val useLogicalOperators: bool ref
 
+(** Set this to true to get old-style handling of gcc's extern inline C extension:
+   old-style: the extern inline definition is used until the actual definition is
+     seen (as long as optimization is enabled)
+   new-style: the extern inline definition is used only if there is no actual
+     definition (as long as optimization is enabled)
+   Note that CIL assumes that optimization is always enabled ;-) *)
+val oldstyleExternInline : bool ref
 
 (** A visitor that does constant folding. Pass as argument whether you want 
  * machine specific simplifications to be done, or not. *)
@@ -2036,7 +2045,7 @@ val print_CIL_Input: bool ref
 (** Whether to print the CIL as they are, without trying to be smart and 
   * print nicer code. Normally this is false, in which case the pretty 
   * printer will turn the while(1) loops of CIL into nicer loops, will not 
-  * print empty "else" blocks, etc. These is one case howewer in which if you 
+  * print empty "else" blocks, etc. There is one case howewer in which if you 
   * turn this on you will get code that does not compile: if you use varargs 
   * the __builtin_va_arg function will be printed in its internal form. *)
 val printCilAsIs: bool ref
@@ -2470,13 +2479,13 @@ val uniqueVarNames: file -> unit
 
 (** {b Optimization Passes} *)
 
-(** A peephole optimizer that processes two adjacent statements and possibly 
-    replaces them both. If some replacement happens, then the new statements 
+(** A peephole optimizer that processes two adjacent instructions and possibly 
+    replaces them both. If some replacement happens, then the new instructions
     are themselves subject to optimization *)
 val peepHole2: (instr * instr -> instr list option) -> stmt list -> unit
 
 (** Similar to [peepHole2] except that the optimization window consists of 
-    one statement, not two *)
+    one instruction, not two *)
 val peepHole1: (instr -> instr list option) -> stmt list -> unit
 
 (** {b Machine dependency} *)
@@ -2492,14 +2501,15 @@ exception SizeOfError of string * typ
 (** Give the unsigned kind corresponding to any integer kind *)
 val unsignedVersionOf : ikind -> ikind
 
-(** The signed integer kind for a given size. Raises Not_found
- *  if no such kind exists *)
-val intKindForSize : int -> ikind
+(** The signed integer kind for a given size (unsigned if second argument
+ * is true). Raises Not_found if no such kind exists *)
+val intKindForSize : int -> bool -> ikind
 
 (** The float kind for a given size. Raises Not_found
  *  if no such kind exists *)
 val floatKindForSize : int-> fkind
 
+(** The size in bytes of the given int kind. *)
 val bytesSizeOfInt: ikind -> int 
 
 (** The size of a type, in bits. Trailing padding is added for structs and 
@@ -2508,7 +2518,17 @@ val bytesSizeOfInt: ikind -> int
  * call {!Cil.initCIL}. Remember that on GCC sizeof(void) is 1! *)
 val bitsSizeOf: typ -> int
 
+(** Represents an integer as for a given kind. 
+ * Returns a flag saying whether the value was changed
+ * during truncation (because it was too large to fit in k). *)
 val truncateInteger64: ikind -> int64 -> int64 * bool
+
+(** True if the integer fits within the kind's range *)
+val fitsInInt: ikind -> int64 -> bool
+
+(** Return the smallest kind that will hold the integer's value.
+ *  The kind will be unsigned if the 2nd argument is true *)
+val intKindForValue: int64 -> bool -> ikind
 
 (** The size of a type, in bytes. Returns a constant expression or a "sizeof" 
  * expression if it cannot compute the size. This function is architecture 
