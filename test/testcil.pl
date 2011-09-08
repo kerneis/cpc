@@ -215,6 +215,9 @@ addBadComment("test/argcast",
 addTest("test/array1");
 addTest("test/array2");
 addTest("testrun/array_varsize");
+addTest("testrun/array_multi_varsize");
+addBadComment("testrun/array_multi_varsize",
+           "Limitation. CIL does not handle variable-length multidimensional arrays.");
 addTest("testrun/array_formal");
 addTest("testrun/formalscope");
 addTest("test/matrix");
@@ -266,6 +269,7 @@ addTest("test/const13 WARNINGS_ARE_ERRORS=1");
 addBadComment("test/const13", "Minor. Const warnings from generated code - need more casts.");
 addTest("test/const14");
 addBadComment("test/const14", "Bug. Missing cast to result type when short-cutting expressions to 0.");
+addTest("testrun/const15 ");
 addTest("test/deref _GNUCC=1");
 addTest("test_i/empty");
 addTest("test/enum");
@@ -399,6 +403,9 @@ addTest("testrun/label6");
 addTest("test/label7");
 addTest("test/label8");
 addTest("test/label9 EXTRAARGS=--domakeCFG");
+addTest("testrun/case_then_default_in_switch EXTRAARGS=--domakeCFG");
+addTestFail("test/switch_default_parse_bug ", "Empty default in switch ");
+addTestFail("test/break1 ", "No enclosing loop for break");
 addTest("testrun/wchar1");
 addTest("testrun/wchar2");
 addTest("testrun/wchar3");

@@ -1090,10 +1090,6 @@ type loopstate =
 
 let continues : loopstate list ref = ref []
 
-let startLoop iswhile = 
-  continues := (if iswhile then While
-  else NotWhile (ref "")) :: !continues
-
 (* Sometimes we need to create new label names *)
 let newLabelName (base: string) = fst (newAlphaName false "label" base)
 
@@ -1113,7 +1109,26 @@ let consLabContinue (c: chunk) =
   | While :: rest -> c
   | NotWhile lr :: rest -> if !lr = "" then c else consLabel !lr c !currentLoc false
 
+let break_env = Stack.create ()
+
+let enter_break_env () = Stack.push () break_env
+
+let breakChunk l =
+  if Stack.is_empty break_env then
+    E.s (error "break outside of a loop or switch");
+  breakChunk l
+
+let exit_break_env () =
+  if Stack.is_empty break_env then
+    E.s (error "trying to exit a breakable env without having entered it");
+  ignore (Stack.pop break_env)
+
+let startLoop iswhile =
+  enter_break_env ();
+  continues := (if iswhile then While else NotWhile (ref "")) :: !continues
+
 let exitLoop () = 
+  exit_break_env ();
   match !continues with
     [] -> E.s (error "exit Loop not in a loop")
   | _ :: rest -> continues := rest
@@ -1282,8 +1297,7 @@ let rec castTo ?(fromsource=false)
      * source. *)
     (ot, e) 
   else begin
-    let nt' = unrollType nt in
-    let nt' = if fromsource then nt' else !typeForInsertedCast nt' in
+    let nt' = if fromsource then nt else !typeForInsertedCast nt in
     let result = (nt', 
                   if !insertImplicitCasts || fromsource then Cil.mkCastT e ot nt' else e) in
 
@@ -1293,7 +1307,7 @@ let rec castTo ?(fromsource=false)
                 d_plainexp (snd result));
 
     (* Now see if we can have a cast here *)
-    match unrollType ot, nt' with
+    match unrollType ot, unrollType nt' with
       TNamed _, _ 
     | _, TNamed _ -> E.s (bug "unrollType failed in castTo")
     | TInt(ikindo,_), TInt(ikindn,_) -> 
@@ -1309,7 +1323,8 @@ let rec castTo ?(fromsource=false)
           
     | TArray _, TPtr _ -> result
           
-    | TArray(t1,_,_), TArray(t2,None,_) when Util.equals (typeSig t1) (typeSig t2) -> (nt', e)
+    | TArray(t1,_,_), TArray(t2,None,_)
+        when Util.equals (typeSig t1) (typeSig t2) -> (nt', e)
           
     | TPtr _, TArray(_,_,_) -> (nt', e)
           
@@ -1346,7 +1361,7 @@ let rec castTo ?(fromsource=false)
            * have been changed to the type of the first argument, and we'll 
            * see a cast from a union to the type of the first argument. Turn 
            * that into a field access *)
-    | TComp(tunion, a1), nt -> begin
+    | TComp(tunion, a1), _ -> begin
         match isTransparentUnion ot with 
           None -> E.s (error "cabs2cil/castTo: illegal cast  %a -> %a@!"
                          d_type ot d_type nt')
@@ -4808,7 +4823,10 @@ and doCondition (isconst: bool) (* If we are in constants, we do our best to
                 (e: A.expression) 
                 (st: chunk)
                 (sf: chunk) : chunk = 
-  compileCondExp (doCondExp isconst e) st sf
+  if isEmpty st && isEmpty sf then
+    let se,_,_ = doExp isconst e ADrop in se
+  else
+    compileCondExp (doCondExp isconst e) st sf
 
 
 and doPureExp (e : A.expression) : exp = 
@@ -6305,11 +6323,11 @@ and doStatement (s : A.statement) : chunk =
     | A.WHILE(e,s,loc) ->
         startLoop true;
         let s' = doStatement s in
-        exitLoop ();
         let loc' = convLoc loc in
+        let break_cond = breakChunk loc' in
+        exitLoop ();
         currentLoc := loc';
-        loopChunk ((doCondition false e skipChunk
-                      (breakChunk loc'))
+        loopChunk ((doCondition false e skipChunk break_cond)
                    @@ s')
           
     | A.DOWHILE(e,s,loc) -> 
@@ -6337,14 +6355,14 @@ and doStatement (s : A.statement) : chunk =
         let s' = doStatement s in
         currentLoc := loc';
         let s'' = consLabContinue se3 in
+        let break_cond = breakChunk loc' in
         exitLoop ();
         let res = 
           match e2 with
             A.NOTHING -> (* This means true *)
               se1 @@ loopChunk (s' @@ s'')
           | _ -> 
-              se1 @@ loopChunk ((doCondition false e2 skipChunk
-              (breakChunk loc'))
+              se1 @@ loopChunk ((doCondition false e2 skipChunk break_cond)
                                 @@ s' @@ s'')
         in
         exitScope ();
@@ -6395,7 +6413,9 @@ and doStatement (s : A.statement) : chunk =
         currentLoc := loc';
         let (se, e', et) = doExp false e (AExp (Some intType)) in
         let (et'', e'') = castTo et intType e' in
+        enter_break_env ();
         let s' = doStatement s in
+        exit_break_env ();
         se @@ (switchChunk e'' s' loc')
                
     | A.CASE (e, s, loc) -> 
@@ -6738,7 +6758,3 @@ let convFile (f : A.file) : Cil.file =
     globinit = None;
     globinitcalled = false;
   } 
-
-
-    
-                      

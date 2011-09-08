@@ -1679,6 +1679,15 @@ let d_storage () = function
 let mostNeg32BitInt : int64 = (Int64.of_string "-0x80000000")
 let mostNeg64BitInt : int64 = (Int64.of_string "-0x8000000000000000")
 
+let bytesSizeOfInt (ik: ikind): int = 
+  match ik with 
+  | IChar | ISChar | IUChar -> 1
+  | IBool -> !M.theMachine.M.sizeof_bool
+  | IInt | IUInt -> !M.theMachine.M.sizeof_int
+  | IShort | IUShort -> !M.theMachine.M.sizeof_short
+  | ILong | IULong -> !M.theMachine.M.sizeof_long
+  | ILongLong | IULongLong -> !M.theMachine.M.sizeof_longlong
+
 (* constant *)
 let d_const () c = 
   match c with
@@ -1703,13 +1712,10 @@ let d_const () c =
       (* Watch out here for negative integers that we should be printing as 
        * large positive ones *)
       if i < Int64.zero && (not (isSigned ik)) then
-        let high = Int64.shift_right i 32 in
-        if ik <> IULongLong && ik <> ILongLong && high = Int64.of_int (-1) then
-          (* Print only the low order 32 bits *)
-          text (prefix ^ "0x" ^ 
-                (Int64.format "%x" 
-                  (Int64.logand i (Int64.shift_right_logical high 32))
-                ^ suffix))
+        if bytesSizeOfInt ik <> 8 then
+          (* I am convinced that we shall never store smaller than 64-bits
+           * integers in negative form. -- Gabriel *)
+          E.s (E.bug "unexpected negative unsigned integer (please report this bug)")
         else
           text (prefix ^ "0x" ^ Int64.format "%x" i ^ suffix)
       else (
@@ -1936,15 +1942,6 @@ and typeOffset basetyp =
  **)
 exception SizeOfError of string * typ
 
-
-let bytesSizeOfInt (ik: ikind): int = 
-  match ik with 
-  | IChar | ISChar | IUChar -> 1
-  | IBool -> !M.theMachine.M.sizeof_bool
-  | IInt | IUInt -> !M.theMachine.M.sizeof_int
-  | IShort | IUShort -> !M.theMachine.M.sizeof_short
-  | ILong | IULong -> !M.theMachine.M.sizeof_long
-  | ILongLong | IULongLong -> !M.theMachine.M.sizeof_longlong
 
 let unsignedVersionOf (ik:ikind): ikind =
   match ik with
@@ -3725,6 +3722,14 @@ class defaultCilPrinterClass : cilPrinter = object (self)
 	in
 	leftflush ++ directive ++ chr ' ' ++ num l.line ++ filename ++ line
 
+  method private pIfConditionThen loc condition thenBlock =
+      self#pLineDirective loc
+      ++ text "if"
+      ++ (align
+          ++ text " ("
+          ++ self#pExp () condition
+          ++ text ") "
+          ++ self#pBlock () thenBlock)
 
   method private pStmtKind (next: stmt) () = function
       Return(None, l) ->
@@ -3765,59 +3770,33 @@ class defaultCilPrinterClass : cilPrinter = object (self)
           ++ unalign
 
     | If(be,t,{bstmts=[];battrs=[]},l) when not !printCilAsIs ->
-        self#pLineDirective l
-          ++ text "if"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () be
-                ++ text ") "
-                ++ self#pBlock () t)
+        self#pIfConditionThen l be t
           
     | If(be,t,{bstmts=[{skind=Goto(gref,_);labels=[]}];
                 battrs=[]},l)
      when !gref == next && not !printCilAsIs ->
-       self#pLineDirective l
-         ++ text "if"
-         ++ (align
-               ++ text " ("
-               ++ self#pExp () be
-               ++ text ") "
-               ++ self#pBlock () t)
+        self#pIfConditionThen l be t
 
     | If(be,{bstmts=[];battrs=[]},e,l) when not !printCilAsIs ->
-        self#pLineDirective l
-          ++ text "if"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () (UnOp(LNot,be,intType))
-                ++ text ") "
-                ++ self#pBlock () e)
+          self#pIfConditionThen l (UnOp(LNot,be,intType)) e
 
     | If(be,{bstmts=[{skind=Goto(gref,_);labels=[]}];
            battrs=[]},e,l)
       when !gref == next && not !printCilAsIs ->
-        self#pLineDirective l
-          ++ text "if"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () (UnOp(LNot,be,intType))
-                ++ text ") "
-                ++ self#pBlock () e)
+        self#pIfConditionThen l (UnOp(LNot,be,intType)) e
           
     | If(be,t,e,l) ->
-        self#pLineDirective l
-          ++ (align
-                ++ text "if"
-                ++ (align
-                      ++ text " ("
-                      ++ self#pExp () be
-                      ++ text ") "
-                      ++ self#pBlock () t)
-                ++ text " "   (* sm: indent next code 2 spaces (was 4) *)
-                ++ (align
-                      ++ text "else "
-                      ++ self#pBlock () e)
-          ++ unalign)
+        self#pIfConditionThen l be t
+          ++ (match e with
+                { bstmts=[{skind=If _} as elsif]; battrs=[] } ->
+                    text " else"
+                    ++ line (* Don't indent else-ifs *)
+                    ++ self#pStmtNext next () elsif
+              | _ ->
+                    text " "   (* sm: indent next code 2 spaces (was 4) *)
+                    ++ align
+                    ++ text "else "
+                    ++ self#pBlock () e)
           
     | Switch(e,b,_,l) ->
         self#pLineDirective l
@@ -6534,12 +6513,7 @@ let labelAlphaTable : (string, unit A.alphaTableData ref) H.t =
 let freshLabel (base:string) =
   fst (A.newAlphaName labelAlphaTable None base ())
 
-let switch_count = ref (-1) 
-let get_switch_count () = 
-  switch_count := 1 + !switch_count ;
-  !switch_count
-
-let rec xform_switch_stmt s break_dest cont_dest label_index = begin
+let rec xform_switch_stmt s break_dest cont_dest = begin
   s.labels <- Util.list_map (fun lab -> match lab with
     Label _ -> lab
   | Case(e,l) ->
@@ -6553,11 +6527,9 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
 	| None ->
 	    "exp"
       in
-      let str = Pretty.sprint !lineLength 
-	  (Pretty.dprintf "switch_%d_%s" label_index suffix) in 
-      (Label(freshLabel str,l,false))
-  | Default(l) -> (Label(freshLabel (Printf.sprintf 
-                  "switch_%d_default" label_index),l,false))
+      let str = "case_" ^ suffix in
+      Label(freshLabel str,l,false)
+  | Default(l) -> Label(freshLabel "switch_default",l,false)
   ) s.labels ; 
   match s.skind with
   | Instr _ | Return _ | Goto _ -> ()
@@ -6573,10 +6545,10 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
                   ignore (error "prepareCFG: continue: %a@!" d_stmt s) ;
                   raise e
                 end
-  | If(e,b1,b2,l) -> xform_switch_block b1 break_dest cont_dest label_index ;
-                     xform_switch_block b2 break_dest cont_dest label_index
-  | Switch(e,b,sl,l) -> begin
-      (* change 
+  | If(e,b1,b2,l) -> xform_switch_block b1 break_dest cont_dest ;
+                     xform_switch_block b2 break_dest cont_dest
+  | Switch(e,b,sl,l) ->
+      (* change
        * switch (se) {
        *   case 0: s0 ;
        *   case 1: s1 ; break;
@@ -6586,84 +6558,98 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
        * into:
        *
        * if (se == 0) goto label_0;
-       * else if (se == 1) goto label_1;
+       * if (se == 1) goto label_1;
        * ...
-       * else if (0) { // body_block
-       *  label_0: s0;
-       *  label_1: s1; goto label_break;
-       *  ...
-       * } else if (0) { // break_block
-       *  label_break: ; // break_stmt
-       * } 
+       * goto label_default; // If there is a [Default]
+       * goto label_break; // If there is no [Default]
+       * label_0: s0;
+       * label_1: s1; goto label_break;
+       * ...
+       * label_break: ; // break_stmt
+       *
+       * The default case, if present, must be used only if *all*
+       * non-default cases fail [ISO/IEC 9899:1999, §6.8.4.2, ¶5]. As
+       * a result, we test all cases first, and hit 'default' only if
+       * no case matches. However, we do not reorder the switch's
+       * body, so fall-through still works as expected.
+       *
        *)
-      let i = get_switch_count () in 
+
       let break_stmt = mkStmt (Instr []) in
-      break_stmt.labels <- 
-				[Label(freshLabel (Printf.sprintf "switch_%d_break" i),l,false)] ;
-      let break_block = mkBlock [ break_stmt ] in
-      let body_block = b in 
-      let body_if_stmtkind = (If(zero,body_block,break_block,l)) in
+      break_stmt.labels <- [Label(freshLabel "switch_break",l,false)] ;
 
-      (* The default case, if present, must be used only if *all*
-      non-default cases fail [ISO/IEC 9899:1999, §6.8.4.2, ¶5]. As a
-      result, we sort the order in which we handle the labels (but not the
-      order in which we print out the statements, so fall-through still
-      works as expected). *)
-      let compare_choices s1 s2 = match s1.labels, s2.labels with
-      | (Default(_) :: _), _ -> 1
-      | _, (Default(_) :: _) -> -1
-      | _, _ -> 0
+      (* To be changed into goto default if there if a [Default] *)
+      let goto_break = mkStmt (Goto (ref break_stmt, l)) in
+
+      (* Return a list of [If] statements, equivalent to the cases of [stmt].
+       * Use a single [If] and || operators if useLogicalOperators is true.
+       * If [stmt] is a [Default], update goto label_break into goto
+       * label_default.
+       *)
+      let xform_choice stmt =
+        let cases = List.filter (function Label _ -> false | _ -> true ) stmt.labels in
+        try (* is this the default case? *)
+          match List.find (function Default _ -> true | _ -> false) cases with
+          | Default dl ->
+              (* We found a [Default], update the fallthrough goto *)
+              goto_break.skind <- Goto(ref stmt, dl);
+              []
+          | _ -> E.s (bug "Unexpected pattern-matching failure")
+        with
+        Not_found -> (* this is a list of specific cases *)
+          match cases with
+          | Case (ce,cl) :: lab_tl ->
+              let make_eq exp =  BinOp(Eq,e,exp,intType) in
+              let make_or_from_cases =
+                List.fold_left
+                    (fun pred label -> match label with
+                           Case (exp, _) -> BinOp(LOr, pred, make_eq exp, intType)
+                         | _ -> E.s (bug "Unexpected pattern-matching failure"))
+                    (make_eq ce)
+            in
+            let make_if_stmt pred cl =
+              let then_block = mkBlock [ mkStmt (Goto(ref stmt,cl)) ] in
+              let else_block = mkBlock [] in
+              mkStmt(If(pred,then_block,else_block,cl)) in
+            if !useLogicalOperators then
+              [make_if_stmt (make_or_from_cases lab_tl) cl]
+            else
+              List.map
+                (function Case (ce,cl) -> make_if_stmt (make_eq ce) cl
+                         | _ -> E.s (bug "Unexpected pattern-matching failure"))
+                cases
+          | Default _ :: _ | Label _ :: _ ->
+              E.s (bug "Unexpected pattern-matching failure")
+          | [] -> E.s (bug "Block missing 'case' and 'default' in switch statement")
       in
-
-      let rec handle_choices sl = match sl with
-        [] -> body_if_stmtkind
-      | stmt_hd :: stmt_tl -> begin
-        let rec handle_labels lab_list = begin
-          match lab_list with
-            [] -> handle_choices stmt_tl 
-          | Case(ce,cl) :: lab_tl -> 
-              let pred = BinOp(Eq,e,ce,intType) in
-              let then_block = mkBlock [ mkStmt (Goto(ref stmt_hd,cl)) ] in
-              let else_block = mkBlock [ mkStmt (handle_labels lab_tl) ] in
-              If(pred,then_block,else_block,cl)
-          | Default(dl) :: lab_tl -> 
-              (* ww: before this was 'if (1) goto label', but as Ben points
-              out this might confuse someone down the line who doesn't have
-              special handling for if(1) into thinking that there are two
-              paths here. The simpler 'goto label' is what we want. *) 
-              Block(mkBlock [ mkStmt (Goto(ref stmt_hd,dl)) ;
-                              mkStmt (handle_labels lab_tl) ])
-          | Label(_,_,_) :: lab_tl -> handle_labels lab_tl
-        end in
-        handle_labels stmt_hd.labels
-      end in
-      s.skind <- handle_choices (List.sort compare_choices sl) ;
-      xform_switch_block b (fun () -> ref break_stmt) cont_dest i 
-    end
+      b.bstmts <-
+        (List.flatten (List.map xform_choice sl)) @
+        [goto_break] @
+        b.bstmts @
+        [break_stmt];
+      s.skind <- Block b;
+      xform_switch_block b (fun () -> ref break_stmt) cont_dest
   | Loop(b,l,_,_) -> 
-          let i = get_switch_count () in 
           let break_stmt = mkStmt (Instr []) in
-          break_stmt.labels <- 
-						[Label(freshLabel (Printf.sprintf "while_%d_break" i),l,false)] ;
+          break_stmt.labels <- [Label(freshLabel "while_break",l,false)] ;
           let cont_stmt = mkStmt (Instr []) in
-          cont_stmt.labels <- 
-						[Label(freshLabel (Printf.sprintf "while_%d_continue" i),l,false)] ;
+          cont_stmt.labels <- [Label(freshLabel "while_continue",l,false)] ;
           b.bstmts <- cont_stmt :: b.bstmts ;
           let this_stmt = mkStmt 
             (Loop(b,l,Some(cont_stmt),Some(break_stmt))) in 
           let break_dest () = ref break_stmt in
           let cont_dest () = ref cont_stmt in 
-          xform_switch_block b break_dest cont_dest label_index ;
+          xform_switch_block b break_dest cont_dest ;
           break_stmt.succs <- s.succs ; 
           let new_block = mkBlock [ this_stmt ; break_stmt ] in
           s.skind <- Block new_block
-  | Block(b) -> xform_switch_block b break_dest cont_dest label_index
+  | Block(b) -> xform_switch_block b break_dest cont_dest
 
   | TryExcept _ | TryFinally _ -> 
       failwith "xform_switch_statement: structured exception handling not implemented"
   | CpcFun _ | CpcSpawn _ -> ()
 
-end and xform_switch_block b break_dest cont_dest label_index = 
+end and xform_switch_block b break_dest cont_dest =
   try 
     let rec link_succs sl = match sl with
     | [] -> ()
@@ -6671,7 +6657,7 @@ end and xform_switch_block b break_dest cont_dest label_index =
     in 
     link_succs b.bstmts ;
     List.iter (fun stmt -> 
-      xform_switch_stmt stmt break_dest cont_dest label_index) b.bstmts ;
+      xform_switch_stmt stmt break_dest cont_dest) b.bstmts ;
   with e ->
     List.iter (fun stmt -> ignore
       (warn "prepareCFG: %a@!" d_stmt stmt)) b.bstmts ;
@@ -6705,7 +6691,7 @@ let prepareCFG (fd : fundec) : unit =
   ignore (visitCilFunction (new registerLabelsVisitor) fd);
   xform_switch_block fd.sbody 
       (fun () -> failwith "prepareCFG: break with no enclosing loop") 
-      (fun () -> failwith "prepareCFG: continue with no enclosing loop") (-1)
+      (fun () -> failwith "prepareCFG: continue with no enclosing loop")
 
 (* make the cfg and return a list of statements *)
 let computeCFGInfo (f : fundec) (global_numbering : bool) : unit =
