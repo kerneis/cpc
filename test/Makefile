@@ -177,6 +177,9 @@ ifdef WARNINGS_ARE_ERRORS
   CFLAGS += -Werror
 endif
 
+ifdef USE_LOGICAL_OPERATORS
+  CILLY+= --useLogicalOperators
+endif
 
 # Enable profiling
 ifdef PROFILE

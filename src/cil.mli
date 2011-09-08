@@ -250,6 +250,7 @@ and typ =
  {!Cil.isIntegralType}, 
  {!Cil.isArithmeticType}, 
  {!Cil.isPointerType}, 
+ {!Cil.isScalarType}, 
  {!Cil.isFunctionType}, 
  {!Cil.isArrayType}. 
 
@@ -1430,6 +1431,9 @@ val isArithmeticType: typ -> bool
 
 (**True if the argument is a pointer type *)
 val isPointerType: typ -> bool
+
+(**True if the argument is a scalar type *)
+val isScalarType: typ -> bool
 
 (** True if the argument is a function type *)
 val isFunctionType: typ -> bool

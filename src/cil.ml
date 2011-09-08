@@ -1846,6 +1846,9 @@ let isPointerType t =
     TPtr _ -> true
   | _ -> false
 
+let isScalarType t =
+  isArithmeticType t || isPointerType t
+
 let isFunctionType t = 
   match unrollType t with
     TFun _ -> true
