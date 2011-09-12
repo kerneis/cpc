@@ -727,10 +727,6 @@ uninstall:
 	rm -f $(addprefix $(DESTDIR)$(bindir)/, $(install_cpc_bin))
 	rm -rf $(DESTDIR)$(pkgincludedir)
 
-uninstall:
-	-rm -rf $(DESTDIR)$(pkglibdir)
-	-rm -rf $(DESTDIR)$(pkgdatadir)
-
 cil.spec: cil.spec.in
 	./config.status $@
 
