@@ -64,6 +64,20 @@ get_thread(cpc_continuation *c)
     return (cpc_thread *)(((char *)c) - offsetof(struct cpc_thread, cont));
 }
 
+
+
+#ifdef UGLY_HACK_RETVAL
+#define RETVAL_FIELD(type) type* cpc_retval;
+#define RETVAL_SET(cont,args) do{(cont)->cpc_retval = (args)->cpc_retval;}while(0);
+#else
+#define RETVAL_FIELD(type)
+#define RETVAL_SET(cont,args) do{}while(0);
+#endif
+
+
+
+
+
 struct cpc_sched {
     threadpool_t *pool;
     struct cpc_sched *next;
@@ -549,8 +563,9 @@ cpc_condvar_count(cpc_condvar *cond)
 #define LAST_ARG(type, arg) type arg __attribute((aligned));}
 #endif
 
-#define cps_expand1(name,type,arg)\
+#define cps_expand1(ret_type,name,type,arg)\
     struct name##_arglist {\
+        RETVAL_FIELD(ret_type);\
         LAST_ARG(type,arg);\
     cpc_continuation *\
     name(struct cpc_continuation *cont)\
@@ -559,10 +574,12 @@ cpc_condvar_count(cpc_condvar *cond)
         cpc_arguments = (struct name##_arglist *) cpc_dealloc(cont,\
                         (int )sizeof(struct name##_arglist ));\
         type arg = cpc_arguments -> arg;\
+        RETVAL_SET(cont, cpc_arguments);\
         cpc_thread *thread = get_thread(cont);
 
-#define cps_expand3(name,type1,arg1,type2,arg2,type3,arg3) \
+#define cps_expand3(ret_type,name,type1,arg1,type2,arg2,type3,arg3) \
     struct name##_arglist {\
+        RETVAL_FIELD(ret_type);\
         type1 arg1;\
         type2 arg2;\
         LAST_ARG(type3,arg3);\
@@ -575,11 +592,12 @@ cpc_condvar_count(cpc_condvar *cond)
         type1 arg1 = cpc_arguments -> arg1;\
         type2 arg2 = cpc_arguments -> arg2;\
         type3 arg3 = cpc_arguments -> arg3;\
+        RETVAL_SET(cont, cpc_arguments);\
         cpc_thread *thread = get_thread(cont);
 
 
 /* cps int cpc_wait(cpc_condvar *cond) */
-cps_expand1(cpc_wait, cpc_condvar *, cond)
+cps_expand1(int,cpc_wait, cpc_condvar *, cond)
     assert(!IS_DETACHED && thread->condvar == NULL && thread->state == STATE_UNKNOWN);
     thread->condvar = cond;
     cond_enqueue(&cond->queue, thread);
@@ -623,7 +641,7 @@ cpc_signal_all(cpc_condvar *cond)
 /*** cpc_sleep ***/
 
 /* cps int cpc_sleep(int sec, int usec, cpc_condvar *cond) */
-cps_expand3(cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
+cps_expand3(int,cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
     struct timeval when;
 
     assert(cont);
@@ -743,7 +761,7 @@ recompute_fdsets(int fd)
 }
         
 /* cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond) */
-cps_expand3(cpc_io_wait, int, fd, int, direction, cpc_condvar *, cond)
+cps_expand3(int,cpc_io_wait, int, fd, int, direction, cpc_condvar *, cond)
     int rc;
 
     assert(cont);
@@ -806,7 +824,7 @@ cpc_continuation *cpc_prim_attach(cpc_thread*);
 cpc_continuation *cpc_prim_detach(cpc_sched*, cpc_thread*);
 
 /* cps cpc_sched *cpc_link(cpc_sched *sched) */
-cps_expand1(cpc_link, cpc_sched *, sched)
+cps_expand1(cpc_sched *,cpc_link, cpc_sched *, sched)
     /* Return the previous scheduler */
     cpc_continuation_patch(cont, sizeof(cpc_sched *), &thread->sched);
 

@@ -50,6 +50,8 @@ This is broken on some architectures.
 
 #endif
 
+#define UGLY_HACK_RETVAL 1
+
 typedef struct cpc_condvar cpc_condvar;
 typedef struct cpc_sched cpc_sched;
 extern cpc_sched *cpc_default_threadpool;
@@ -58,6 +60,9 @@ extern cpc_sched *cpc_default_threadpool;
 typedef struct cpc_continuation {
     unsigned short length;
     unsigned short size;
+#ifdef UGLY_HACK_RETVAL
+    void *cpc_retval; // FIXME UGLY HACK
+#endif
     char c[1];
 } cpc_continuation;
 
@@ -112,7 +117,12 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, const void *value)
 {
   void *cpc_arg;
   cpc_arg =
+#ifdef UGLY_HACK_RETVAL
+    ((cont)->cpc_retval);
+  if(cpc_arg == NULL) return; /* FIXME ugly ugly caller sent us NULL */
+#else
     ((cont)->c + (cont)->length - PTR_SIZE - ((size - 1) / MAX_ALIGN + 1) * MAX_ALIGN);
+#endif
   __builtin_memcpy(cpc_arg, value, size);
   return;
 }
