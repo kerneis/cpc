@@ -37,7 +37,7 @@ CIL_VERSION=$CIL_VERSION_MAJOR.$CIL_VERSION_MINOR.$CIL_VERSION_REV
 # Assign here the CPC version numbers
 CPC_VERSION_MAJOR=0
 CPC_VERSION_MINOR=1
-CPC_VERSION_REV=0
+CPC_VERSION_REV=1
 CPC_VERSION=$CPC_VERSION_MAJOR.$CPC_VERSION_MINOR.$CPC_VERSION_REV
 
 # make sure I haven't forgotten to run autoconf
@@ -432,6 +432,10 @@ case "$target" in
     CILHOME=`cygpath -u "$CILHOME"`
     CC=`which $CC`
     CC=`cygpath -wa "$CC"  | sed -e "s/\\\\\/\\//g"`
+    # Ocaml >= 3.11 uses flexlink for linking
+    if test $major -ge 3 -a $minor -ge 11; then
+      FLEXLINK=yes
+    fi
     ;;
 
   # MinGW
@@ -440,6 +444,10 @@ case "$target" in
 
     ARCHOS=x86_WIN32
     MINGW=yes
+    # Ocaml >= 3.11 uses flexlink for linking
+    if test $major -ge 3 -a $minor -ge 11; then
+      FLEXLINK=yes
+    fi
 
     CC=`which $CC`
     ;;
@@ -557,6 +565,7 @@ chmod -w Makefile.features
 # write @ARCHOS@ somewhere in a written file to get it substituted
 AC_SUBST(ARCHOS)
 AC_SUBST(MINGW)
+AC_SUBST(FLEXLINK)
 AC_SUBST(EMUL)
 AC_SUBST(CILHOME)
 AC_SUBST(HAS_MSVC)
