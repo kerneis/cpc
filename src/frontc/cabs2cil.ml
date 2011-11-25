@@ -4096,6 +4096,12 @@ and doExp (asconst: bool)   (* This expression is used as a constant *)
               fv.vname = "__builtin_next_arg"
             | _ -> false
         in
+        let isBuiltinChooseExpr = 
+          match f'' with 
+            Lval (Var fv, NoOffset) ->
+              fv.vname = "__builtin_choose_expr"
+            | _ -> false
+        in
           
         (** If the "--forceRLArgEval" flag was used, make sure
           we evaluate args right-to-left.
@@ -4149,9 +4155,16 @@ and doExp (asconst: bool)   (* This expression is used as a constant *)
                       let (ss, args') = loop args in
                       let (sa, a', at) = force_right_to_left_evaluation 
                           (doExp false a (AExp None)) in
-                      let promoted_type = defaultArgumentPromotion at in
-                      let _, a'' = castTo at promoted_type a' in
-                      (sa :: ss, a'' :: args')
+                      if isBuiltinChooseExpr then
+                          (* This built-in function is analogous to the `? :'
+                           * operator in C, except that the expression returned
+                           * has its type unaltered by promotion rules. 
+                           * -- gcc manual *)
+                          (sa :: ss, a' :: args')
+                      else
+                          let promoted_type = defaultArgumentPromotion at in
+                          let _, a'' = castTo at promoted_type a' in
+                          (sa :: ss, a'' :: args')
                 in
                 loop args
         in
@@ -4291,6 +4304,27 @@ and doExp (asconst: bool)   (* This expression is used as a constant *)
                 end
               | _ -> 
                   ignore (warn "Invalid call to %s" fv.vname);
+            end else if fv.vname = "__builtin_object_size" then begin
+              (* Side-effects make __builtin_object_size return -1 or 0 *)
+              if (not (isEmpty (!prechunk ()))) then
+              (match !pargs with
+                [ ptr; typ ] -> begin
+                  match constFold true typ with
+                  | Const (CInt64 (0L,_,_)) | Const (CInt64 (1L,_,_))  ->
+                          piscall := false;
+                          pres := kinteger !kindOfSizeOf (-1);
+                          prestype := !typeOfSizeOf
+                  | Const (CInt64 (2L,_,_)) | Const (CInt64 (3L,_,_))  ->
+                          piscall := false;
+                          pres := kinteger !kindOfSizeOf 0;
+                          prestype := !typeOfSizeOf
+                  | _ ->
+                          ignore (warn "Invalid call to builtin_object_size")
+                end
+              | _ ->
+                  ignore (warn "Invalid call to builtin_object_size"));
+              (* Drop the side-effects *)
+              prechunk := (fun _ -> empty);
             end else if fv.vname = "__builtin_constant_p" then begin
               (* Drop the side-effects *)
               prechunk := (fun _ -> empty);

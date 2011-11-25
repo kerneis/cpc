@@ -40,6 +40,8 @@
 /_build
 /_log
 /META
+/README
+/index.html
 
 # /bin/
 /bin/scaninfer.bat

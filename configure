@@ -605,7 +605,6 @@ EXTRAFEATURES
 UNDERSCORE_NAME
 THREAD_IS_KEYWORD
 HAVE_BUILTIN_VA_LIST
-HAS_PERFCOUNT
 CYCLES_PER_USEC
 CPC_VERSION
 CPC_VERSION_REV
@@ -2174,8 +2173,8 @@ ac_config_headers="$ac_config_headers config.h"
 #
 # Assign here the CIL version numbers
 CIL_VERSION_MAJOR=1
-CIL_VERSION_MINOR=3
-CIL_VERSION_REV=7
+CIL_VERSION_MINOR=4
+CIL_VERSION_REV=0
 CIL_VERSION=$CIL_VERSION_MAJOR.$CIL_VERSION_MINOR.$CIL_VERSION_REV
 
 # Assign here the CPC version numbers
@@ -3387,7 +3386,7 @@ ocamlDownloadInstructions="
 reqMaj=3
 reqMin=08
 knownMaj=3
-knownMin=11
+knownMin=12
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking ocaml version is at least $reqMaj.$reqMin" >&5
 $as_echo_n "checking ocaml version is at least $reqMaj.$reqMin... " >&6; }
 if binaryExists ocamlc; then
@@ -3566,42 +3565,6 @@ EOF
      { $as_echo "$as_me:${as_lineno-$LINENO}: result: $perlfixres" >&5
 $as_echo "$perlfixres" >&6; }
  fi
-fi
-
-#
-# Now setup the performance counters
-#
-# At runtime, we'll try to get the cycle speed from /proc/cpuinfo
-# or FreeBSD sysctl.  This means binaries can be moved to different computers.
-# CYCLES_PER_USEC is only a backup in case these aren't available.
-# (See the subversion history for the old code that read /proc/cpuinfo here.)
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking if performance counters are usable" >&5
-$as_echo_n "checking if performance counters are usable... " >&6; }
-# Create a C file from src/perfcount.c.in
-rm -f ./cycles.exe
-if gcc -DCONFIGURATION_ONLY \
-       -x c ocamlutil/perfcount.c.in -lm -o ./cycles.exe >/dev/null 2>&1; then
-
-   if CYCLES_PER_USEC=`./cycles.exe 2>&1` ;then
-     { $as_echo "$as_me:${as_lineno-$LINENO}: result: ok ($CYCLES_PER_USEC cycles per us)" >&5
-$as_echo "ok ($CYCLES_PER_USEC cycles per us)" >&6; }
-   else
-     # Print what we got
-     { $as_echo "$as_me:${as_lineno-$LINENO}: result: no ($CYCLES_PER_USEC)" >&5
-$as_echo "no ($CYCLES_PER_USEC)" >&6; }
-     CYCLES_PER_USEC=0
-   fi
-else
-   CYCLES_PER_USEC=0
-   { $as_echo "$as_me:${as_lineno-$LINENO}: result: no (cannot compile perfcount.c)" >&5
-$as_echo "no (cannot compile perfcount.c)" >&6; }
-fi
-rm -f ./cycles.exe
-
-if test "$CYCLES_PER_USEC" != "0" ;then
-      HAS_PERFCOUNT=1
-else
-      HAS_PERFCOUNT=0
 fi
 
 # additional tools we might check for:
@@ -4800,6 +4763,19 @@ $as_echo "configuring for freebsd/${ARCH}" >&6; }
     ARCHOS=${ARCH}_FREEBSD
     ;;
 
+  *powerpc64*linux*)
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: configuring for linux/powerpc64" >&5
+$as_echo "configuring for linux/powerpc64" >&6; }
+
+    ARCHOS=ppc64_LINUX
+    ;;
+
+  *powerpc-*linux*)
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: configuring for linux/powerpc" >&5
+$as_echo "configuring for linux/powerpc" >&6; }
+
+    ARCHOS=ppc_LINUX
+    ;;
 
   # Mac OS X
   *86*darwin*)
@@ -5081,7 +5057,6 @@ chmod -w Makefile.features
 
 
 
-
 # finish the configure script and generate various files; ./configure
 # will apply variable substitutions to <filename>.in to generate <filename>;
 
@@ -5101,15 +5076,6 @@ chmod -w Makefile.features
   else
     true
     #echo "skipping [META] because it's not in this distribution"
-  fi
-}
-{
-  if test -f cil.spec.in; then
-    ac_config_files="$ac_config_files cil.spec"
-
-  else
-    true
-    #echo "skipping [cil.spec] because it's not in this distribution"
   fi
 }
 {
@@ -5173,15 +5139,6 @@ chmod -w Makefile.features
   else
     true
     #echo "skipping [doc/header.html] because it's not in this distribution"
-  fi
-}
-{
-  if test -f ocamlutil/perfcount.c.in; then
-    ac_config_files="$ac_config_files ocamlutil/perfcount.c"
-
-  else
-    true
-    #echo "skipping [ocamlutil/perfcount.c] because it's not in this distribution"
   fi
 }
 {
@@ -5908,7 +5865,6 @@ do
     "config.h") CONFIG_HEADERS="$CONFIG_HEADERS config.h" ;;
     "Makefile") CONFIG_FILES="$CONFIG_FILES Makefile" ;;
     "META") CONFIG_FILES="$CONFIG_FILES META" ;;
-    "cil.spec") CONFIG_FILES="$CONFIG_FILES cil.spec" ;;
     "config.mk") CONFIG_FILES="$CONFIG_FILES config.mk" ;;
     "test/Makefile") CONFIG_FILES="$CONFIG_FILES test/Makefile" ;;
     "bin/cilly.bat") CONFIG_FILES="$CONFIG_FILES bin/cilly.bat" ;;
@@ -5916,7 +5872,6 @@ do
     "bin/CilConfig.pm") CONFIG_FILES="$CONFIG_FILES bin/CilConfig.pm" ;;
     "doc/index.html") CONFIG_FILES="$CONFIG_FILES doc/index.html" ;;
     "doc/header.html") CONFIG_FILES="$CONFIG_FILES doc/header.html" ;;
-    "ocamlutil/perfcount.c") CONFIG_FILES="$CONFIG_FILES ocamlutil/perfcount.c" ;;
     "test/llvm/Makefile") CONFIG_FILES="$CONFIG_FILES test/llvm/Makefile" ;;
     "src/machdep-ml.c") CONFIG_FILES="$CONFIG_FILES src/machdep-ml.c" ;;
 
@@ -6473,7 +6428,6 @@ $as_echo "$as_me: $ac_file is unchanged" >&6;}
   case $ac_file$ac_mode in
     "Makefile":F) chmod a-w Makefile ;;
     "META":F) chmod a-w META ;;
-    "cil.spec":F) chmod a-w cil.spec ;;
     "config.mk":F) chmod a-w config.mk ;;
     "test/Makefile":F) chmod a-w test/Makefile ;;
     "bin/cilly.bat":F) chmod a-w,a+x bin/cilly.bat ;;
@@ -6481,7 +6435,6 @@ $as_echo "$as_me: $ac_file is unchanged" >&6;}
     "bin/CilConfig.pm":F) chmod a-w bin/CilConfig.pm ;;
     "doc/index.html":F) chmod a-w doc/index.html ;;
     "doc/header.html":F) chmod a-w doc/header.html ;;
-    "ocamlutil/perfcount.c":F) chmod a-w ocamlutil/perfcount.c ;;
     "test/llvm/Makefile":F) chmod a-w test/llvm/Makefile ;;
     "src/machdep-ml.c":F) chmod a-w src/machdep-ml.c ;;
 

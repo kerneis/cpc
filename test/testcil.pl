@@ -202,7 +202,6 @@ addTest("testrun/asm1 _GNUCC=1");
 addTest("test/asm2 _GNUCC=1");
 addTest("test/asm3 _GNUCC=1");
 addTest("test/asm4 _GNUCC=1");
-addBadComment("test/asm4", "Limitation. See testrun/const1.");
 addTest("testobj/asm5 _GNUCC=1");
 
 addTest("testrun/offsetof");
@@ -255,7 +254,6 @@ addTest("test/cast4 _GNUCC=1");
 addTest("testrun/cast8 ");
 addTest("test/constprop");
 addTest("testrun/const1 _GNUCC=1");
-addBadComment("testrun/const1", "Limitation. CIL can't handle large 64-bit unsigned constants.");
 addTest("testrun/const2 ");
 addTest("testrun/const3 ");
 addTest("testrun/const4 _GNUCC=1");
@@ -364,7 +362,7 @@ addTest("test/vararg7 _GNUCC=1");
 addTest("testrun/va-arg-1 _GNUCC=1");
 addTest("testrun/va-arg-2 _GNUCC=1");
 addTest("testrun/va-arg-7 _GNUCC=1");
-addTest("test-bad/arrsize ");
+addTest("test/arrsize ");
 addTest("testrun/comma1 _GNUCC=1");
 addTest("test/retval");
 addTest("testrun/static ");
@@ -553,6 +551,9 @@ addTest("testrun/simplify_structs2 USECILLY=1 EXTRAARGS=--dosimplify");
 
 addTest("test/tempname EXTRAARGS=--dosimplify");
 
+addTest("test/simplify_volatile EXTRAARGS=--dosimplify");
+addBadComment("test/simplify_volatile", "Bug. Simplification of volatile structures with array members fails.");
+
 addTest("testrun/typeof1 ");
 addTest("testrun/semicolon _GNUCC=1");
 
@@ -568,6 +569,7 @@ addTest("testrun/builtin ");
 addTest("test/builtin2 ");
 addTest("testrun/builtin3 ");
 addTest("testrun/builtin_choose_expr");
+addTest("testrungcc/builtin_object_size _GNUCC=1");
 addTest("testrun/builtin4 ");
 addTest("test/builtin5 ");
 addTest("test/sync-1 _GNUCC=1");
@@ -635,6 +637,9 @@ addTest("combine_syserr");
 addTest("combine_syserr MERGEINLINES=1");
 addTest("combine_copyptrs WARNINGS_ARE_ERRORS=1");
 addTest("combine_copyptrs WARNINGS_ARE_ERRORS=1 MERGEINLINES=1");
+
+addTest("testrun/constfold EXTRAARGS=\"--domakeCFG --dopartial\"");
+addBadComment("testrun/constfold", "Bug. Wrong constant folding.  #2276515 on sourceforge.");
 
 # tests of things implemented for EDG compatibility
 addTest("mergestruct");

@@ -4073,6 +4073,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
       ++ text "{ "
       ++ (align
             (* locals. *)
+            ++ line
             ++ (docList ~sep:line (fun vi -> self#pVDecl () vi ++ text ";") 
                   () f.slocals)
             ++ line ++ line
@@ -4970,16 +4971,15 @@ let loadBinaryFile (filename : string) : file =
   let inchan = open_in_bin filename in
   let loaded : savedFile = (Marshal.from_channel inchan : savedFile) in
   close_in inchan ;
-  if !nextGlobalVID = 1 && !nextCompinfoKey = 1 then begin
-    nextGlobalVID := loaded.savedNextVID;
-    nextCompinfoKey := loaded.savedNextCompinfoKey;
-  end
-  else begin
+  nextGlobalVID := max loaded.savedNextVID !nextGlobalVID;
+  nextCompinfoKey := max loaded.savedNextCompinfoKey !nextCompinfoKey;
+  (* nextGlobalVID = 11 because CIL initialises many dummy variables *)
+  if !nextGlobalVID != 11 || !nextCompinfoKey != 1 then begin
     (* In this case, we should change all of the varinfo and compinfo
        keys in loaded.savedFile to prevent conflicts.  But since that hasn't
        been implemented yet, just print a warning.  If you do implement this,
        please send it to the CIL maintainers. *)
-    ignore (E.log "CIL error: you loading a binary file after another file has been loaded.  This isn't currently supported, so varinfo and compinfo id numbers may conflict.")
+    ignore (E.warn "You are probably loading a binary file after another file has been loaded.  This isn't currently supported, so varinfo and compinfo id numbers may conflict.")
   end;
   loaded.savedFile
 
@@ -5614,7 +5614,7 @@ let foldGlobals (fl: file)
 let findOrCreateFunc (f:file) (name:string) (t:typ) : varinfo = 
   let rec search glist = 
     match glist with
-	GVarDecl(vi,_) :: rest when vi.vname = name -> 
+	GVarDecl(vi,_) :: rest | GFun ({svar = vi},_) :: rest when vi.vname = name ->
           if not (isFunctionType vi.vtype) then 
             E.s (error ("findOrCreateFunc: can't create %s because another "
                         ^^"global exists with that name.") name);
