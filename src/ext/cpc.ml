@@ -51,8 +51,6 @@ let is_label = function Label _ -> true | _ -> false
 exception FoundFun of fundec
 exception FoundVar of varinfo
 
-let external_patch = ref true
-
 let aligned_continuations = ref true
 
 (* Avoid stack-overflow on recursive structures *)
@@ -838,39 +836,13 @@ class cpsConverter = fun file ->
     let temp = makeTempVar f ~name:"patch" typ in
     (* typ temp = value *)
     (Set((Var temp, NoOffset), value, locUnknown)) ::
-    if !external_patch then
-      let cpc_patch = find_function "cpc_continuation_patch" file in
-       (* cpc_patch(cont, sizeof(typ), &temp); *)
-      [ Call(None,Lval(Var cpc_patch, NoOffset), [
-        Lval(Var cont, NoOffset);
-        mkCast (sizeOf typ) !typeOfSizeOf;
-        mkCast (addr_of temp) voidPtrType],
-        locUnknown)]
-    else
-      let memcpy = find_function "__builtin_memcpy" file in
-      let cpc_arg = makeTempVar f ~name:"cpc_arg" voidPtrType in [
-      (* cpc_arg = cont->c + cont->length - __BIGGEST_ALIGNMENT__ -
-                     ((sizeof(typ) - 1) / __BIGGEST_ALIGNMENT__ + 1) * __BIGGEST_ALIGNMENT__ *)
-        Set((Var cpc_arg, NoOffset),
-        (if !aligned_continuations then
-        Formatcil.cExp
-        "cont->c + cont->length - %d:biggestalign - ((%e:sizetyp - 1) / %d:biggestalign + 1) * %d:biggestalign"
-          [("cont", Fv cont); ("sizefp", Fe (sizeOf cpc_fun_ptr));
-          ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)]
-        else
-        (* compact continuations *)
-        Formatcil.cExp
-        "cont->c + cont->length - %e:sizefp - %e:sizetyp"
-          [("cont", Fv cont); ("sizefp", Fe (sizeOf cpc_fun_ptr));
-          ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)]
-        ),
-        locUnknown);
-      (* memcpy(cpc_arg, &temp, sizeof(typ)) *)
-        Call(None, Lval(Var memcpy, NoOffset), [
-        Lval(Var cpc_arg, NoOffset);
-        mkCast (addr_of temp) voidPtrType;
-        mkCast (sizeOf typ) !typeOfSizeOf],
-        locUnknown)]
+    let cpc_patch = find_function "cpc_continuation_patch" file in
+     (* cpc_patch(cont, sizeof(typ), &temp); *)
+    [ Call(None,Lval(Var cpc_patch, NoOffset), [
+      Lval(Var cont, NoOffset);
+      mkCast (sizeOf typ) !typeOfSizeOf;
+      mkCast (addr_of temp) voidPtrType],
+      locUnknown)]
     in
   let cpc_spawn = find_function "cpc_prim_spawn" file in
   let spawn cc context =
@@ -2038,9 +2010,6 @@ let rec doit (f: file) =
   with Exit -> E.log "Exit\n"
 
 let feature : featureDescr =
-  let is_default = function
-    | true -> " (default)"
-    | false -> "" in
   { fd_name = "cpc";
     fd_enabled = ref true;
     fd_description = "cpc translation to C";
@@ -2050,10 +2019,6 @@ let feature : featureDescr =
        ("--pause",Arg.Set pause," step by step execution");
        ("--dumpcfg",Arg.Set dumpcfg," dump the cfg of cps functions in cfg/");
        ("--goto", Arg.Int set_goto, "<n> how to convert gotos (0-2)");
-       ("--external-patch",Arg.Set external_patch," call \
-       cpc_continuation_patch from the runtime library" ^ is_default(!external_patch));
-       ("--noexternal-patch",Arg.Clear external_patch," generate inline \
-       patching" ^ is_default(not !external_patch));
        ("--packed", Arg.Clear aligned_continuations, " compact continuations");
       ];
     fd_doit = doit;
