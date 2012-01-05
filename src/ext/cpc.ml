@@ -52,6 +52,7 @@ exception FoundFun of fundec
 exception FoundVar of varinfo
 
 let aligned_continuations = ref true
+let use_environments = ref true
 
 (* Avoid stack-overflow on recursive structures *)
 let (=) x y = (compare x y) = 0
@@ -1677,7 +1678,9 @@ let contains_nasty args =
       (* if a local variable has its address retained,
          avoidAmpersand has boxed it, and vlval has raised an exception
          before we get here, detecting the box. *)
-      (* assert(not (must_be_boxed v)); XXX No more true with environments *)
+      assert(not (must_be_boxed v) ||
+      (* Except if we use environments of course... *)
+      !use_environments);
       DoChildren
 
     method vlval = function
@@ -2371,29 +2374,37 @@ let stages = [
   visitCilFileSameGlobals (new uniqueVarinfo) file);
   ("Initialize label table\n", fun file ->
   visitCilFileSameGlobals (new initLabelTbl) file);
-  (*
-  ("Initialize ampersand table\n", fun file ->
-  visitCilFileSameGlobals (new initAmpSet) file);
-  (* WARNING: do not call uniqueVarinfo between building and using
-   * the ampersand table, since it will deprecate any recorded varinfo!
-   *)
-  ("Avoid ampersand\n", fun file ->
-  visitCilFileSameGlobals (new avoidAmpersand file) file);
-  *)
-  ("adding an empty environment with frees and mallocs\n", fun file ->
-     visitCilFileSameGlobals (new addEnvStruct file) file);
-  (*
-  ("Remove nasty expressions\n", fun file ->
-  visitCilFileSameGlobals (new removeNastyExpressions) file);
-  *)
+  ] @
+  (if !use_environments
+  then
+    [
+    ("adding an empty environment with frees and mallocs\n", fun file ->
+    visitCilFileSameGlobals (new addEnvStruct file) file);
+    ]
+  else
+    [
+    ("Initialize ampersand table\n", fun file ->
+    visitCilFileSameGlobals (new initAmpSet) file);
+    (* WARNING: do not call uniqueVarinfo between building and using
+     * the ampersand table, since it will deprecate any recorded varinfo!
+     *)
+    ("Avoid ampersand\n", fun file ->
+    visitCilFileSameGlobals (new avoidAmpersand file) file);
+    ("Remove nasty expressions\n", fun file ->
+    visitCilFileSameGlobals (new removeNastyExpressions) file);
+    ]
+  ) @ [
   ("Handle assignment cps return values\n", fun file ->
   visitCilFileSameGlobals (new cpsReturnValues) file);
   ("Insert gotos after cps assignments and returns after cpc_done\n",
   fun file -> visitCilFileSameGlobals (new insertGotos) file);
   ("Cps marking\n", fun file ->
   cps_marking file);
-  ("fill environment, indirect...\n", fun file ->
+  ] @ (if !use_environments then [
+    ("filling environments\n", fun file ->
      visitCilFile (new createEnv2 file) file);
+    ] else []
+  ) @ [
   ("Percolating local variables\n", fun file ->
   percolateLocals file);
   ("Lambda-lifting\n", fun file ->
@@ -2441,6 +2452,10 @@ let feature : featureDescr =
        ("--pause",Arg.Set pause," step by step execution");
        ("--dumpcfg",Arg.Set dumpcfg," dump the cfg of cps functions in cfg/");
        ("--goto", Arg.Int set_goto, "<n> how to convert gotos (0-2)");
+       ("--ecpc", Arg.Set use_environments, "use environments" ^
+         is_default !use_environments);
+       ("--no-ecpc", Arg.Clear use_environments, "do not use environments" ^
+         is_default (not!use_environments));
        ("--packed", Arg.Clear aligned_continuations, " compact continuations");
       ];
     fd_doit = doit;

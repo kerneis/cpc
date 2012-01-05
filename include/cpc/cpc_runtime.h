@@ -34,6 +34,9 @@ THE SOFTWARE.
 This is broken on some architectures.
 */
 
+/* If you want to build with the --ecpc option, do not forget to set: */
+#define CPC_INDIRECT_PATCH 1
+
 #ifdef CPC_COMPACT_CONTINUATIONS
 
 #define MAX_ALIGN 1
@@ -49,8 +52,6 @@ This is broken on some architectures.
 #define PTR_SIZE MAX_ALIGN
 
 #endif
-
-#define CPC_INDIRECT_PATCH 1
 
 typedef struct cpc_condvar cpc_condvar;
 typedef struct cpc_sched cpc_sched;
