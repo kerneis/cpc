@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2008-2010,
+Copyright (c) 2008-2011,
   Gabriel Kerneis     <kerneis@pps.jussieu.fr>
 Copyright (c) 2004-2005,
   Juliusz Chroboczek  <jch@pps.jussieu.fr>
@@ -50,7 +50,7 @@ This is broken on some architectures.
 
 #endif
 
-#define UGLY_HACK_RETVAL 1
+#define CPC_INDIRECT_PATCH 1
 
 typedef struct cpc_condvar cpc_condvar;
 typedef struct cpc_sched cpc_sched;
@@ -60,8 +60,8 @@ extern cpc_sched *cpc_default_threadpool;
 typedef struct cpc_continuation {
     unsigned short length;
     unsigned short size;
-#ifdef UGLY_HACK_RETVAL
-    void *cpc_retval; // FIXME UGLY HACK
+#ifdef CPC_INDIRECT_PATCH
+    void *cpc_retval; // where to write the next return value
 #endif
     char c[1];
 } cpc_continuation;
@@ -117,9 +117,9 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, const void *value)
 {
   void *cpc_arg;
   cpc_arg =
-#ifdef UGLY_HACK_RETVAL
+#ifdef CPC_INDIRECT_PATCH
     ((cont)->cpc_retval);
-  if(cpc_arg == NULL) return; /* FIXME ugly ugly caller sent us NULL */
+  if(cpc_arg == NULL) return; /* this should not happen if the caller is smart enough */
 #else
     ((cont)->c + (cont)->length - PTR_SIZE - ((size - 1) / MAX_ALIGN + 1) * MAX_ALIGN);
 #endif
