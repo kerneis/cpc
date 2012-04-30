@@ -20,13 +20,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <stdlib.h>
-#include <errno.h>
-#include <assert.h>
-#include <pthread.h>
-#include <sched.h>
-
+#include "compatibility.h"
 #include "threadpool.h"
+
+#define IOCPKEY_ITEM  0
+#define IOCPKEY_DYING 1
+
+static DWORD WINAPI thread_main(void *pool);
 
 #ifndef USE_ATOMIC_INTRINSICS
 
@@ -84,18 +84,12 @@ typedef struct threadpool_queue {
 } threadpool_queue_t;
 
 struct threadpool {
-    int maxthreads, threads, idle;
-    threadpool_queue_t scheduled, scheduled_back;
+    int maxthreads;
+    volatile long threads;
     /* Set when we request that all threads die. */
     int dying;
-    /* If this is false, we are guaranteed that scheduled_back is empty. */
-    atomic_bool have_scheduled_back;
-    /* Protects everything except the atomics above. */
-    pthread_mutex_t lock;
-    /* Signalled whenever a new continuation is enqueued or dying is set. */
-    pthread_cond_t cond;
-    /* Signalled whenever a thread dies. */
-    pthread_cond_t die_cond;
+    int paquets_number;
+    HANDLE completionPort;
     threadpool_func_t *wakeup;
     void *wakeup_closure;
 };
@@ -104,152 +98,109 @@ threadpool_t *
 threadpool_create(int maxthreads,
                   threadpool_func_t *wakeup, void *wakeup_closure)
 {
+    HANDLE thread;
     threadpool_t *tp;
+    int tmp;
     tp = calloc(1, sizeof(threadpool_t));
     if(tp == NULL)
         return NULL;
 
+    tp->threads = maxthreads;
     tp->maxthreads = maxthreads;
     tp->wakeup = wakeup;
     tp->wakeup_closure = wakeup_closure;
-    pthread_mutex_init(&tp->lock, NULL);
-    pthread_cond_init(&tp->cond, NULL);
-    pthread_cond_init(&tp->die_cond, NULL);
-
+    assert(tp->dying == 0);
+    /* En vrai, la bonne valeur de concurrence serait à préciser en argument. */
+    tp->completionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
+    if(tp->completionPort == NULL) {
+        return NULL;
+    }
+    tmp = 0;
+    while(maxthreads-- > 0) {
+        thread = CreateThread(NULL, 0, thread_main, (void*) tp,
+                              0, NULL);
+        if(thread == NULL) {
+            print_error("Unable to create all the requested threads");
+            if(tmp > 0) {
+                tp->threads = tmp;
+                return tp;
+            } else {
+                goto fail;
+            }
+        }
+        CloseHandle(thread);
+    }
     return tp;
+ fail:
+    free(tp);
+    return NULL;
 }
 
 int
 threadpool_die(threadpool_t *threadpool, int canblock)
 {
-    int done;
-
-    pthread_mutex_lock(&threadpool->lock);
-
+    int i = threadpool->threads;
     threadpool->dying = 1;
-    pthread_cond_broadcast(&threadpool->cond);
-
-    while(threadpool->threads > 0) {
-        if(threadpool->scheduled_back.first || !canblock)
-            break;
-        pthread_cond_wait(&threadpool->die_cond, &threadpool->lock);
-    }
-
-    done = threadpool->threads == 0;
-
-    pthread_mutex_unlock(&threadpool->lock);
-    return done;
+    while(i-- > 0)
+        PostQueuedCompletionStatus(threadpool->completionPort, 0,
+                                   IOCPKEY_DYING, NULL);
+    return 0;
 }
 
 int
 threadpool_destroy(threadpool_t *threadpool)
 {
-    int dead;
-
-    pthread_mutex_lock(&threadpool->lock);
-    dead =
-        threadpool->threads == 0 &&
-        threadpool->scheduled.first == NULL &&
-        threadpool->scheduled_back.first == NULL;
-    pthread_mutex_unlock(&threadpool->lock);
-
-    if(!dead)
-        return -1;
-
-    pthread_cond_destroy(&threadpool->cond);
-    pthread_cond_destroy(&threadpool->die_cond);
-    pthread_mutex_destroy(&threadpool->lock);
+    int dead = threadpool->dying && threadpool->threads == 0;
+    if(!dead) return -1;
+    CloseHandle(threadpool->completionPort);
     free(threadpool);
     return 1;
 }
 
-static threadpool_item_t *
-threadpool_dequeue(threadpool_queue_t *queue)
-{
-    threadpool_item_t *item;
-
-    if(queue->first == NULL)
-        return NULL;
-
-    item = queue->first;
-    queue->first = item->next;
-    if(item->next == NULL)
-        queue->last = NULL;
-    return item;
-}
-
-static void *
+static DWORD WINAPI
 thread_main(void *pool)
 {
     threadpool_t *threadpool = pool;
     threadpool_item_t *item;
     threadpool_func_t *func;
     void *closure;
+    int rc;
+    DWORD nbytes;
+    DWORD completionKey;
+    OVERLAPPED *poverlapped;
 
- again:
-    pthread_mutex_lock(&threadpool->lock);
+    while(1) {
+        rc = GetQueuedCompletionStatus(threadpool->completionPort,
+                                       &nbytes,
+                                       &completionKey,
+                                       &poverlapped,
+                                       threadpool->dying ? 0 : INFINITE);
+        if(!rc) {
+            if(poverlapped != NULL) {
+                print_error("GetQueuedCompletionStatus");
+                /* impossible, since we only use PostQCP */
+                continue;
+            }
+            goto die; /* timeout: no more paquets */
+        }
 
-    if(threadpool->scheduled.first == NULL) {
-        struct timespec ts;
-
-        if(threadpool->dying)
+        switch(completionKey) {
+        case IOCPKEY_ITEM:
+            item = (void*)poverlapped;
+            func = item->func;
+            closure = item->closure;
+            free(item);
+            func(closure);
+            break;
+        case IOCPKEY_DYING:
             goto die;
-
-        /* Beware when benchmarking.  Under Linux with NPTL, idle threads
-           are slightly counter-productive in some benchmarks, but
-           extremely productive in others. */
-
-        /* This constant may need to be tweaked. */
-        if(threadpool->idle >= 2)
-            goto die;
-
-        /* Don't bother with POSIX clocks. */
-        ts.tv_sec = time(NULL) + 1;
-        ts.tv_nsec = 0;
-
-        threadpool->idle++;
-        pthread_cond_timedwait(&threadpool->cond, &threadpool->lock, &ts);
-        threadpool->idle--;
-        if(threadpool->scheduled.first == NULL)
-            goto die;
+        default: assert(0);
+        }
     }
-
-    item = threadpool_dequeue(&threadpool->scheduled);
-    pthread_mutex_unlock(&threadpool->lock);
-
-    func = item->func;
-    closure = item->closure;
-    free(item);
-
-    func(closure);
-    goto again;
 
  die:
-    threadpool->threads--;
-    pthread_cond_broadcast(&threadpool->die_cond);
-    pthread_mutex_unlock(&threadpool->lock);
-    return NULL;
-}
-
-/* This is called with the pool locked. */
-static int
-threadpool_new_thread(threadpool_t *threadpool)
-{
-    pthread_t thread;
-    pthread_attr_t attr;
-    int rc;
-
-    assert(threadpool->threads < threadpool->maxthreads);
-
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    rc = pthread_create(&thread, &attr, thread_main, (void*)threadpool);
-    if(rc) {
-        errno = rc;
-        return -1;
-    }
-    threadpool->threads++;
-    return 1;
+    InterlockedDecrement(&threadpool->threads);
+    return 0;
 }
 
 /* There's a reason for the inconvenient interface: we want to perform the
@@ -272,102 +223,25 @@ threadpool_item_alloc(threadpool_func_t *func, void *closure)
     return item;
 }
 
-static void
-threadpool_enqueue(threadpool_queue_t *queue, threadpool_item_t *item)
-{
-    item->next = NULL;
-    if(queue->last)
-        queue->last->next = item;
-    else
-        queue->first = item;
-    queue->last = item;
-}
-
 int
 threadpool_schedule(threadpool_t *threadpool,
                     threadpool_func_t *func, void *closure)
 {
     threadpool_item_t *item;
-    int rc = 0;
-    int dosignal = 1;
 
     item = threadpool_item_alloc(func, closure);
     if(item == NULL)
         return -1;
 
-    pthread_mutex_lock(&threadpool->lock);
-    threadpool_enqueue(&threadpool->scheduled, item);
-    if(threadpool->idle == 0) {
-        dosignal = 0;
-        if(threadpool->threads < threadpool->maxthreads) {
-            rc = threadpool_new_thread(threadpool);
-            if(rc < 0 && threadpool->threads > 0)
-                rc = 0;             /* we'll recover */
-        }
-    }
-    if(dosignal)
-        pthread_cond_signal(&threadpool->cond);
-    pthread_mutex_unlock(&threadpool->lock);
-
-    return rc;
+    PostQueuedCompletionStatus(threadpool->completionPort, 0,
+                               IOCPKEY_ITEM, (void*)item);
+    return 1;
 }
 
 int
 threadpool_schedule_back(threadpool_t *threadpool,
                          threadpool_func_t *func, void *closure)
 {
-    threadpool_item_t *item;
-    int wake = 1;
-
-    item = threadpool_item_alloc(func, closure);
-    if(item == NULL)
-        return -1;
-
-    pthread_mutex_lock(&threadpool->lock);
-    if(threadpool->have_scheduled_back)
-        wake = 0;
-    /* Order is important. */
-    atomic_set(&threadpool->have_scheduled_back);
-    threadpool_enqueue(&threadpool->scheduled_back, item);
-    pthread_mutex_unlock(&threadpool->lock);
-
-    if(wake && threadpool->wakeup)
-        threadpool->wakeup(threadpool->wakeup_closure);
-
+    threadpool->wakeup(closure); /* closure is a cpc_thread */
     return 0;
-}
-
-threadpool_item_t *
-threadpool_get_back(threadpool_t *threadpool)
-{
-    threadpool_item_t *item;
-
-    if(!atomic_test(&threadpool->have_scheduled_back))
-        return NULL;
-
-    pthread_mutex_lock(&threadpool->lock);
-    item = threadpool->scheduled_back.first;
-    /* Order is important. */
-    threadpool->scheduled_back.first = NULL;
-    threadpool->scheduled_back.last = NULL;
-    atomic_reset(&threadpool->have_scheduled_back);
-    pthread_mutex_unlock(&threadpool->lock);
-
-    return item;
-}
-
-void
-threadpool_items_run(threadpool_item_t *items)
-{
-    while(items) {
-        threadpool_item_t *first;
-        threadpool_func_t *func;
-        void *closure;
-        first = items;
-        items = items->next;
-        func = first->func;
-        closure = first->closure;
-        free(first);
-        func(closure);
-    }
 }

@@ -20,29 +20,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include "compatibility.h"
+
 #include "cpc_runtime.h"
 #include "cpc_barrier.h"
 #include "cpc_io.h"
 
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-
-#ifndef SOL_TCP
-# define SOL_TCP IPPROTO_TCP
-#endif
-
-#include <assert.h>
-
 #define _TIMEOUT_EXPIRED 1
 #define _TIMEOUT_CANCELLED 2
 
+
+/*=========================   All Operating Systems   ========================*/
 struct cpc_timeout {
     cpc_condvar *cancel, *expire;
     int flags;
@@ -133,6 +121,8 @@ cpc_timeout_destroy(cpc_timeout *timeout)
     }
 }
 
+/*=================================   Unix   =================================*/
+#ifdef __unix__
 int
 cpc_setup_descriptor(int fd, int nonagle)
 {
@@ -142,9 +132,10 @@ cpc_setup_descriptor(int fd, int nonagle)
     if(rc < 0) return -1;
     rc = fcntl(fd, F_SETFL, rc | O_NONBLOCK);
     if(rc < 0) return -1;
-    if(nonagle)
+    if(nonagle) {
         rc = setsockopt(fd, SOL_TCP, TCP_NODELAY, (char*)&one, sizeof(one));
-    if(rc < 0) return -1;
+        if(rc < 0) return -1;
+    }
     return 1;
 }
 
@@ -210,7 +201,7 @@ cpc_write_timeout(int fd, void *buf, size_t count, int secs, int micros)
         return -1;
     }
 }
-    
+
 cps int
 cpc_read(int fd, void *buf, size_t count)
 {
@@ -274,3 +265,609 @@ cpc_read_timeout(int fd, void *buf, size_t count, int secs, int micros)
         return -1;
     }
 }
+
+/*================================   Windows   ===============================*/
+#elif defined _WIN32
+cpc_handle_t
+cpc_open_file_std(const char *path, int openflags)
+{
+    cpc_handle_file_t handle = NULL;
+    HANDLE file;
+    DWORD access = 0;
+    DWORD disposition = 0;
+    int rc;
+
+    switch(openflags & (O_RDWR | O_RDONLY | O_WRONLY)) {
+    case O_RDONLY: access = GENERIC_READ;                 break;
+    case O_WRONLY: access = GENERIC_WRITE;                break;
+    case O_RDWR:   access = GENERIC_READ | GENERIC_WRITE; break;
+    default: assert(0);
+    }
+
+    /* O_APPEND : réagit bizarrement sous unix en O_RDWR. */
+    switch(openflags & (O_CREAT | O_TRUNC | O_EXCL)) {
+    case 0:                 disposition = OPEN_EXISTING;    break;
+    case O_CREAT:           disposition = OPEN_ALWAYS;      break;
+    case O_CREAT | O_TRUNC: disposition = CREATE_ALWAYS;    break;
+    case O_CREAT | O_EXCL:  disposition = CREATE_NEW;       break;
+    case O_TRUNC:           disposition = TRUNCATE_EXISTING;break;
+    default: assert(0);
+    }
+
+    file = CreateFile(path, access,
+                      FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                      disposition,
+                      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
+    if(file == INVALID_HANDLE_VALUE) {
+        return NULL;
+    }
+    rc = cpc_setup_descriptor(file, 0);
+    if(rc < 0) {
+        CloseHandle(file);
+        return NULL;
+    }
+    handle = malloc(sizeof(cpc_handle_file));
+    handle->cpch_handle = file;
+    handle->cpch_kind   = CPC_HANDLE_FILE;
+    handle->cpch_offset = 0;
+    return handle;
+}
+
+cpc_handle_t
+cpc_open_socket_std(int no_nagle)
+{
+    cpc_handle_t handle = NULL;
+    SOCKET sock;
+    int rc;
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) {
+        WSA_print_error("socket");
+        return NULL;
+    }
+    rc = cpc_setup_descriptor(sock, no_nagle);
+    if(rc < 0) return NULL;
+    handle = malloc(sizeof(cpc_handle));
+    handle->cpch_handle = sock;
+    handle->cpch_kind   = CPC_HANDLE_SOCKET;
+    return handle;
+}
+
+void
+cpc_close_handle(cpc_handle_t handle)
+{
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET)
+        closesocket(handle->cpch_handle);
+    else
+        CloseHandle(handle->cpch_handle);
+    free(handle);
+}
+
+int
+cpc_setup_descriptor(HANDLE handle, int no_nagle)
+{
+    int rc;
+    int one = 1;
+    rc = cpc_io_associate_with_completion_port(handle);
+    if (rc < 0) return -1;
+    if(no_nagle) {
+        rc = setsockopt(handle, SOL_TCP, TCP_NODELAY, (char*)&one, sizeof(one));
+        if(rc < 0) return -2;
+    }
+    rc = SetFileCompletionNotificationModes(handle,
+             FILE_SKIP_COMPLETION_PORT_ON_SUCCESS);
+    if(!rc) return -3;
+    return 1;
+}
+
+struct cpc_basic_io_struct {
+    char *buffer;
+    uint64_t offset;
+    uint64_t count;
+};
+static int64_t
+cpc_write_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
+                cpc_condvar *cond)
+{
+    int rc;
+    DWORD nbytes;
+    struct cpc_basic_io_struct *data = closure;
+    memset(ovl, 0, sizeof(OVERLAPPED));
+    ovl->Offset = data->offset & 0xFFFFFFFFLLU;
+    ovl->OffsetHigh = (data->offset >> 32) & 0xFFFFFFFFLLU;
+    rc = WriteFile(handle, data->buffer, data->count, nbytes, ovl);
+    if(!rc) /* asynchronous read or error */
+        return -(int64_t)GetLastError();
+    return nbytes;
+}
+
+cps int64_t
+cpc_write_cond(cpc_handle_t handle, void *buf, size_t count, cpc_condvar *cond)
+{
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET)
+        return cpc_send_cond(handle, buf, count, cond);
+    assert(handle->cpch_kind == CPC_HANDLE_FILE);
+    int64_t nbytes;
+    struct cpc_handle_file *fh = (void*)handle;
+    struct cpc_basic_io_struct closure = { buf, fh->cpch_offset, count };
+    cpc_async_prim f = &cpc_write_aux;
+    nbytes = cpc_call_async_prim(handle->cpch_handle, f, &closure, cond);
+    if(nbytes > 0) fh->cpch_offset += nbytes;
+    return nbytes;
+}
+
+cps int64_t /* TODO: se définit par une macro avec cpc_write_cond */
+cpc_write(cpc_handle_t handle, void *buf, size_t count)
+{
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET)
+        return cpc_send(handle, buf, count);
+    assert(handle->cpch_kind == CPC_HANDLE_FILE);
+    int64_t nbytes;
+    struct cpc_handle_file *fh = (void*)handle;
+    struct cpc_basic_io_struct closure = { buf, fh->cpch_offset, count };
+    cpc_async_prim f = &cpc_write_aux;
+    nbytes = cpc_call_async_prim(handle->cpch_handle, f, &closure, NULL);
+    if(nbytes > 0) fh->cpch_offset += nbytes;
+    return nbytes;
+}
+
+cps int64_t
+cpc_write_timeout(cpc_handle_t handle, void *buf, size_t count,
+                  int secs, int micros)
+{
+    cpc_condvar *cond = cpc_condvar_get();
+    cpc_barrier *barrier = cpc_barrier_get(3);
+    int *done = malloc(sizeof(int));
+    int64_t *ret = malloc(sizeof(int64_t));
+    int64_t rc;
+
+    *done = 0;
+
+    cpc_spawn {
+        *ret = cpc_write_cond(handle, buf, count, cond);
+        if(!*done) {
+            *done = 1;
+            cpc_signal(cond);
+        }
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_spawn {
+        if(!*done) {
+            cpc_sleep(secs, micros, cond);
+            if(!*done) {
+                *done = 2;
+                cpc_signal(cond);
+            }
+        }
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_barrier_await(barrier);
+    cpc_condvar_release(cond);
+    rc = *ret;
+    free(ret);
+    if(*done == 1) {
+        free(done);
+        return rc;
+    } else {
+        free(done);
+        errno = EAGAIN;
+        return -1;
+    }
+}
+
+static int64_t
+cpc_read_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
+                cpc_condvar *cond)
+{
+    int rc;
+    DWORD nbytes;
+    struct cpc_basic_io_struct *data = closure;
+    memset(ovl, 0, sizeof(OVERLAPPED));
+    ovl->Offset = data->offset & 0xFFFFFFFFLLU;
+    ovl->OffsetHigh = (data->offset >> 32) & 0xFFFFFFFFLLU;
+    rc = ReadFile(handle, data->buffer, data->count, nbytes, ovl);
+    if(!rc) /* asynchronous read or error */
+        return -(int64_t)GetLastError();
+    return nbytes;
+}
+
+cps int64_t
+cpc_read_cond(cpc_handle_t handle, void *buf, size_t count, cpc_condvar *cond)
+{
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET)
+        return cpc_recv_cond(handle, buf, count, cond);
+    assert(handle->cpch_kind == CPC_HANDLE_FILE);
+    int64_t nbytes;
+    struct cpc_handle_file *fh = (void*)handle;
+    struct cpc_basic_io_struct closure = { buf, fh->cpch_offset, count };
+    cpc_async_prim f = &cpc_read_aux;
+    nbytes = cpc_call_async_prim(handle->cpch_handle, f, &closure, cond);
+    if(nbytes > 0) fh->cpch_offset += nbytes;
+    return nbytes;
+}
+
+cps int64_t /* TODO: se définit par une macro avec cpc_read_cond */
+cpc_read(cpc_handle_t handle, void *buf, size_t count)
+{
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET)
+        return cpc_recv(handle, buf, count);
+    assert(handle->cpch_kind == CPC_HANDLE_FILE);
+    int64_t nbytes;
+    struct cpc_handle_file *fh = (void*)handle;
+    struct cpc_basic_io_struct closure = { buf, fh->cpch_offset, count };
+    cpc_async_prim f = &cpc_read_aux;
+    nbytes = cpc_call_async_prim(handle->cpch_handle, f, &closure, NULL);
+    if(nbytes > 0) fh->cpch_offset += nbytes;
+    return nbytes;
+}
+
+cps int64_t
+cpc_read_timeout(cpc_handle_t handle, void *buf, size_t count,
+                 int secs, int micros)
+{
+    cpc_condvar *cond = cpc_condvar_get();
+    cpc_barrier *barrier = cpc_barrier_get(3);
+    int *done = malloc(sizeof(int));
+    int64_t *ret = malloc(sizeof(int64_t));
+    int64_t rc;
+
+    *done = 0;
+
+    cpc_spawn {
+        *ret = cpc_read_cond(handle, buf, count, cond);
+        if(!*done) {
+            *done = 1;
+            cpc_signal(cond);
+        }
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_spawn {
+        if(!*done) {
+            cpc_sleep(secs, micros, cond);
+            if(!*done) {
+                *done = 2;
+                cpc_signal(cond);
+            }
+        }
+        cpc_barrier_await(barrier);
+    }
+
+    cpc_barrier_await(barrier);
+    cpc_condvar_release(cond);
+    rc = *ret;
+    free(ret);
+    if(*done == 1) {
+        free(done);
+        return rc;
+    } else {
+        free(done);
+        errno = EAGAIN;
+        return -1;
+    }
+}
+
+struct cpc_socket_io_struct {
+    WSABUF wsaBuffer;
+};
+static int64_t
+cpc_send_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
+                cpc_condvar *cond)
+{
+    int rc;
+    DWORD nbytes;
+    DWORD flags = 0;
+    SOCKET sock = (SOCKET)handle;
+    struct cpc_socket_io_struct *data = closure;
+    memset(ovl, 0, sizeof(OVERLAPPED));
+    rc = WSASend(sock, &data->wsaBuffer, 1, &nbytes, flags, ovl, NULL);
+    if(rc == SOCKET_ERROR) /* asynchronous read or error */
+        return -(int64_t)WSAGetLastError();
+    return nbytes;
+}
+
+cps int64_t
+cpc_send_cond(cpc_handle_t handle, void *buf, size_t count, cpc_condvar *cond)
+{
+    int64_t nbytes;
+    cpc_async_prim f = &cpc_send_aux;
+    struct cpc_socket_io_struct closure;
+    closure.wsaBuffer.buf = buf;
+    closure.wsaBuffer.len = count;
+    assert(handle->cpch_kind == CPC_HANDLE_SOCKET);
+    nbytes = cpc_call_async_prim(handle->cpch_handle, f, &closure, cond);
+    return nbytes;
+}
+
+cps int64_t
+cpc_send(cpc_handle_t handle, void *buf, size_t count)
+{
+    int64_t nbytes;
+    cpc_async_prim f = &cpc_send_aux;
+    struct cpc_socket_io_struct closure;
+    closure.wsaBuffer.buf = buf;
+    closure.wsaBuffer.len = count;
+    assert(handle->cpch_kind == CPC_HANDLE_SOCKET);
+    nbytes = cpc_call_async_prim(handle->cpch_handle, f, &closure, NULL);
+    return nbytes;
+}
+
+static int64_t
+cpc_recv_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
+                cpc_condvar *cond)
+{
+    int rc;
+    DWORD nbytes;
+    DWORD flags = 0;
+    SOCKET sock = (SOCKET)handle;
+    struct cpc_socket_io_struct *data = closure;
+    memset(ovl, 0, sizeof(OVERLAPPED));
+    rc = WSARecv(sock, &data->wsaBuffer, 1, &nbytes, &flags, ovl, NULL);
+    if(rc == SOCKET_ERROR) /* asynchronous read or error */
+        return -(int64_t)WSAGetLastError();
+    return nbytes;
+}
+
+cps int64_t
+cpc_recv_cond(cpc_handle_t handle, void *buf, size_t count, cpc_condvar *cond)
+{
+    int64_t nbytes;
+    cpc_async_prim f = &cpc_recv_aux;
+    struct cpc_socket_io_struct closure;
+    closure.wsaBuffer.buf = buf;
+    closure.wsaBuffer.len = count;
+    assert(handle->cpch_kind == CPC_HANDLE_SOCKET);
+    nbytes = cpc_call_async_prim(handle->cpch_handle, f, &closure, cond);
+    return nbytes;
+}
+
+cps int64_t
+cpc_recv(cpc_handle_t handle, void *buf, size_t count)
+{
+    int64_t nbytes;
+    cpc_async_prim f = &cpc_recv_aux;
+    struct cpc_socket_io_struct closure;
+    closure.wsaBuffer.buf = buf;
+    closure.wsaBuffer.len = count;
+    assert(handle->cpch_kind == CPC_HANDLE_SOCKET);
+    nbytes = cpc_call_async_prim(handle->cpch_handle, f, &closure, NULL);
+    return nbytes;
+}
+
+#define PROTOCOL_SIZE         (sizeof(struct sockaddr))
+#define LOCAL_ADDRESS_LENGTH  (PROTOCOL_SIZE + 16)
+#define REMOTE_ADDRESS_LENGTH (PROTOCOL_SIZE + 16)
+struct cpc_accept_aux_struct {
+    SOCKET acceptedSocket;
+    char *buffer;
+    uint64_t count;
+};
+static int64_t
+cpc_accept_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
+                cpc_condvar *cond)
+{
+    int rc;
+    DWORD nbytes;
+    SOCKET serverSocket = (void*) handle;
+    struct cpc_accept_aux_struct *data = closure;
+    memset(ovl, 0, sizeof(OVERLAPPED));
+    rc = AcceptEx(serverSocket,
+                  data->acceptedSocket,
+                  data->buffer,
+                  data->count - LOCAL_ADDRESS_LENGTH - REMOTE_ADDRESS_LENGTH,
+                  LOCAL_ADDRESS_LENGTH,
+                  REMOTE_ADDRESS_LENGTH,
+                  &nbytes,
+                  ovl);
+    if(!rc) /* asynchronous read or error */
+        return -(int64_t)GetLastError();
+    return nbytes;
+}
+
+cps int64_t
+cpc_accept(cpc_handle_t serverHandle, cpc_handle_t acceptedHandle,
+           void *buf, size_t count)
+{
+    int64_t nbytes;
+    int64_t rc;
+    SOCKET serv_sock = serverHandle->cpch_handle;
+    SOCKET acc_sock = acceptedHandle->cpch_handle;
+    struct cpc_accept_aux_struct closure;
+    cpc_async_prim f = &cpc_accept_aux;
+    int is_big_enough = count >= LOCAL_ADDRESS_LENGTH + REMOTE_ADDRESS_LENGTH;
+
+    assert(serverHandle->cpch_kind == CPC_HANDLE_SOCKET);
+
+    closure.acceptedSocket = acc_sock;
+    if(is_big_enough) {
+        closure.buffer = buf;
+        closure.count = count;
+    } else {
+        int buf_size = count + LOCAL_ADDRESS_LENGTH + REMOTE_ADDRESS_LENGTH;
+        closure.buffer = malloc(buf_size);
+        if(closure.buffer == NULL) return -WSA_NOT_ENOUGH_MEMORY;
+        closure.count = buf_size;
+    }
+
+    nbytes = cpc_call_async_prim(serv_sock, f, &closure, NULL);
+    if(!is_big_enough) {
+        if(buf != NULL)
+            memcpy(buf, closure.buffer, count);
+        free(closure.buffer);
+    }
+
+    rc =  setsockopt(acc_sock, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT,
+                     (char *)&serv_sock, sizeof(serv_sock));
+    if (rc < 0) {
+        WSA_print_error("setsockopt (UPTADE ACCEPT CONTEXT)");
+        exit(1);
+    }
+
+    return nbytes;
+}
+
+#endif
+
+
+
+
+
+
+
+
+
+
+
+
+
+#if 0
+
+/* fonctions probablement périmées, utilisant une autre version du runtime. */
+
+cps int64_t
+cpc_write(cpc_handle_t handle, void *buf, size_t count)
+{
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET) {
+        return cpc_write_v(handle->cpch_handle, 0, buf, count, 0, NULL);
+    } else {
+        struct cpc_handle_file *fh = (void*)handle;
+        int rc;
+        rc = cpc_write_v(handle, fh->cpch_offset, buf, count, 0,
+                         NULL);
+        if(rc <= 0) return rc;
+        fh->cpch_offset += rc;
+        return rc;
+    }
+}
+
+cps int64_t
+cpc_read(cpc_handle_t handle, void *buf, size_t count)
+{
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET) {
+        return cpc_read_v(handle->cpch_handle, 0, buf, count, 0, NULL);
+    } else {
+        struct cpc_handle_file *fh = (void*)handle;
+        int rc;
+        rc = cpc_read_v(handle, fh->cpch_offset, buf, count, 0,
+                        NULL);
+        if(rc <= 0) return rc;
+        fh->cpch_offset += rc;
+        return rc;
+    }
+}
+
+
+/* extraits périmés de ce qu'il y avait dans le runtime: */
+
+static inline cpc_continuation *
+cpc_handle_yield(HANDLE handle, cpc_thread *thread, cpc_condvar *cond)
+{
+    if(cond) {
+        thread->performed_handle = handle;
+        thread->condvar = cond;
+        cond_enqueue(&cond->queue, thread);
+    }
+    num_fds++;
+    if(thread->state == STATE_DETACHED) {
+        assert(IS_DETACHED);
+        thread->state = STATE_IO_PENDING;
+    }
+    return NULL;
+}
+
+cps_expand4(cpc_call_async_prim,
+            HANDLE, handle,
+            cpc_async_prim, f,
+            void *, closure,
+            cpc_condvar *, cond)
+    OVERLAPPED *overlapped = get_overlapped(thread);
+    int rc;
+    assert(cont);
+    rc = f(closure, overlapped, cond);
+    if(rc) /* IO is synchronous or an error occurs */
+        return cont;
+    return cpc_handle_yield(handle, thread, cond);
+}
+
+cps_expand5(cpc_write_v,
+            cpc_handle_t, handle,
+            uint64_t, offset,
+            void *,buf,
+            DWORD, count,
+            int, flags)
+    DWORD nbytes;
+    int rc;
+    OVERLAPPED *overlapped = get_overlapped(thread);
+    assert(cont);
+    memset(&overlapped, 0, sizeof(OVERLAPPED));
+
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET) {
+        /* TODO: il faut utiliser WSASend, mais pour ça, il faut peut être
+           modifier le prototype de la fonction, afin qu'il prenne un tableau de
+           WSABUF (pointeur sur buffer + leur taille). */
+        rc = WriteFile(handle->cpch_handle, buf, count, &nbytes, overlapped);
+        if(!rc) { /* asynchronous write or error */
+            if(GetLastError() != ERROR_IO_PENDING)
+                nbytes = -1;
+            else
+                goto yield;
+        }
+    } else {
+        overlapped->Offset = offset & 0xFFFFFFFFLLU;
+        overlapped->OffsetHigh = (offset >> 32) & 0xFFFFFFFFLLU;
+        rc = WriteFile(handle->cpch_handle, buf, count, &nbytes, overlapped);
+        if(!rc) { /* asynchronous write or error */
+            if(GetLastError() != ERROR_IO_PENDING)
+                nbytes = -1;
+            else
+                goto yield;
+        }
+    }
+    cpc_continuation_patch(cont, sizeof(int), &nbytes); // TODO: quel sizeof ?
+    return cont;
+ yield:
+    return cpc_handle_yield(handle, thread, cond);
+}
+
+cps_expand5(cpc_read_v,
+            cpc_handle_t, handle,
+            uint64_t, offset,
+            void *,buf,
+            DWORD, count,
+            int, flags)
+    DWORD nbytes;
+    int rc;
+    OVERLAPPED *overlapped = get_overlapped(thread);
+    assert(cont);
+    memset(&overlapped, 0, sizeof(OVERLAPPED));
+
+    if(handle->cpch_kind == CPC_HANDLE_SOCKET) {
+        /* TODO: il faut utiliser WSARecv, mais pour ça, il faut peut être
+           modifier le prototype de la fonction, afin qu'il prenne un tableau de
+           WSABUF (pointeur sur buffer + leur taille). */
+        rc = ReadFile(handle->cpch_handle, buf, count, &nbytes, overlapped);
+        if(!rc) { /* asynchronous read or error */
+            if(GetLastError() != ERROR_IO_PENDING)
+                nbytes = -1;
+            else
+                goto yield;
+        }
+    } else {
+        overlapped->Offset = offset & 0xFFFFFFFFLLU;
+        overlapped->OffsetHigh = (offset >> 32) & 0xFFFFFFFFLLU;
+        rc = ReadFile(handle->cpch_handle, buf, count, &nbytes, overlapped);
+        if(!rc) { /* asynchronous read or error */
+            if(GetLastError() != ERROR_IO_PENDING)
+                nbytes = -1;
+            else
+                goto yield;
+        }
+    }
+    cpc_continuation_patch(cont, sizeof(int), &nbytes);
+    return cont;
+ yield:
+    return cpc_handle_yield(handle, thread, cond);
+}
+
+#endif

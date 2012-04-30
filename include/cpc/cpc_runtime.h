@@ -23,9 +23,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#ifndef CPC_RUNTIME_H
+#define CPC_RUNTIME_H
+
 /* CPC cannot parse anonymous functions (aka Apple's "blocks") */
 #undef __BLOCKS__
 
+#include "compatibility.h"
 #include <stddef.h> // size_t
 #include <time.h>
 
@@ -73,6 +77,14 @@ typedef struct cpc_continuation {
 extern void cpc_print_continuation(struct cpc_continuation *c, char *s);
 
 typedef cpc_continuation *cpc_function(cpc_continuation *);
+
+/* If synchronous success, return the number of bytes of the IO.
+   If the operation is pending, return the negative value: -ERROR_IO_PENDING or
+   -WSA_IO_PENDING.
+   Else (error), return the negative value of the error code.
+   You should reset the OVERLAPPED structure, and set Offset and OffsetHigh
+   fields as the syscall required it. */
+typedef int64_t (*cpc_async_prim)(HANDLE, void *, OVERLAPPED *, cpc_condvar *);
 
 struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);
@@ -145,9 +157,15 @@ extern void cpc_prim_spawn(struct cpc_continuation*, struct cpc_continuation*);
 
 extern cpc_sched *cpc_threadpool_get(int);
 extern int cpc_threadpool_release(cpc_sched *);
+extern int cpc_io_associate_with_completion_port(HANDLE handle);
 
 #ifndef NO_CPS_PROTO
-extern cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond);
+extern cps int64_t cpc_call_async_prim(HANDLE handle, cpc_async_prim f,
+                                       void * closure, cpc_condvar *cond);
+extern cps int64_t cpc_write_v(cpc_handle_t handle, uint64_t offset, void *buf,
+                               DWORD count, int flags, cpc_condvar *cond);
+extern cps int64_t cpc_read_v(cpc_handle_t handle, uint64_t offset, void *buf,
+                              DWORD count, int flags, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_yield(void);
@@ -170,3 +188,5 @@ extern time_t cpc_time(time_t *t) __attribute__((cpc_need_cont,cpc_no_retain));
 
 #pragma cpc_no_retain("writev", "curl_easy_getinfo", "snprintf", "memcmp",  "memcpy")
 #pragma cpc_no_retain("getpeername", "setsockopt", "memset", "bind", "accept", "recvfrom")
+
+#endif /* CPC_RUNTIME_H */

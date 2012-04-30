@@ -20,19 +20,41 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#ifndef CPC_IO_H
+#define CPC_IO_H
+#include "compatibility.h"
+
 typedef struct cpc_timeout cpc_timeout;
 
+/* Timeouts */
 cps cpc_timeout *cpc_timeout_get(int secs, int usecs);
 cps void cpc_timeout_restart(cpc_timeout *timeout);
 cpc_condvar *cpc_timeout_condvar(cpc_timeout *timeout);
 int cpc_timeout_expired(cpc_timeout *timeout);
 void cpc_timeout_destroy(cpc_timeout *timeout);
 
-int cpc_setup_descriptor(int fd, int nonagle);
-cps int cpc_write(int fd, void *buf, size_t count);
-cps int
-cpc_write_timeout(int fd, void *buf, size_t count, int secs, int micros);
-cps int cpc_read(int fd, void *buf, size_t count);
-cps int
-cpc_read_timeout(int fd, void *buf, size_t count, int secs, int micros);
+/* IO */
+cpc_handle_t cpc_open_file_std(const char *path, int openflags);
+cpc_handle_t cpc_open_socket_std(int no_nagle);
+int cpc_setup_descriptor(HANDLE h, int nonagle);
+cps int64_t cpc_write(cpc_handle_t handle, void *buf, size_t count);
+cps int64_t cpc_write_cond(cpc_handle_t handle, void *buf, size_t count,
+                           cpc_condvar *cond);
+cps int64_t cpc_write_timeout(cpc_handle_t h, void *buf, size_t count,
+                              int secs, int micros);
+cps int64_t cpc_my_read(cpc_handle_t handle, char *buf, uint64_t count);
+cps int64_t cpc_read(cpc_handle_t h, void *buf, size_t count);
+cps int64_t cpc_read_cond(cpc_handle_t h, void *buf, size_t count,
+                          cpc_condvar *cond);
+cps int64_t cpc_read_timeout(cpc_handle_t h, void *buf, size_t count,
+                             int secs, int micros);
+cps int64_t cpc_send_cond(cpc_handle_t handle, void *buf, size_t count,
+                          cpc_condvar *cond);
+cps int64_t cpc_send(cpc_handle_t handle, void *buf, size_t count);
+cps int64_t cpc_recv_cond(cpc_handle_t handle, void *buf, size_t count,
+                          cpc_condvar *cond);
+cps int64_t cpc_recv(cpc_handle_t handle, void *buf, size_t count);
+cps int64_t cpc_accept(cpc_handle_t serverHandle, cpc_handle_t acceptedSocket,
+                       void *buf, size_t count);
 
+#endif /* CPC_IO_H */

@@ -1,32 +1,25 @@
 #include <cpc/cpc_runtime.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <signal.h>
+#include <cpc/compatibility.h>
 
 #ifndef SOL_TCP
 # define SOL_TCP IPPROTO_TCP
 #endif
 
+#define PORT 4200
+#define BUFFER_SIZE 4096
+
 #include "cpc/cpc_lib.h"
 
-cps void accept_connection(int fd);
-cps void handle_connection(int fd);
+cps void launch_server(int serverPort);
+cps void accept_connection(cpc_handle_t serverSocket);
+cps void handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes);
 
 static struct sockaddr_in addr;
-static socklen_t len;
+static unsigned int len;
 
-char *root = "/usr/share/polipo/www/";
+char *root = "../../benchmarks/web/";
 
 #ifdef STATIC
-int port = 7666;
 static char resp[] = "HTTP/1.0 200 OK\r\n"
                     "Content-type: text/html\r\n"
                     "Server: Trivial-cpc\r\n"
@@ -42,39 +35,19 @@ static char resp[] = "HTTP/1.0 200 OK\r\n"
   "</body></html>\n";
 static int resp_size = sizeof(resp);
 #else
-int port = 8666;
 #endif
 
 #undef htons
 
 int
-main()
+main(int argc, char **argv)
 {
-    int fd, rc;
-    int one = 1;
+    int serverPort = PORT;
 
-    signal(SIGPIPE, SIG_IGN);
-    
-    fd = socket(PF_INET, SOCK_STREAM, 0);
-    if(fd < 0) { perror("socket"); exit(1); }
+    if (argc >= 2)
+        sscanf(argv[1], "%d", &serverPort);
 
-    rc = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char *)&one, sizeof(one));
-    if(rc < 0) perror("setsockopt(SO_REUSEADDR)");
-
-    memset(&addr, 0, sizeof(addr));
-
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    rc = bind(fd, (struct sockaddr*)&addr, sizeof(addr));
-    if(rc < 0) { perror("bind"); exit(1); }
-
-    rc = listen(fd, 1024);
-    if(rc < 0) { perror("listen"); exit(1); }
-
-    rc = cpc_setup_descriptor(fd, 1);
-    if(rc < 0) { perror("setup_descriptor"); exit(1); }
-
-    cpc_spawn accept_connection(fd);
+    cpc_spawn launch_server(serverPort);
 
     cpc_main_loop();
 
@@ -82,57 +55,108 @@ main()
 }
 
 cps void
-accept_connection(int fd)
+launch_server(int serverPort)
 {
+    cpc_handle_t serverSocket;
+    int rc;
+    WSADATA wsaData;
+    WORD versionRequested = MAKEWORD(2,2);
+    int one = 1;
+
+    rc = WSAStartup(versionRequested, &wsaData); /* init wsaData */
+    if(rc != 0) {
+        printf("WSAStartup: %d", rc);
+        exit(1);
+    }
+
+    serverSocket = cpc_open_socket_std(1);
+    if(serverSocket == NULL) { print_error("serverSocket"); exit(1); }
+
+    rc = setsockopt(serverSocket->cpch_handle, SOL_SOCKET, SO_REUSEADDR,
+                    (char *)&one, sizeof(one));
+    if(rc < 0) perror("setsockopt(SO_REUSEADDR)");
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(serverPort);
+    rc = bind(serverSocket->cpch_handle, (struct sockaddr*)&addr, sizeof(addr));
+    if(rc == SOCKET_ERROR) { WSA_print_error("bind"); exit(1); }
+
+    rc = listen(serverSocket->cpch_handle, 1024);
+    if(rc == SOCKET_ERROR) { WSA_print_error("listen"); exit(1); }
+
+    printf("server started on port %d\n", serverPort);
+
+    cpc_spawn accept_connection(serverSocket);
+}
+
+cps void
+accept_connection(cpc_handle_t serverSocket)
+{
+    int64_t rc;
+    cpc_handle_t acceptedSocket;
+    char *buf;
     while(1) {
-        int rc;
-        cpc_io_wait(fd, CPC_IO_IN);
-        len = sizeof(addr);
-        rc = accept(fd, (struct sockaddr*)&addr, &len);
+        buf = malloc(BUFFER_SIZE);
+        if(buf == NULL) {
+            cpc_yield();
+            continue;
+        }
+    again:
+        acceptedSocket = cpc_open_socket_std(1);
+        if(acceptedSocket == NULL) {
+            cpc_yield();
+            goto again;
+        }
+    again2:
+        rc = cpc_accept(serverSocket, acceptedSocket, buf, BUFFER_SIZE);
         if(rc < 0) {
-            if(errno == EINTR) {
-                continue;
-            } else {
-                perror("accept");
-                cpc_yield();
-                continue;
-            }
+            print_errno("accept", -(long)rc);
+            cpc_yield();
+            goto again2;
         }
 
-        cpc_spawn handle_connection(rc);
+        cpc_spawn handle_connection(acceptedSocket, buf, rc);
     }
 }
 
 cps void
-handle_connection(int fd)
+handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes)
 {
-    int rc, n, ffd, len;
-    char *buf, *fn;
+    int64_t rc = 0;
+    int readed;
+    int n, len;
+    cpc_handle_t file;
+    char *fn = NULL;
     int i, val;
 
     val = 1;
-    rc = setsockopt(fd, SOL_TCP, TCP_NODELAY, (char *)&val, sizeof(val));
-    if(rc < 0)
-        goto fail;
 
-    buf = malloc(4096);
-    rc = 0;
+    if(nbytes == 0) /* Gracefull closure */
+        goto fail;
+    readed = nbytes;
 
  again:
-    rc += cpc_read_timeout(fd, buf + rc, 4096 - rc, 60, 0);
-    if(rc < 0) { perror("read"); goto fail; }
-
-    if(rc < 4)
+    if(readed < 4)
         goto fail;
 
     if(memcmp(buf, "GET ", 4) != 0)
         goto fail;
 
-    for(i = 5; i < rc; i++)
+    for(i = 5; i < readed; i++)
         if(buf[i] == ' ' || buf[i] == '\r' || buf[i] == '\n')
             break;
-    if(i == rc && rc < 4096)
+    if(i == readed && readed < BUFFER_SIZE) {
+        rc = cpc_read_timeout(sock, buf + readed, BUFFER_SIZE - readed, 60, 0);
+        if(rc < 0) {
+            print_errno("read", -(long)rc);
+            goto fail;
+        }
+        if(rc == 0) /* graceful close */
+            goto fail;
+        readed += rc;
         goto again;
+    }
 
     len = strlen(root);
     
@@ -148,24 +172,31 @@ handle_connection(int fd)
     i--;
 
  search:
-    while(i < rc - 3)
+    while(i < readed - 3)
       if(buf[i++] == '\r' && buf[i] == '\n'){
         i++; if(buf[i++] == '\r' && buf[i] == '\n')
           goto send;
         }
 
-    if(rc < 4096) {
-        rc += cpc_read_timeout(fd, buf + rc, 4096 - rc, 60, 0);
+    if(readed < BUFFER_SIZE) {
+        rc = cpc_read_timeout(sock, buf + rc, BUFFER_SIZE - rc, 60, 0);
+        if(rc < 0) {
+            print_errno("read", -(long)rc);
+            goto fail_fn;
+        }
+        if(rc == 0) /* graceful close */
+            goto fail_fn;
+        readed += rc;
         goto search;
     }
  
  send:
 #ifdef STATIC
-    rc = cpc_write_timeout(fd, &resp, resp_size, 60, 0);
+    rc = cpc_write_timeout(sock, &resp, resp_size, 60, 0);
     if(rc != resp_size) { perror("write"); goto fail; }
 #else
-    ffd = open(fn, O_RDONLY);
-    if(ffd < 0) {
+    file = cpc_open_file_std(fn, O_RDONLY);
+    if(file == NULL) {
         int err;
         char *message;
         if(errno == ENOENT) {
@@ -184,7 +215,7 @@ handle_connection(int fd)
             err = 500;
             message = "Unknown error";
         }
-        n = snprintf(buf, 4096,
+        n = snprintf(buf, BUFFER_SIZE,
                      "HTTP/1.1 %d %s\r\n"
                      "Content-Type: text/html\r\n"
                      "Server: Trivial-cpc\r\n"
@@ -193,36 +224,48 @@ handle_connection(int fd)
                      "<html><body><p>Couldn't open %s: %s</body></html>\r\n",
                      err, message, fn, message);
         free(fn);
+        fn = NULL;
     } else {
         free(fn);
-        n = snprintf(buf, 4096,
+        fn = NULL;
+        n = snprintf(buf, BUFFER_SIZE,
                      "HTTP/1.1 200 OK\r\n"
                      "Content-Type: text/html\r\n"
                      "Server: Trivial-cpc\r\n"
                      "Connection: close\r\n"
                      "\r\n");
-        rc = read(ffd, buf + n, 4096 - n);
+        rc = cpc_read(file, buf + n, BUFFER_SIZE - n);
         if(rc >= 0)
             n += rc;
     }
-    
-    rc = cpc_write_timeout(fd, buf, n, 60, 0);
-    if(rc < 0) { perror("write"); if(ffd >= 0) close(ffd); goto fail; }
 
-    if(ffd >= 0) {
+    rc = cpc_write_timeout(sock, buf, n, 60, 0);
+    if(rc < 0) {
+        print_errno("write", -rc);
+        goto fail_file;
+    }
+
+    if(file != NULL) {
         while(1) {
-            n = read(ffd, buf, 4096);
-            if(n <= 0) break;
-            rc = cpc_write_timeout(fd, buf, 4096, 60, 0);
+            rc = cpc_read(file, buf, BUFFER_SIZE);
+            if(rc <= 0) break;
+            rc = cpc_write_timeout(sock, buf, rc, 60, 0);
+            if(rc <= 0) break;
             cpc_yield();
         }
     }
 
-    close(ffd);
+    cpc_close_handle(file);
 #endif
- 
-  fail:
-    close(fd);
+
+ fail_file:
+    if(file != NULL)
+        cpc_close_handle(file);
+ fail_fn:
+    if(fn != NULL)
+      free(fn);
+ fail:
+    cpc_close_handle(sock);
     free(buf);
     return;
 }

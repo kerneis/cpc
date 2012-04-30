@@ -40,7 +40,8 @@ main(int argc, char **argv)
     cpc_main_loop();
 
     for(i = 0; i < N_POOLS; i++)
-        while(cpc_threadpool_release(pools[i]) < 0);
+        while(cpc_threadpool_release(pools[i]) < 0)
+            Sleep(1);
 
     return 0;
 }

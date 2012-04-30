@@ -38,6 +38,7 @@
 #include "../config.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef HAVE_STDLIB_H
@@ -235,7 +236,11 @@ int main(int argc, char **argv)
 	     (int)sizeof(long double), alignof_longdouble, (int)sizeof(void), 
 	     (int)sizeof(bool), alignof_bool,
 	     sizeof_fun, alignof_fun, alignof_str, alignof_aligned, 
-	     underscore(TYPE_SIZE_T), underscore(TYPE_WCHAR_T), 
+#ifdef TYPE_SIZE_T
+	     underscore(TYPE_SIZE_T), underscore(TYPE_WCHAR_T),
+#else
+         "unsigned_int", "int",
+#endif
 	     char_is_unsigned ? "false" : "true", CONST_STRING_LITERALS, 
 	     little_endian ? "false" : "true",
 	     THREAD_IS_KEYWORD, HAVE_BUILTIN_VA_LIST, UNDERSCORE_NAME);
@@ -261,8 +266,13 @@ int main(int argc, char **argv)
       printf("\t sizeof_longdouble     = %d;\n", (int)sizeof(long double));
       printf("\t sizeof_void           = %d;\n", (int)sizeof(void));
       printf("\t sizeof_fun            = %d;\n", (int)sizeof_fun);
+#ifdef TYPE_SIZE_T
       printf("\t size_t                = \"%s\";\n", TYPE_SIZE_T);
       printf("\t wchar_t               = \"%s\";\n", TYPE_WCHAR_T);
+#else
+      printf("\t size_t                = \"%s\";\n", "unsigned long");
+      printf("\t wchar_t               = \"%s\";\n", "int");
+#endif
       printf("\t alignof_short         = %d;\n", alignof_short);
       printf("\t alignof_int           = %d;\n", alignof_int);
       printf("\t alignof_bool          = %d;\n", alignof_bool);

@@ -5,14 +5,14 @@ CLIBS=-I ../include
 
 CFLAGS+=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
 
-LDLIBS=-L../runtime -lcpc -lm -pthread
+LDLIBS=-L../runtime -lcpc -lm -lWs2_32 -lMswsock
 
 .PHONY: all clean servers test
 
 BASICS=barrier boxing bug conditions done loops patch padding sleep\
     sleep_cond detached-torture sleep-torture conditions-torture pointer\
-	detached-spawn spawn cps_funptr
-EXTENDED=ampersand nontailcall tcat tcat_fd trivial-httpd
+	detached-spawn cps_funptr
+EXTENDED=ampersand nontailcall copy trivial-httpd
 SERVERS=trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
 	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
 	 trivial-httpd-pth static-httpd-pth

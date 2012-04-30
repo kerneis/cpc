@@ -28,18 +28,7 @@ THE SOFTWARE.
 #define NO_CPS_PROTO
 #include "cpc_runtime.h"
 
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <assert.h>
-#include <pthread.h>
-#include <sys/time.h>
-#include <fcntl.h>
-#include <stddef.h>
-
-#include <poll.h> /* cpc_d_io_wait */
+#include "compatibility.h"
 
 #include "threadpool/threadpool.h"
 
@@ -49,6 +38,8 @@ typedef struct cpc_thread {
     struct cpc_thread *cond_next;
     cpc_sched *sched;
     int state;
+    HANDLE performed_handle; /* Ces deux champs ne devraient pas être là : */
+    OVERLAPPED overlapped;   /* tous les threads ne font pas d'E/S. (?) */
     struct cpc_continuation cont;
 } cpc_thread;
 
@@ -64,29 +55,31 @@ get_thread(cpc_continuation *c)
     return (cpc_thread *)(((char *)c) - offsetof(struct cpc_thread, cont));
 }
 
+static inline OVERLAPPED *
+get_overlapped(cpc_thread *t)
+{
+    return (OVERLAPPED *)(((char *)t) + offsetof(struct cpc_thread, overlapped));
+}
 
-
-#ifdef CPC_INDIRECT_PATCH
-#define RETVAL_FIELD(type) type* cpc_retval;
-#define RETVAL_SET(cont,args) do{(cont)->cpc_retval = (args)->cpc_retval;}while(0)
-#else
-#define RETVAL_FIELD(type)
-#define RETVAL_SET(cont,args) do{}while(0)
-#endif
-
-
-
-
+static inline cpc_thread *
+get_thread_from_overlapped(OVERLAPPED *o)
+{
+    return (cpc_thread *)(((char *)o) - offsetof(struct cpc_thread, overlapped));
+}
 
 struct cpc_sched {
     threadpool_t *pool;
     struct cpc_sched *next;
 };
-static pthread_t main_loop_id;
-#define IS_DETACHED (cpc_default_threadpool && !pthread_equal(main_loop_id,pthread_self()))
+static DWORD main_loop_id;
+#define IS_DETACHED (cpc_default_threadpool &&                  \
+                     (main_loop_id != GetCurrentThreadId()))
 #define MAX_THREADS 20
 cpc_sched *cpc_default_threadpool = NULL;
-static int p[2];
+#define IOCPKEY_IO             0
+#define IOCPKEY_ATTACH         1
+#define IOCPKEY_SPAWN          2
+#define IOCPKEY_DETACHED_DEATH 3
 
 const int cpc_pessimise_runtime = 0;
 
@@ -117,20 +110,18 @@ struct cpc_condvar {
     cpc_thread_queue queue;
 };
 
-#define STATE_UNKNOWN -1
-#define STATE_SLEEPING -2
-#define STATE_DETACHED -3
+#define STATE_UNKNOWN    -1
+#define STATE_SLEEPING   -2
+#define STATE_DETACHED   -3
+#define STATE_IO_PENDING -4
 
+static HANDLE completionPort = INVALID_HANDLE_VALUE;
 static cpc_thread_queue ready = {NULL, NULL};
 static cpc_timed_thread_queue sleeping = {NULL, 0, 0};
 static cpc_sched_queue schedulers = {NULL, NULL};
-static cpc_thread_queue *fd_queues = NULL;
-static int num_fds = 0, size_fds = 0;
-static fd_set readfds, writefds, exceptfds;
+static int num_fds = 0;
 
 static struct timeval cpc_now;
-
-static void recompute_fdsets(int fd);
 
 static void cpc_invoke_continuation(struct cpc_continuation *c);
 
@@ -169,19 +160,15 @@ cpc_thread_get(int size)
     return t;
 }
 
-static void
-free_detached_cb(void *closure)
-{
-    detached_count--;
-}
-
 void
 cpc_continuation_free(struct cpc_continuation *c)
 {
     cpc_thread *t = get_thread(c);
-    assert((t->state == STATE_UNKNOWN || t->state == STATE_DETACHED) && t->condvar == NULL);
+    assert((t->state == STATE_UNKNOWN || t->state == STATE_DETACHED)
+           && t->condvar == NULL);
     if(t->state == STATE_DETACHED)
-        threadpool_schedule_back(t->sched->pool, free_detached_cb, NULL);
+        PostQueuedCompletionStatus(completionPort, 0,
+                                   IOCPKEY_DETACHED_DEATH, NULL);
     free(t);
 }
 
@@ -253,27 +240,6 @@ dequeue(cpc_thread_queue *queue)
         queue->tail = NULL;
     t->next = NULL;
     return t;
-}    
-
-static void
-dequeue_1(cpc_thread_queue *queue, cpc_thread *thread)
-{
-    cpc_thread *t, *target;
-    t = queue->head;
-    if(t == thread) {
-        queue->head = queue->head->next;
-        thread->next = NULL;
-        if(queue->head == NULL)
-            queue->tail = NULL;
-        return;
-    }
-    while(t->next != thread)
-        t = t->next;
-    target = t->next;
-    t->next = target->next;
-    target->next = NULL;
-    if(t->next == NULL)
-        queue->tail = t;
 }
 
 static void
@@ -501,10 +467,9 @@ dequeue_other(cpc_thread *thread)
 {
     if(thread->state == STATE_SLEEPING)
         timed_dequeue_1(&sleeping, thread);
-    else if(thread->state >= 0 && (thread->state & ((1 << 29) - 1)) <= size_fds) {
-        dequeue_1(&fd_queues[thread->state & ((1 << 29) - 1)], thread);
-        recompute_fdsets(thread->state & ((1 << 29) - 1));
-    } else
+    else if (thread->state == STATE_IO_PENDING)
+        CancelIoEx(thread->performed_handle, &thread->overlapped);
+    else
         assert(thread->state == STATE_UNKNOWN);
     thread->state = STATE_UNKNOWN;
 }
@@ -595,6 +560,47 @@ cpc_condvar_count(cpc_condvar *cond)
         RETVAL_SET(cont, cpc_arguments);\
         cpc_thread *thread = get_thread(cont);
 
+#define cps_expand4(name,type1,arg1,type2,arg2,type3,arg3,type4,arg4)\
+    struct name##_arglist {\
+        type1 arg1;\
+        type2 arg2;\
+        type3 arg3;\
+        LAST_ARG(type4,arg4);\
+    cpc_continuation *\
+    name(struct cpc_continuation *cont)\
+    {\
+        struct name##_arglist *cpc_arguments ;\
+        cpc_arguments = (struct name##_arglist *) cpc_dealloc(cont,\
+                        (int )sizeof(struct name##_arglist ));\
+        type1 arg1 = cpc_arguments -> arg1;\
+        type2 arg2 = cpc_arguments -> arg2;\
+        type3 arg3 = cpc_arguments -> arg3;\
+        type4 arg4 = cpc_arguments -> arg4;\
+        cpc_thread *thread = get_thread(cont);
+
+#define cps_expand6(name,type1,arg1,type2,arg2,type3,arg3, \
+                    type4,arg4,type5,arg5,type6,arg6)                 \
+    struct name##_arglist {\
+        type1 arg1;\
+        type2 arg2;\
+        type3 arg3;\
+        type4 arg4;\
+        type5 arg5;\
+        LAST_ARG(type6,arg6);\
+    cpc_continuation *\
+    name(struct cpc_continuation *cont)\
+    {\
+        struct name##_arglist *cpc_arguments ;\
+        cpc_arguments = (struct name##_arglist *) cpc_dealloc(cont,\
+                        (int )sizeof(struct name##_arglist ));\
+        type1 arg1 = cpc_arguments -> arg1;\
+        type2 arg2 = cpc_arguments -> arg2;\
+        type3 arg3 = cpc_arguments -> arg3;\
+        type4 arg4 = cpc_arguments -> arg4;\
+        type5 arg5 = cpc_arguments -> arg5;\
+        type6 arg6 = cpc_arguments -> arg6;\
+        cpc_thread *thread = get_thread(cont);
+
 
 /* cps int cpc_wait(cpc_condvar *cond) */
 cps_expand1(int,cpc_wait, cpc_condvar *, cond)
@@ -667,155 +673,40 @@ cps_expand3(int,cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
     return NULL;
 }
 
-/*** cpc_io_wait ***/
+/*** IO ***/
+#define CPC_IOFLAGS_BUFFER_ALL
 
-static inline int
-cpc_d_io_wait(int fd, int direction)
+static inline cpc_continuation *
+cpc_handle_yield(HANDLE handle, cpc_thread *thread, cpc_condvar *cond)
 {
-    struct pollfd pfd[1];
-    int pollevent = 0;
-    int rc;
-
-    pollevent |= (direction & CPC_IO_OUT) ? POLLOUT : 0;
-    pollevent |= (direction & CPC_IO_IN) ? POLLIN : 0;
-
-    pfd[0].fd = fd;
-    pfd[0].events = pollevent;
-    pfd[0].revents = 0;
-
-    rc = poll(pfd, 1, -1);
-    if(rc < 0)
-        return -1;
-
-    rc = 0;
-    rc |= (pfd[0].revents & POLLOUT) ? CPC_IO_OUT : 0;
-    rc |= (pfd[0].revents & POLLIN) ? CPC_IO_IN : 0;
-
-    return rc;
-}
-
-static void
-fd_queues_expand(int n)
-{
-    cpc_thread_queue *new;
-
-    assert(n >= size_fds && n <= FD_SETSIZE);
-    new = malloc(n * sizeof(struct cpc_thread_queue));
-    if(size_fds > 0) {
-        memcpy(new, fd_queues,
-               size_fds * sizeof(struct cpc_thread_queue));
-    } else {
-        FD_ZERO(&readfds);
-        FD_ZERO(&writefds);
-        FD_ZERO(&exceptfds);
-    }
-
-    memset(new + size_fds, 0,
-           (n - size_fds) * sizeof(struct cpc_thread_queue));
-    free(fd_queues);
-    fd_queues = new;
-    size_fds = n;
-}
-
-static void
-recompute_fdsets(int fd)
-{
-    int r = 0, w = 0;
-    cpc_thread *thread;
-
-    thread = fd_queues[fd].head;
-    while(thread) {
-        if(((thread->state >> 29) & CPC_IO_IN))
-            r = 1;
-        if(((thread->state >> 29) & CPC_IO_OUT))
-            w = 1;
-        if(r && w)
-            break;
-        thread = thread->next;
-    }
-    if(r)
-        FD_SET(fd, &readfds);
-    else
-        FD_CLR(fd, &readfds);
-    if(w)
-        FD_SET(fd, &writefds);
-    else
-        FD_CLR(fd, &writefds);
-    if(r || w)
-        FD_SET(fd, &exceptfds);
-    else
-        FD_CLR(fd, &exceptfds);
-
-    if(r || w) {
-        if(num_fds <= fd + 1)
-            num_fds = fd + 1;
-    } else if(fd == num_fds - 1) {
-        while(!FD_ISSET(num_fds - 1, &readfds) &&
-              !FD_ISSET(num_fds - 1, &writefds) &&
-              !FD_ISSET(num_fds - 1, &exceptfds)) {
-            num_fds--;
-            if(num_fds == 0)
-                break;
-        }
-    }
-}
-        
-/* cps int cpc_io_wait(int fd, int direction, cpc_condvar *cond) */
-cps_expand3(int,cpc_io_wait, int, fd, int, direction, cpc_condvar *, cond)
-    int rc;
-
-    assert(cont);
-
-    if(thread->state == STATE_DETACHED) {
-        assert(IS_DETACHED && cond == NULL);
-        rc = cpc_d_io_wait(fd, direction);
-        cpc_continuation_patch(cont, sizeof(int), &rc);
-        return cont;
-    }
-
-    assert(thread->condvar == NULL && thread->state == STATE_UNKNOWN);
-    assert((fd & (7 << 29)) == 0);
-
     if(cond) {
+        thread->performed_handle = handle;
         thread->condvar = cond;
         cond_enqueue(&cond->queue, thread);
     }
-    if(size_fds <= fd)
-        fd_queues_expand(fd + 10);
-
-    thread->state = fd | ((direction & 3) << 29);
-    enqueue(&fd_queues[fd], thread);
-    recompute_fdsets(fd);
+    num_fds++;
+    if(thread->state == STATE_DETACHED) {
+        assert(IS_DETACHED);
+        thread->state = STATE_IO_PENDING;
+    }
     return NULL;
 }
 
-static void
-requeue_io_ready(int fd, int direction)
-{
-    cpc_thread *thread;
-    thread = fd_queues[fd].head;
-    while(thread) {
-        if((thread->state >> 29) & direction) {
-            dequeue_1(&fd_queues[fd], thread); /* XXX */
-            thread->state = STATE_UNKNOWN;
-            cpc_continuation_patch(get_cont(thread), sizeof(int), &direction);
-            if(thread->condvar) {
-                cond_dequeue_1(&thread->condvar->queue, thread);
-            }
-            thread->condvar = NULL;
-            enqueue(&ready, thread);
-        }
-        thread = thread->next;
+cps_expand4(cpc_call_async_prim,
+            HANDLE, handle,
+            cpc_async_prim, f,
+            void *, closure,
+            cpc_condvar *, cond)
+    OVERLAPPED *overlapped = get_overlapped(thread);
+    int64_t rc;
+    assert(cont);
+    rc = f(handle, closure, overlapped, cond);
+    if(rc != -ERROR_IO_PENDING && rc != -WSA_IO_PENDING) {
+        /* IO is synchronous or an error occurs */
+        cpc_continuation_patch(cont, sizeof(int64_t), &rc);
+        return cont;
     }
-    recompute_fdsets(fd);
-}
-
-void
-cpc_signal_fd(int fd, int direction)
-{
-    assert(!IS_DETACHED);
-    if(fd < size_fds)
-        requeue_io_ready(fd, direction);
+    return cpc_handle_yield(handle, thread, cond);
 }
 
 /*** cpc_link ****/
@@ -849,13 +740,6 @@ spawn_cb(void *closure)
     enqueue(&ready, thread); // XXX
 }
 
-static void
-attach_cb(void *closure)
-{
-    spawn_cb(closure);
-    detached_count--;
-}
-
 cpc_continuation *
 cpc_prim_attach(cpc_thread *thread)
 {
@@ -866,7 +750,8 @@ cpc_prim_attach(cpc_thread *thread)
     }
 
     assert(thread->state == STATE_DETACHED);
-    threadpool_schedule_back(thread->sched->pool, attach_cb, thread);
+    PostQueuedCompletionStatus(completionPort, 0,
+                               IOCPKEY_ATTACH, (void*)thread);
     return NULL;
 }
 
@@ -905,13 +790,6 @@ cpc_prim_detach(cpc_sched *sched, cpc_thread *thread)
     return NULL;
 }
 
-void
-wakeup(void *pp)
-{
-    int *p = (int*)pp;
-    write(p[1], "a", 1);
-}
-
 cpc_sched *
 cpc_threadpool_get(int max_threads)
 {
@@ -924,7 +802,7 @@ cpc_threadpool_get(int max_threads)
 
     cpc_sched *sched = malloc(sizeof(cpc_sched));
 
-    sched->pool = threadpool_create(max_threads, wakeup, (void *)p);
+    sched->pool = threadpool_create(max_threads, NULL, NULL);
     sched->next = NULL;
 
     if(q->head == NULL) {
@@ -996,12 +874,14 @@ cpc_prim_spawn(struct cpc_continuation *cont, struct cpc_continuation *context)
     /* If context is NULL, we have to perform a syscall to know if we
      * are detached or not */
     if(context == NULL && IS_DETACHED) {
-        threadpool_schedule_back(thread->sched->pool, spawn_cb, thread);
+        PostQueuedCompletionStatus(completionPort, 0,
+                                   IOCPKEY_SPAWN, (void*)thread);
     }
     /* Otherwise, trust the context */
     else if (context && get_thread(context)->state == STATE_DETACHED) {
         assert(IS_DETACHED);
-        threadpool_schedule_back(get_thread(context)->sched->pool, spawn_cb, thread);
+        PostQueuedCompletionStatus(completionPort, 0,
+                                   IOCPKEY_SPAWN, (void*)thread);
     }
     else {
         assert(!IS_DETACHED);
@@ -1035,35 +915,27 @@ cpc_invoke_continuation(struct cpc_continuation *c)
     }
 }
 
-#define BUF_SIZE 4096
-
 void
 cpc_main_loop(void)
 {
     struct cpc_thread *thread;
+    cpc_continuation *cont;
     struct cpc_thread_queue q;
     struct timeval when;
-    int rc, i, done;
-    fd_set r_readfds, r_writefds, r_exceptfds;
-    char buf[BUF_SIZE];
+    int rc;
+    POVERLAPPED poverlapped;
+    DWORD milliseconds;
+    DWORD nbytes;
+    int64_t io_rc;
+    DWORD completionKey;
 
-    main_loop_id = pthread_self();
+    main_loop_id = GetCurrentThreadId();
 
     cpc_default_threadpool = cpc_threadpool_get(MAX_THREADS);
 
-    rc = pipe(p);
-    if(rc < 0) {
-        perror("pipe");
-        exit(1);
-    }
-    for(i=0; i < 2; i++) {
-        rc = fcntl(p[i], F_GETFL, 0);
-        if(rc < 0) goto fail;
-        rc = fcntl(p[i], F_SETFL, rc | O_NONBLOCK);
-        if(rc < 0) goto fail;
-        continue;
-      fail:
-        perror("fcntl");
+    completionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
+    if(completionPort == NULL) {
+        print_error("CreateIoCompletionPort");
         exit(1);
     }
 
@@ -1100,7 +972,7 @@ cpc_main_loop(void)
                     cond_dequeue_1(&thread->condvar->queue, thread);
                 thread->condvar = NULL;
                 thread->state = STATE_UNKNOWN;
-                cpc_continuation *cont = get_cont(thread);
+                cont = get_cont(thread);
                 cpc_continuation_patch(cont, sizeof(int), &rc);
                 cpc_invoke_continuation(cont);
             }
@@ -1110,94 +982,69 @@ cpc_main_loop(void)
            detached_count == 0 && !cpc_pessimise_runtime)
             continue;
 
-        memcpy(&r_readfds, &readfds, sizeof(fd_set));
-        memcpy(&r_writefds, &writefds, sizeof(fd_set));
-        memcpy(&r_exceptfds, &exceptfds, sizeof(fd_set));
-        int old_num_fds = num_fds;
-        if(detached_count > 0) {
-            FD_SET(p[0], &r_readfds);
-            num_fds = num_fds > p[0] + 1 ? num_fds : p[0] + 1;
-        }
         gettimeofday(&cpc_now, NULL);
+
         if(ready.head || sleeping.size > 0) {
             if(ready.head) {
-                when.tv_sec = 0;
-                when.tv_usec = 0;
+                milliseconds = 0;
             } else {
                 timeval_minus(&when, &sleeping.heap[0]->time, &cpc_now);
+                milliseconds = 1000 * when.tv_sec + when.tv_usec / 1000;
             }
-            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
-                        &when);
-            num_fds = old_num_fds;
         } else {
-            if(num_fds == 0)
+            if(num_fds == 0 && detached_count == 0)
                 continue;
-            rc = select(num_fds, &r_readfds, &r_writefds, &r_exceptfds,
-                        NULL);
-            num_fds = old_num_fds;
-        }
-        if(rc == 0 || (rc < 0 && errno == EINTR)) {
-            continue;
-        } else if(rc < 0) {
-            perror("select");
-            sleep(1);
-            continue;
+            milliseconds = INFINITE;
         }
 
-        if(detached_count > 0 && FD_ISSET(p[0], &r_readfds)) {
-            read(p[0], buf, BUF_SIZE);
-            cpc_sched *s = schedulers.head;
-            while(s) {
-                threadpool_items_run(threadpool_get_back(s->pool));
-                s = s->next;
+        while(1) {
+            rc = GetQueuedCompletionStatus(completionPort,
+                                           &nbytes,
+                                           &completionKey,
+                                           &poverlapped,
+                                           milliseconds);
+            if(!rc) {
+                if (poverlapped == NULL)
+                    break;
+                assert(completionKey == IOCPKEY_IO);
+                if (GetLastError() == ERROR_HANDLE_EOF) {
+                    io_rc = 0;
+                } else {
+                    io_rc = -GetLastError();
+                }
+            } else {
+                io_rc = nbytes;
             }
-        }
 
-        /* 1 for reads, 2 for writes.  0x100 means allow starvation. */
-#ifndef PREFER
-#define PREFER 3
-#endif
+            milliseconds = 0;
 
-        done = 0;
-        for(i = 0; i < num_fds; i++) {
-            int dir = 0;
-            if(rc <= 0)
+            switch(completionKey) {
+            case IOCPKEY_ATTACH:
+                detached_count --; /* don't break */
+            case IOCPKEY_SPAWN:
+                spawn_cb((cpc_thread *)poverlapped);
                 break;
-            if((PREFER & 1) && FD_ISSET(i, &r_readfds))
-                dir |= CPC_IO_IN;
-            if((PREFER & 2) && FD_ISSET(i, &r_writefds))
-                dir |= CPC_IO_OUT;
-            if(FD_ISSET(i, &r_exceptfds))
-                dir |= (CPC_IO_IN | CPC_IO_OUT);
-            if(dir) {
-                requeue_io_ready(i, dir);
-                rc--;
-                done = 1;
-            }
-        }
-
-#if (PREFER & 3) != 3
-        if((PREFER & 0x100) && done)
-            continue;
-        for(i = 0; i < num_fds; i++) {
-            int dir = 0;
-            if(rc <= 0)
+            case IOCPKEY_DETACHED_DEATH:
+                detached_count --;
                 break;
-            if(FD_ISSET(i, &r_readfds))
-                dir |= CPC_IO_IN;
-            if(FD_ISSET(i, &r_writefds))
-                dir |= CPC_IO_OUT;
-            if(dir) {
-                requeue_io_ready(i, dir);
-                rc--;
+            default:
+                assert(completionKey == IOCPKEY_IO && num_fds > 0);
+                num_fds--;
+                thread = get_thread_from_overlapped(poverlapped);
+                cont = get_cont(thread);
+                if(thread->condvar) {
+                    cond_dequeue_1(&thread->condvar->queue, thread);
+                    thread->condvar = NULL;
+                }
+                thread->state = STATE_UNKNOWN;
+                cpc_continuation_patch(cont, sizeof(int64_t), &io_rc);
+                enqueue(&ready, thread);
+                break;
             }
         }
-#endif
     }
-
-    while(cpc_threadpool_release(cpc_default_threadpool) < 0);
-    close(p[0]);
-    close(p[1]);
+    while(cpc_threadpool_release(cpc_default_threadpool) < 0)
+        Sleep(1);
 
 #ifdef DEBUG
     gettimeofday(&cpc_now, NULL);
@@ -1240,4 +1087,14 @@ cpc_time(cpc_continuation *cont, time_t *t)
     if(t)
         *t = cpc_now.tv_sec;
     return cpc_now.tv_sec;
+}
+
+int
+cpc_io_associate_with_completion_port(HANDLE handle)
+{
+    assert(completionPort != NULL);
+    HANDLE cp = CreateIoCompletionPort(handle, completionPort, IOCPKEY_IO, 0);
+    if(cp == NULL)
+        return -1;
+    return 0;
 }

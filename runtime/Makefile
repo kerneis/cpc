@@ -14,7 +14,7 @@ CFLAGS += $(CDEBUGFLAGS) $(EXTRA_DEFINES)
 # Import $(RANLIB)
 include ../config.mk
 
-LDLIBS=-pthread
+LDLIBS=-lWs2_32 -lMswsock 
 
 PREFIX=/usr/local
 
@@ -25,15 +25,12 @@ PREFIX=/usr/local
 all: libcpc.a
 
 cpc_runtime.o: cpc_runtime.c
-	$(CC) $(CFLAGS) $(CLIBS) -c $<
-
-cpc_libev.o: cpc_libev.c
-	$(CC) $(CFLAGS) $(CLIBS) -I libev -c $<
+	$(CC) $(CFLAGS) $(CLIBS) $(LDLIBS) -c $<
 
 threadpool/threadpool.o: threadpool/threadpool.c
 	cd threadpool && $(MAKE) threadpool.o CFLAGS="$(CFLAGS)"
 
-libcpc.a: cpc_libev.o threadpool/threadpool.o  cpc_barrier.o cpc_io.o
+libcpc.a: cpc_runtime.o threadpool/threadpool.o  cpc_barrier.o cpc_io.o
 	rm -f $@
 	$(AR) rc $@ $^
 	$(RANLIB) $@

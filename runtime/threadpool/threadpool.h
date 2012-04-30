@@ -54,12 +54,3 @@ int threadpool_schedule(threadpool_t *threadpool,
    thread, not only one that belongs to the thread pool. */
 int threadpool_schedule_back(threadpool_t *threadpool,
                               threadpool_func_t *func, void *closure);
-
-/* Get the list of callback items.  Should be called by the main loop in
-   a timely manner after the wakeup function has been called.  Calling it
-   more often than that doesn't harm, the nothing-to-do case is extremely
-   fast and doesn't take any locks. */
-threadpool_item_t *threadpool_get_back(threadpool_t *threadpool);
-
-/* Utility function -- run a list of items, freeing it in the process. */
-void threadpool_items_run(threadpool_item_t *items);

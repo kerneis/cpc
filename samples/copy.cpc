@@ -1,0 +1,60 @@
+#include <cpc/cpc_runtime.h>
+#include <cpc/compatibility.h>
+#include <cpc/cpc_io.h>
+
+#define BUF_SIZE 4096
+
+char buf[BUF_SIZE];
+int is_signaled = 0;
+cpc_handle_t src;
+cpc_handle_t dest;
+
+int
+main(int argc, char **argv)
+{
+    cpc_condvar *c;
+
+    if(argc < 3) {
+        printf("usage: copy src dest\n");
+        return 1;
+    }
+
+    c = cpc_condvar_get();
+
+    cpc_spawn {
+        src = cpc_open_file_std(argv[1], O_RDONLY);
+        dest = cpc_open_file_std(argv[2], O_WRONLY | O_CREAT);
+        if(src == NULL || dest == NULL)
+            return;
+
+        while(1) {
+            int rc;
+            if(is_signaled)
+                break;
+            printf("read\n");
+            rc = cpc_read(src, buf, BUF_SIZE);
+            printf("read returns: %d\n", rc);
+            if(rc <= 0)
+                break;
+            printf("write\n");
+            rc = cpc_write(dest, buf, rc);
+            printf("write returns: %d\n", rc);
+            if(rc <= 0)
+                break;
+        }
+        printf("end\n");
+        cpc_close_handle(src);
+        cpc_close_handle(dest);
+        cpc_signal(c);
+    }
+
+    cpc_spawn {
+        cpc_sleep(1, 0, c);
+        printf("sleep terminated ----------------------\n");
+        is_signaled = 1;
+        cpc_signal(c);
+    }
+    cpc_main_loop();
+    cpc_condvar_release(c);
+    return 0;
+}

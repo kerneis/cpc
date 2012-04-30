@@ -39,8 +39,6 @@ THE SOFTWARE.
 #include <fcntl.h>
 #include <stddef.h>
 
-#include <poll.h> /* cpc_d_io_wait */
-
 #include "threadpool/threadpool.h"
 
 #define EV_STANDALONE 1
@@ -515,24 +513,28 @@ cps_expand3(int,cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
 static inline int
 cpc_d_io_wait(int fd, int direction)
 {
-    struct pollfd pfd[1];
-    int pollevent = 0;
+    fd_set rd_fds;
+    fd_set wr_fds;
+    fd_set er_fds;
     int rc;
 
-    pollevent |= (direction & CPC_IO_OUT) ? POLLOUT : 0;
-    pollevent |= (direction & CPC_IO_IN) ? POLLIN : 0;
+    FD_ZERO(rd_fds);
+    FD_ZERO(wr_fds);
+    FD_ZERO(er_fds);
 
-    pfd[0].fd = fd;
-    pfd[0].events = pollevent;
-    pfd[0].revents = 0;
+    if (direction & CPC_IO_OUT)
+        FD_SET(fd, wr_fds);
+    if (direction & CPC_IO_IN)
+        FD_SET(fd, rd_fds);
+    FD_SET(fd, er_fds);
 
-    rc = poll(pfd, 1, -1);
+    rc = select(fd + 1, rd_fds, wr_fds, er_fds, NULL);
     if(rc < 0)
         return -1;
 
     rc = 0;
-    rc |= (pfd[0].revents & POLLOUT) ? CPC_IO_OUT : 0;
-    rc |= (pfd[0].revents & POLLIN) ? CPC_IO_IN : 0;
+    rc |= (FD_ISSET(fd, wr_fds)) ? CPC_IO_OUT : 0;
+    rc |= (FD_ISSET(fd, rd_fds)) ? CPC_IO_IN : 0;
 
     return rc;
 }
@@ -866,7 +868,7 @@ cpc_gettimeofday(cpc_continuation *cont, struct timeval *tv)
     assert(thread->state == STATE_UNKNOWN && !IS_DETACHED);
     ev_tstamp now = ev_now(cpc_default_loop);
     tv->tv_sec = (time_t) now;
-    tv->tv_usec = ((suseconds_t)(now * 1e6)) % 1000000;
+    tv->tv_usec = ((useconds_t)(now * 1e6)) % 1000000;
     return 0;
 }
 
