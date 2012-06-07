@@ -1322,7 +1322,10 @@ class removeNastyExpressions = object(self)
       (try contains_nasty args; SkipChildren
       with ContainsNasty ->
         trace (dprintf "nasty variables in call to %s\n" f.vname);
-        let (bind_list, args') = rebind ef f.vtype args in
+        let (bind_list, args') = try rebind ef f.vtype args
+        with _ -> E.s (E.error "%a: wrong number of arguments to function '%s'"
+                    d_loc !currentLoc f.vname)
+        in
         ChangeTo(bind_list @[Call(ret, Lval(Var f, NoOffset),args',loc)]))
   | _ -> SkipChildren
 end
