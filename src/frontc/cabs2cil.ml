@@ -6656,28 +6656,24 @@ and doStatement (s : A.statement) : chunk =
           ignore(E.warn "cpc_spawn in a detached or attached block will attach \
           the spawned thread to the default scheduler anyway (at %a)." d_loc loc'); 
         let mkSpawn f args = mkStmt (CpcSpawn (f, args, loc')) in
-        let returns_void f = match splitFunctionTypeVI f with
-          (t,_,_,_) -> typeSig t = typeSig voidType in
         currentLoc := loc';
-        begin match compactStmts (pushPostIns (doStatement s)) with
-        | [] ->
-            ignore(E.warn "empty cpc_spawn (at %a)." d_loc loc');
-            detachedVars := dv;
-            skipChunk
-        | [{skind=Instr[Call(None,Lval(Var f, NoOffset),args,_)]}]
-            when f.vcps && returns_void f ->
-	      detachedVars := dv;
-              s2c (mkSpawn (Lval (Var f, NoOffset)) args)
-        | body ->
-          let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
-          let f = {(emptyFunction name) with sbody = mkBlock (body @
-            [mkStmt (Return (None,locUnknown))])} in
-          f.svar.vcps <- true;
-          detachedVars := dv;
-          s2c (mkStmt (Block (mkBlock [
-          mkStmt(CpcFun(f, loc'));
-          mkSpawn (Lval (Var f.svar,NoOffset)) []
-          ])))
+        let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
+        let decl = A.PROTO(A.JUSTBASE, [], false) in
+        let fundef = A.FUNDEF (([A.SpecCPS; A.SpecType A.Tvoid],(name,decl,[],loc)),
+            { A.blabels = []; A.battrs = []; A.bstmts = [s] }, loc, loc) in
+        begin match doDecl false fundef with
+        | { stmts = [{ skind = CpcFun (fd, _)} as fdef]; postins = []; cases = [] } ->
+                detachedVars := dv;
+                begin match fd.sbody.bstmts with
+                | [] | [ { skind = Return (None, _) } ] ->
+                    ignore(E.warn "empty cpc_spawn (at %a)." d_loc loc');
+                    skipChunk
+                | _ -> s2c (mkStmt (Block (mkBlock [
+                        fdef;
+                        mkSpawn (Lval (Var fd.svar,NoOffset)) []
+                    ])))
+                end
+        | _ -> E.s (E.bug "conversion of cpc_spawn to inner function failed.")
         end
       | CPC_LINKED (e, s, loc) ->
           (* setSched and resetSched update detachedVars *)
