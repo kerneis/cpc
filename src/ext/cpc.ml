@@ -2365,7 +2365,7 @@ let rec cps_marking f =
       | _ -> functionalize start f; cps_marking f
       end
 
-let stages = [
+let stages () = [
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
   ("Initialize safe functions\n", fun file ->
@@ -2381,7 +2381,7 @@ let stages = [
   (if !use_environments
   then
     [
-    ("adding an empty environment with frees and mallocs\n", fun file ->
+    ("Adding an empty environment with frees and mallocs\n", fun file ->
     visitCilFileSameGlobals (new addEnvStruct file) file);
     ]
   else
@@ -2404,7 +2404,7 @@ let stages = [
   ("Cps marking\n", fun file ->
   cps_marking file);
   ] @ (if !use_environments then [
-    ("filling environments\n", fun file ->
+    ("Filling environments\n", fun file ->
      visitCilFile (new createEnv2 file) file);
     ] else []
   ) @ [
@@ -2438,7 +2438,7 @@ let rec doit (f: file) =
     end
   in
   try
-    ignore(List.fold_left do_stage 0 stages);
+    ignore(List.fold_left do_stage 0 (stages ()));
     trace (dprintf "Finished\n")
   with Exit -> E.log "Exit\n"
 
@@ -2455,9 +2455,9 @@ let feature : featureDescr =
        ("--pause",Arg.Set pause," step by step execution");
        ("--dumpcfg",Arg.Set dumpcfg," dump the cfg of cps functions in cfg/");
        ("--goto", Arg.Int set_goto, "<n> how to convert gotos (0-2)");
-       ("--ecpc", Arg.Set use_environments, "use environments" ^
+       ("--ecpc", Arg.Set use_environments, " use environments" ^
          is_default !use_environments);
-       ("--no-ecpc", Arg.Clear use_environments, "do not use environments" ^
+       ("--no-ecpc", Arg.Clear use_environments, " do not use environments" ^
          is_default (not!use_environments));
        ("--packed", Arg.Clear aligned_continuations, " compact continuations");
       ];

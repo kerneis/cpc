@@ -4,8 +4,12 @@ CDEBUGFLAGS=-Wall -g -O2 -Wno-unknown-pragmas
 CLIBS=-I ../include/cpc
 CFLAGS += $(CDEBUGFLAGS) $(EXTRA_DEFINES)
 
-# To build with compact continuations , disable the following line
+# To build with compact continuations , disable the following lines
 # CFLAGS += -DCPC_COMPACT_CONTINUATIONS
+# CPCOPTS += --packed
+# To build with environments, disable the following lines
+# CFLAGS += -DCPC_INDIRECT_PATCH
+# CPCOPTS += --ecpc
 
 # Import $(RANLIB)
 include ../config.mk
