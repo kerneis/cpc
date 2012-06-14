@@ -52,7 +52,7 @@ exception FoundFun of fundec
 exception FoundVar of varinfo
 
 let aligned_continuations = ref true
-let use_environments = ref true
+let use_environments = ref false
 
 (* Avoid stack-overflow on recursive structures *)
 let (=) x y = (compare x y) = 0
