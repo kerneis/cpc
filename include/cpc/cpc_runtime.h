@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2008-2010,
+Copyright (c) 2008-2011,
   Gabriel Kerneis     <kerneis@pps.jussieu.fr>
 Copyright (c) 2004-2005,
   Juliusz Chroboczek  <jch@pps.jussieu.fr>
@@ -34,6 +34,10 @@ THE SOFTWARE.
 This is broken on some architectures.
 */
 
+/* If you want to build with the --ecpc option, do not forget to set:
+#define CPC_INDIRECT_PATCH 1
+*/
+
 #ifdef CPC_COMPACT_CONTINUATIONS
 
 #define MAX_ALIGN 1
@@ -58,6 +62,9 @@ extern cpc_sched *cpc_default_threadpool;
 typedef struct cpc_continuation {
     unsigned short length;
     unsigned short size;
+#ifdef CPC_INDIRECT_PATCH
+    void *cpc_retval; // where to write the next return value
+#endif
     char c[1];
 } cpc_continuation;
 
@@ -112,7 +119,12 @@ cpc_continuation_patch(cpc_continuation *cont, size_t size, const void *value)
 {
   void *cpc_arg;
   cpc_arg =
+#ifdef CPC_INDIRECT_PATCH
+    ((cont)->cpc_retval);
+  if(cpc_arg == NULL) return; /* this should not happen if the caller is smart enough */
+#else
     ((cont)->c + (cont)->length - PTR_SIZE - ((size - 1) / MAX_ALIGN + 1) * MAX_ALIGN);
+#endif
   __builtin_memcpy(cpc_arg, value, size);
   return;
 }
