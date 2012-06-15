@@ -1654,6 +1654,7 @@ class cpsReturnValues = object(self)
           ]
       | None when  (typeSig typ <> typeSig voidType) -> (* Missing assignment *)
           let v = makeTempVar ef typ in
+          v.vattr <- [Attr("unused", [])];
           trace (dprintf "Ignoring a cps return value: %a\n" d_instr i);
           ChangeTo [
           Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc)]
