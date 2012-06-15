@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef _COMPATIBILITY_H
 #define _COMPATIBILITY_H
 
-/*                               Common headers                               */
+/*============================   Common headers   =========================== */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,7 +47,7 @@ enum cpc_handle_kind {
 };
 
 
-/*                                    Unix                                    */
+/*=================================   Unix   =================================*/
 #ifdef __unix__
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -64,7 +64,7 @@ static inline DWORD get_last_error(cpc_handle_t *h)
     return errno;
 }
 
-/*                                  Windows                                   */
+/*===============================   Windows   ================================*/
 #elif defined _WIN32
 #define _WIN32_WINNT 0x0600
 
@@ -72,9 +72,7 @@ static inline DWORD get_last_error(cpc_handle_t *h)
 #include <stdlib.h>
 #include <stdint.h>
 #include <assert.h>
-#include <winsock2.h> /* Attention: doit se placer AVANT <widnows.h> !!
-                       Par ailleurs, il faut compiler en liant la librairie
-                       ws2_32. Donc ajouter -lws2_32 au compilateur. */
+#include <winsock2.h>
 #include <Mswsock.h>
 #include <windows.h>
 
@@ -92,32 +90,24 @@ typedef struct cpc_handle_file {
     uint64_t cpch_offset;
 } cpc_handle_file, *cpc_handle_file_t;
 
-static inline DWORD get_last_error(cpc_handle_t h)
-{
-    return h->cpch_kind == CPC_HANDLE_SOCKET ?
-        WSAGetLastError() : GetLastError();
-}
-
 static inline void print_errno(char *str, long errno)
 {
-    printf("%s: %ld\n", str, errno);
+    fprintf(stderr, "%s: %ld\n", str, errno);
 }
 
 static inline void print_error(char *str)
 {
-  printf("%s: %ld\n", str, (long)GetLastError());
+    fprintf(stderr, "%s: %ld\n", str, (long)GetLastError());
 }
 
 static inline void WSA_print_error(char *str)
 {
-  printf("%s: %ld\n", str, (long)WSAGetLastError());
+    fprintf(stderr, "%s: %ld\n", str, (long)WSAGetLastError());
 }
 
+/* MinGw doesn't have these headers. */
 #ifndef SetFileCompletionNotificationModes
-BOOL WINAPI SetFileCompletionNotificationModes(
-  HANDLE FileHandle,
-  UCHAR Flags
-);
+BOOL WINAPI SetFileCompletionNotificationModes(HANDLE FileHandle, UCHAR Flags);
 #define FILE_SKIP_COMPLETION_PORT_ON_SUCCESS 0x1
 #endif
 #ifndef CancelIoEx

@@ -162,10 +162,6 @@ extern int cpc_io_associate_with_completion_port(HANDLE handle);
 #ifndef NO_CPS_PROTO
 extern cps int64_t cpc_call_async_prim(HANDLE handle, cpc_async_prim f,
                                        void * closure, cpc_condvar *cond);
-extern cps int64_t cpc_write_v(cpc_handle_t handle, uint64_t offset, void *buf,
-                               DWORD count, int flags, cpc_condvar *cond);
-extern cps int64_t cpc_read_v(cpc_handle_t handle, uint64_t offset, void *buf,
-                              DWORD count, int flags, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_yield(void);

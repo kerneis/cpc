@@ -14,7 +14,7 @@ CFLAGS += $(CDEBUGFLAGS) $(EXTRA_DEFINES)
 # Import $(RANLIB)
 include ../config.mk
 
-LDLIBS=-lWs2_32 -lMswsock 
+LDLIBS=-lWs2_32 -lMswsock
 
 PREFIX=/usr/local
 

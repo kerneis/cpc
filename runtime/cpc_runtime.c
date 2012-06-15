@@ -578,29 +578,6 @@ cpc_condvar_count(cpc_condvar *cond)
         type4 arg4 = cpc_arguments -> arg4;\
         cpc_thread *thread = get_thread(cont);
 
-#define cps_expand6(name,type1,arg1,type2,arg2,type3,arg3, \
-                    type4,arg4,type5,arg5,type6,arg6)                 \
-    struct name##_arglist {\
-        type1 arg1;\
-        type2 arg2;\
-        type3 arg3;\
-        type4 arg4;\
-        type5 arg5;\
-        LAST_ARG(type6,arg6);\
-    cpc_continuation *\
-    name(struct cpc_continuation *cont)\
-    {\
-        struct name##_arglist *cpc_arguments ;\
-        cpc_arguments = (struct name##_arglist *) cpc_dealloc(cont,\
-                        (int )sizeof(struct name##_arglist ));\
-        type1 arg1 = cpc_arguments -> arg1;\
-        type2 arg2 = cpc_arguments -> arg2;\
-        type3 arg3 = cpc_arguments -> arg3;\
-        type4 arg4 = cpc_arguments -> arg4;\
-        type5 arg5 = cpc_arguments -> arg5;\
-        type6 arg6 = cpc_arguments -> arg6;\
-        cpc_thread *thread = get_thread(cont);
-
 
 /* cps int cpc_wait(cpc_condvar *cond) */
 cps_expand1(int,cpc_wait, cpc_condvar *, cond)
@@ -674,7 +651,6 @@ cps_expand3(int,cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
 }
 
 /*** IO ***/
-#define CPC_IOFLAGS_BUFFER_ALL
 
 static inline cpc_continuation *
 cpc_handle_yield(HANDLE handle, cpc_thread *thread, cpc_condvar *cond)
