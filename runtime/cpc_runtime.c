@@ -986,7 +986,7 @@ cpc_main_loop(void)
                 if (GetLastError() == ERROR_HANDLE_EOF) {
                     io_rc = 0;
                 } else {
-                    io_rc = -GetLastError();
+                    io_rc = -(int64_t)GetLastError();
                 }
             } else {
                 io_rc = nbytes;
