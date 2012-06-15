@@ -402,7 +402,7 @@
 
 # /samples/
 /samples/*.o
-/samples/*.cpc
+/samples/*.cpi
 /samples/ampersand
 /samples/barrier
 /samples/boxing
