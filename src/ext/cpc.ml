@@ -889,8 +889,7 @@ class cpsConverter = fun file ->
     match i with
     (* Cps call with or without assignment (we don't care at this level) *)
     | Call (_, Lval (Var f, NoOffset), args, _) -> pre @ [
-      (* cc = new_arglist_fun(... args ..., cc);
-         cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
+      (* cc = new_arglist_fun(... args ..., cc); *)
         Call (
           Some(Var cc , NoOffset),
           (try List.assoc f newarglist_map
@@ -899,13 +898,7 @@ class cpsConverter = fun file ->
           args@[Lval(Var cc, NoOffset)],
           locUnknown
         );
-        Call (
-          Some(Var cc , NoOffset),
-          Lval(Var cpc_push, NoOffset),
-          [Lval(Var cc, NoOffset);
-          mkCast (addr_of f) cpc_fun_ptr],
-          locUnknown
-        )] @ debug "continuation_push" @ post
+        ] @ debug "continuation_push" @ post
     | _ -> E.s (E.bug "Unexpected instruction in cps conversion: %a\n"
         d_instr i)
 
@@ -1013,16 +1006,16 @@ class cpsConverter = fun file ->
       new_arglist_fun.svar.vinline <- true;
       new_arglist_fun.svar.vstorage <- Static;
       new_arglist_fun.sbody <- (
-        let field_args, last_arg = cut_last new_arglist_fun.sformals in
+        let field_args, continuation= cut_last new_arglist_fun.sformals in
         mkBlock ([mkStmt(Instr (
           (* XXX DEBUGING *)
           (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
-          (* temp_arglist = cpc_alloc(&last_arg,(int)sizeof(arglist_struct)) *)
+          (* temp_arglist = cpc_alloc(&continuation,(int)sizeof(arglist_struct)) *)
           Call(
             (if field_args = [] then None (* avoid unused variable warning *)
             else Some (Var temp_arglist, NoOffset)),
             Lval (Var cpc_alloc, NoOffset),
-            [addr_of last_arg;
+            [addr_of continuation;
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
             locUnknown
             ) ::
@@ -1033,10 +1026,19 @@ class cpsConverter = fun file ->
               Lval(Var v, NoOffset),
               locUnknown
             )
-          ) field_args arglist_struct.cfields)));
-        (* return last_arg *)
+          ) field_args arglist_struct.cfields)
+          @
+          (* cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
+          [Call (
+          Some(Var continuation , NoOffset),
+          Lval(Var cpc_push, NoOffset),
+          [Lval(Var continuation, NoOffset);
+          mkCast (addr_of v) cpc_fun_ptr],
+          locUnknown)]
+          ));
+        (* return continuation *)
         mkStmt(Return (
-          Some (Lval(Var last_arg,NoOffset)),
+          Some (Lval(Var continuation,NoOffset)),
           locUnknown))
       ]));
       struct_map <- (v, arglist_struct) :: struct_map;
@@ -1048,7 +1050,7 @@ class cpsConverter = fun file ->
         v.vtype <- TFun(cpc_cont_ptr,
           Some ["cpc_cont", cpc_cont_ptr, []], va, attr)
         end;
-      ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
+      ChangeTo [g;comptag;GFun (new_arglist_fun, locUnknown)]
       end
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
   true};sformals = args} as fd, _) as g ->
