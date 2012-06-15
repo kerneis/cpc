@@ -6738,7 +6738,7 @@ and doStatement (s : A.statement) : chunk =
           the spawned thread to the default scheduler anyway (at %a)." d_loc loc'); 
         let mkSpawn f args = mkStmt (CpcSpawn (f, args, loc')) in
         currentLoc := loc';
-        let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
+        let name = Printf.sprintf "__%s_spawn%d" !currentFunctionFDEC.svar.vname (newVID()) in
         let decl = A.PROTO(A.JUSTBASE, [], false) in
         let fundef = A.FUNDEF (([A.SpecCPS; A.SpecType A.Tvoid],(name,decl,[],loc)),
             { A.blabels = []; A.battrs = []; A.bstmts = [s] }, loc, loc) in

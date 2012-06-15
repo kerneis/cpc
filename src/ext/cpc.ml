@@ -389,7 +389,7 @@ let timestamp () =
 
 let make_label =
   let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "add_goto%d" !i
+  fun () -> incr i; Printf.sprintf "pc%d"  !i
 
 let add_goto src dst =
   assert (src != dummyStmt && dst != dummyStmt);
@@ -1000,8 +1000,8 @@ class cpsConverter = fun file ->
           (if !aligned_continuations then []
            else [Attr("packed",[])]) in
       let comptag = GCompTag (arglist_struct, locUnknown) in
-      let new_arglist_fun = emptyFunction (v.vname^"_new_arglist") in
-      let cont_name = Printf.sprintf "cpc__continuation_%d" (newVID()) in
+      let new_arglist_fun = emptyFunction (v.vname^"_push") in
+      let cont_name = Printf.sprintf "cpc_cont_%d" (newVID()) in
       let new_args = Some (args@[cont_name,cpc_cont_ptr,[]]) in
       let new_arglist_type = TFun (cpc_cont_ptr, new_args, false, []) in
       let temp_arglist =
@@ -1046,16 +1046,16 @@ class cpsConverter = fun file ->
         (* mark it as completed (will be done later for non-extern function *)
         v.vcps <- false;
         v.vtype <- TFun(cpc_cont_ptr,
-          Some ["cpc_current_continuation", cpc_cont_ptr, []], va, attr)
+          Some ["cpc_cont", cpc_cont_ptr, []], va, attr)
         end;
       ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
       end
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
   true};sformals = args} as fd, _) as g ->
-      let new_arg = ["cpc_current_continuation", cpc_cont_ptr, []] in
+      let new_arg = ["cpc_cont", cpc_cont_ptr, []] in
       let arglist_struct = List.assoc fd.svar struct_map in
       let cpc_arguments =
-        makeLocalVar fd "cpc_arguments"
+        makeLocalVar fd "cpc_args"
         (TPtr(TComp(arglist_struct, []),[])) in
       (* add former arguments to slocals *)
       fd.slocals <- args @ fd.slocals;
@@ -2039,8 +2039,12 @@ end
 
 exception GotoContent of stmt list
 
-let make_function_name base =
-  Printf.sprintf "__cpc_%s_%s" base (timestamp ())
+let make_function_name toplevel label =
+  (* Remove leading underscores *)
+  let r = Str.regexp "^_*" in
+  let t = Str.replace_first r "" toplevel in
+  let l = Str.replace_first r "" label in
+  Printf.sprintf "__%s_%s" t l
 
 exception FoundType of typ
 
@@ -2128,11 +2132,11 @@ and blockCanBreak b =
        first we can't be fallen through. *)
 let goto_method = ref 1
 
-class functionalizeGoto start enclosing_fun file =
+class functionalizeGoto start enclosing_fun toplevel file =
       let last_var = find_last_var start file in
       let label = match List.find is_label start.labels with
         | Label(l,_,_) -> l | _ -> assert false in
-      let fd = emptyFunction (make_function_name label) in
+      let fd = emptyFunction (make_function_name toplevel.svar.vname label) in
       (* the return type of the functionalized chunk *)
       let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
       let () = fd.svar.vcps <- true in
@@ -2253,18 +2257,24 @@ and return the nearest enclosing loop/switch statement *)
 let rec functionalize start f =
   begin try
     let enclosing = ref dummyFunDec in
+    let toplevel = ref dummyFunDec in
     let findEnclosing = 
       object(self)
         inherit (enclosingFunction dummyFunDec)
 
         val mutable nearest_loop = dummyStmt
+        val mutable current_top = dummyFunDec
         val mutable seen_start = false
         val mutable check_loops = false
+
+        method vglob = function
+        | GFun (fd,_) -> current_top <- fd; DoChildren
+        | _ -> SkipChildren
 
         method vstmt s =
           assert(check_loops =>  seen_start);
           if s == start then (seen_start <- true; check_loops <- true;
-          enclosing := ef);
+          enclosing := ef; toplevel := current_top);
           match s.skind with
           | Break _ | Continue _ when check_loops ->
               raise (BreakContinue nearest_loop)
@@ -2287,7 +2297,7 @@ let rec functionalize start f =
 
       end
     in  visitCilFileSameGlobals findEnclosing f;
-    visitCilFileSameGlobals (new functionalizeGoto start !enclosing f) f;
+    visitCilFileSameGlobals (new functionalizeGoto start !enclosing !toplevel f) f;
   with
   | BreakContinue s ->
       assert( s != dummyStmt);
