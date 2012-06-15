@@ -5736,6 +5736,9 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
       (*let oldenv = H.copy env in
       let oldgenv = H.copy genv in*)
       let targethash = H.copy gotoTargetHash in
+      let backpatchgotos = H.copy backPatchGotos in
+      let labelstmt = H.copy labelStmt in
+      initLabels ();
       if !detachedVars <> [] then (
       E.s (error "Internal function %s forbidden inside an attached or detached \
       block (at %a)." n d_loc funloc));
@@ -6187,6 +6190,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               (*copy_into oldenv env;
               copy_into oldgenv genv;*)
               copy_into targethash gotoTargetHash;
+              copy_into backpatchgotos backPatchGotos;
+              copy_into labelstmt labelStmt;
               res
             end
           with e when continueOnError -> begin
@@ -6209,6 +6214,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               (*copy_into oldenv env;
               copy_into oldgenv genv;*)
               copy_into targethash gotoTargetHash;
+              copy_into backpatchgotos backPatchGotos;
+              copy_into labelstmt labelStmt;
               res
             end
           end)

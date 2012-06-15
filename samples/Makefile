@@ -11,7 +11,7 @@ LDLIBS=-L../runtime -lm -pthread -lcpcfull
 
 BASICS=barrier boxing bug conditions done loops patch padding sleep\
     sleep_cond detached-torture sleep-torture conditions-torture pointer\
-	detached-spawn
+	detached-spawn spawn
 EXTENDED=ampersand nontailcall tcat tcat_fd trivial-httpd
 SERVERS=trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
 	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
