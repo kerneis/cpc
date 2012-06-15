@@ -1019,7 +1019,8 @@ class cpsConverter = fun file ->
           (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
           (* temp_arglist = cpc_alloc(&last_arg,(int)sizeof(arglist_struct)) *)
           Call(
-            Some (Var temp_arglist, NoOffset),
+            (if field_args = [] then None (* avoid unused variable warning *)
+            else Some (Var temp_arglist, NoOffset)),
             Lval (Var cpc_alloc, NoOffset),
             [addr_of last_arg;
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
@@ -1072,7 +1073,8 @@ class cpsConverter = fun file ->
           (* cpc_arguments = cpc_dealloc(cpc_current_continuation,
                 (int)sizeof(arglist_struct)) *)
           Call(
-            Some (Var cpc_arguments, NoOffset),
+            (if args = [] then None (* avoid unused variable warning *)
+            else Some (Var cpc_arguments, NoOffset)),
             Lval (Var cpc_dealloc, NoOffset),
             [Lval (Var current_continuation, NoOffset);
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
