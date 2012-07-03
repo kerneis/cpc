@@ -47,6 +47,8 @@ main(int argc, char **argv)
     if (argc >= 2)
         sscanf(argv[1], "%d", &serverPort);
 
+    /* Here, we must use a thread cpc, because some cpc needs to init the
+       completion port. */
     cpc_spawn launch_server(serverPort);
 
     cpc_main_loop();
@@ -87,7 +89,8 @@ launch_server(int serverPort)
 
     printf("server started on port %d\n", serverPort);
 
-    cpc_spawn accept_connection(serverSocket);
+    for(rc = 0; rc < 2000; rc++)
+        cpc_spawn accept_connection(serverSocket);
 }
 
 cps void
@@ -96,15 +99,16 @@ accept_connection(cpc_handle_t serverSocket)
     int64_t rc;
     cpc_handle_t acceptedSocket;
     char *buf;
+    buf = malloc(BUFFER_SIZE);
+    if(buf == NULL) {
+        print_error("malloc");
+        return;
+    }
     while(1) {
-        buf = malloc(BUFFER_SIZE);
-        if(buf == NULL) {
-            cpc_yield();
-            continue;
-        }
     again:
         acceptedSocket = cpc_open_socket_std(1);
         if(acceptedSocket == NULL) {
+            print_error("cpc_open_socket_std");
             cpc_yield();
             goto again;
         }
@@ -116,7 +120,7 @@ accept_connection(cpc_handle_t serverSocket)
             goto again2;
         }
 
-        cpc_spawn handle_connection(acceptedSocket, buf, rc);
+        handle_connection(acceptedSocket, buf, rc);
     }
 }
 
