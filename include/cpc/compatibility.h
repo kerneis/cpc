@@ -76,7 +76,13 @@ static inline DWORD get_last_error(cpc_handle_t *h)
 #include <Mswsock.h>
 #include <windows.h>
 
+#ifndef FD_COPY
 #define FD_COPY(src, dest) do { *dest = *src; } while(0)
+#endif
+
+#ifndef socklen_t
+typedef int socklen_t;
+#endif
 
 /* WARNING: internally, cpc_handle can differ due to his kind. */
 typedef struct cpc_handle {
