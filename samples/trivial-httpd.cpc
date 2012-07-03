@@ -253,9 +253,10 @@ handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes)
             if(rc <= 0) break;
             cpc_yield();
         }
+        cpc_close_handle(file);
+        file = NULL;
     }
 
-    cpc_close_handle(file);
 #endif
 
  fail_file:
