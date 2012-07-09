@@ -685,6 +685,12 @@ cps_expand4(cpc_call_async_prim,
     return cpc_handle_yield(handle, thread, cond);
 }
 
+void
+cpc_signal_fd(HANDLE handle, int direction)
+{
+    CancelIo(handle);
+}
+
 /*** cpc_link ****/
 
 cpc_continuation *cpc_prim_attach(cpc_thread*);

@@ -22,13 +22,13 @@ THE SOFTWARE.
 
 #ifndef CPC_IO_H
 #define CPC_IO_H
-#include "compatibility.h"
+#include "cpc_runtime.h"
 
 typedef struct cpc_timeout cpc_timeout;
 
 /* Timeouts */
 cps cpc_timeout *cpc_timeout_get(int secs, int usecs);
-cps void cpc_timeout_restart(cpc_timeout *timeout);
+cps void cpc_timeout_restart(cpc_timeout *timeout, int secs, int usecs);
 cpc_condvar *cpc_timeout_condvar(cpc_timeout *timeout);
 int cpc_timeout_expired(cpc_timeout *timeout);
 void cpc_timeout_destroy(cpc_timeout *timeout);
@@ -40,21 +40,45 @@ int cpc_setup_descriptor(HANDLE h, int nonagle);
 cps int64_t cpc_write(cpc_handle_t handle, void *buf, size_t count);
 cps int64_t cpc_write_cond(cpc_handle_t handle, void *buf, size_t count,
                            cpc_condvar *cond);
-cps int64_t cpc_write_timeout(cpc_handle_t h, void *buf, size_t count,
-                              int secs, int micros);
-cps int64_t cpc_my_read(cpc_handle_t handle, char *buf, uint64_t count);
+cps int64_t cpc_write_at(cpc_handle_t handle, void *buf, size_t count,
+                         size_t offset);
+cps int64_t cpc_write_at_cond(cpc_handle_t handle, void *buf, size_t count,
+                              size_t offset, cpc_condvar *cond);
 cps int64_t cpc_read(cpc_handle_t h, void *buf, size_t count);
 cps int64_t cpc_read_cond(cpc_handle_t h, void *buf, size_t count,
                           cpc_condvar *cond);
-cps int64_t cpc_read_timeout(cpc_handle_t h, void *buf, size_t count,
-                             int secs, int micros);
+cps int64_t cpc_read_at(cpc_handle_t handle, void *buf, size_t count,
+                        size_t offset);
+cps int64_t cpc_read_at_cond(cpc_handle_t handle, void *buf, size_t count,
+                             size_t offset, cpc_condvar *cond);
+
+cps int64_t cpc_send(cpc_handle_t handle, void *buf, size_t count);
 cps int64_t cpc_send_cond(cpc_handle_t handle, void *buf, size_t count,
                           cpc_condvar *cond);
-cps int64_t cpc_send(cpc_handle_t handle, void *buf, size_t count);
+cps int64_t cpc_sendv(cpc_handle_t handle, cpc_iobuf *iobuf, int iocount);
+cps int64_t cpc_sendv_cond(cpc_handle_t handle, cpc_iobuf *iobuf,
+                           int iocount, cpc_condvar *cond);
+cps int64_t cpc_recv(cpc_handle_t handle, void *buf, size_t count);
 cps int64_t cpc_recv_cond(cpc_handle_t handle, void *buf, size_t count,
                           cpc_condvar *cond);
-cps int64_t cpc_recv(cpc_handle_t handle, void *buf, size_t count);
+
+cps int64_t cpc_recvfrom(cpc_handle_t handle, void *buf, size_t count,
+                         struct sockaddr *addr, int *addrlen);
+cps int64_t cpc_recvfrom_cond(cpc_handle_t handle, void *buf, size_t count,
+                              struct sockaddr *addr, int *addrlen,
+                              cpc_condvar *cond);
+cps int64_t cpc_sendto(cpc_handle_t handle, void *buf, size_t count,
+                       struct sockaddr *addr, int addrlen);
+cps int64_t cpc_sendto_cond(cpc_handle_t handle, void *buf, size_t count,
+                            struct sockaddr *addr, int addrlen,
+                            cpc_condvar *cond);
+
 cps int64_t cpc_accept(cpc_handle_t serverHandle, cpc_handle_t acceptedSocket,
                        void *buf, size_t count);
+
+#ifdef __unix
+#else /* windows */
+#define cpc_fullsendv cpc_sendv
+#endif
 
 #endif /* CPC_IO_H */

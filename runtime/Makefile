@@ -1,6 +1,6 @@
 CPC='../bin/cpc'
 
-CDEBUGFLAGS=-Wall -g -O2 -Wno-unknown-pragmas
+CDEBUGFLAGS=-Wall -g -Wno-unknown-pragmas
 CLIBS=-I ../include/cpc
 CFLAGS += $(CDEBUGFLAGS) $(EXTRA_DEFINES)
 

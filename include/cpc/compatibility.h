@@ -53,20 +53,38 @@ enum cpc_handle_kind {
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/uio.h>
 
 typedef struct cpc_handle {
     int cpch_handle;
     int cpch_kind;
 } cpc_handle, *cpc_handle_t;
 
-static inline DWORD get_last_error(cpc_handle_t *h)
+/* cpc_iobuf */
+typedef struct iovec cpc_iobuf;
+static inline void cpc_iobuf_set(cpc_iobuf *iobuf, void* buf, size_t len)
 {
-    return errno;
+    iobuf->iov_base = buf;
+    iobuf->iov_len  = len;
+}
+static inline void *cpc_iobuf_getbuf(cpc_iobuf *iobuf)
+{
+    return iobuf->iov_base;
+}
+static inline size_t cpc_iobuf_getlen(cpc_iobuf *iobuf)
+{
+    return iobuf->iov_len;
 }
 
 /*===============================   Windows   ================================*/
 #elif defined _WIN32
-#define _WIN32_WINNT 0x0600
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+#ifndef WINVER
+#define WINVER 0x0601
+#endif
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,6 +93,7 @@ static inline DWORD get_last_error(cpc_handle_t *h)
 #include <winsock2.h>
 #include <Mswsock.h>
 #include <windows.h>
+#include <ws2tcpip.h>
 
 #ifndef FD_COPY
 #define FD_COPY(src, dest) do { *dest = *src; } while(0)
@@ -82,6 +101,10 @@ static inline DWORD get_last_error(cpc_handle_t *h)
 
 #ifndef socklen_t
 typedef int socklen_t;
+#endif
+
+#ifndef IPV6_V6ONLY
+#define IPV6_V6ONLY 27
 #endif
 
 /* WARNING: internally, cpc_handle can differ due to his kind. */
@@ -111,6 +134,23 @@ static inline void WSA_print_error(char *str)
     fprintf(stderr, "%s: %ld\n", str, (long)WSAGetLastError());
 }
 
+/* cpc_iobuf */
+typedef WSABUF cpc_iobuf;
+static inline void cpc_iobuf_set(cpc_iobuf *iobuf, char FAR* buf, u_long len)
+{
+    iobuf->buf = buf;
+    iobuf->len = len;
+}
+static inline void *cpc_iobuf_getbuf(cpc_iobuf *iobuf)
+{
+    return iobuf->buf;
+}
+static inline u_long cpc_iobuf_getlen(cpc_iobuf *iobuf)
+{
+    return iobuf->len;
+}
+
+
 /* MinGw doesn't have these headers. */
 #ifndef SetFileCompletionNotificationModes
 BOOL WINAPI SetFileCompletionNotificationModes(HANDLE FileHandle, UCHAR Flags);
@@ -123,5 +163,7 @@ BOOL WINAPI CancelIoEx(HANDLE hFile, LPOVERLAPPED lpOverlapped);
 #else
 #error "Unknown Operating System."
 #endif
+
+#pragma cpc_no_retain("cpc_iobuf_set", "cpc_iobuf_getbuf", "cpc_iobuf_getlen")
 
 #endif /* _COMPATIBILITY_H */
