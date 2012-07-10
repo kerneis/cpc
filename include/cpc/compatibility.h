@@ -164,6 +164,8 @@ BOOL WINAPI CancelIoEx(HANDLE hFile, LPOVERLAPPED lpOverlapped);
 #error "Unknown Operating System."
 #endif
 
+#ifndef NO_CPS_PROTO
 #pragma cpc_no_retain("cpc_iobuf_set", "cpc_iobuf_getbuf", "cpc_iobuf_getlen")
+#endif
 
 #endif /* _COMPATIBILITY_H */

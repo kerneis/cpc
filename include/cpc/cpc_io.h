@@ -27,8 +27,10 @@ THE SOFTWARE.
 typedef struct cpc_timeout cpc_timeout;
 
 /* Timeouts */
+#ifndef NO_CPS_PROTO
 cps cpc_timeout *cpc_timeout_get(int secs, int usecs);
 cps void cpc_timeout_restart(cpc_timeout *timeout, int secs, int usecs);
+#endif
 cpc_condvar *cpc_timeout_condvar(cpc_timeout *timeout);
 int cpc_timeout_expired(cpc_timeout *timeout);
 void cpc_timeout_destroy(cpc_timeout *timeout);
@@ -37,6 +39,7 @@ void cpc_timeout_destroy(cpc_timeout *timeout);
 cpc_handle_t cpc_open_file_std(const char *path, int openflags);
 cpc_handle_t cpc_open_socket_std(int no_nagle);
 int cpc_setup_descriptor(HANDLE h, int nonagle);
+#ifndef NO_CPS_PROTO
 cps int64_t cpc_write(cpc_handle_t handle, void *buf, size_t count);
 cps int64_t cpc_write_cond(cpc_handle_t handle, void *buf, size_t count,
                            cpc_condvar *cond);
@@ -75,6 +78,7 @@ cps int64_t cpc_sendto_cond(cpc_handle_t handle, void *buf, size_t count,
 
 cps int64_t cpc_accept(cpc_handle_t serverHandle, cpc_handle_t acceptedSocket,
                        void *buf, size_t count);
+#endif
 
 #ifdef __unix
 #else /* windows */
