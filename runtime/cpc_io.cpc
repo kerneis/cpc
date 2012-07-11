@@ -762,6 +762,8 @@ cpc_accept(cpc_handle_t serverHandle, cpc_handle_t acceptedHandle,
             memcpy(buf, closure.buffer, count);
         free(closure.buffer);
     }
+    if(nbytes < 0)
+        return nbytes;
 
     rc =  setsockopt(acc_sock, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT,
                      (char *)&serv_sock, sizeof(serv_sock));
