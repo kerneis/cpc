@@ -48,7 +48,11 @@ enum cpc_handle_kind {
 
 
 /*=================================   Unix   =================================*/
-#ifdef __unix__
+#if defined(__unix__) || defined(__unix) || defined(unix) ||    \
+    defined(__APPLE__)
+#ifndef(__unix__)
+#define __unix__
+#endif
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>

@@ -161,6 +161,8 @@ extern int cpc_threadpool_release(cpc_sched *);
 extern int cpc_io_associate_with_completion_port(HANDLE handle);
 
 #ifndef NO_CPS_PROTO
+#define CPC_NO_RETAIN_ATTRIBUTE __attribute__((cpc_no_retain))
+
 extern cps int64_t cpc_call_async_prim(HANDLE handle, cpc_async_prim f,
                                        void * closure, cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
@@ -179,11 +181,14 @@ extern time_t cpc_time(time_t *t) __attribute__((cpc_need_cont,cpc_no_retain));
 #define cpc_detach()  cpc_link  (cpc_is_detached() ? cpc_get_sched()   : cpc_default_threadpool)
 #define cpc_detached  cpc_linked(cpc_is_detached() ? cpc_get_sched()   : cpc_default_threadpool)
 
-#endif
-
 /* Safe functions */
-
 #pragma cpc_no_retain("writev", "curl_easy_getinfo", "snprintf", "memcmp",  "memcpy")
 #pragma cpc_no_retain("getpeername", "setsockopt", "memset", "bind", "accept", "recvfrom")
+#pragma cpc_no_retain("__builtin_object_size",  \
+                      "__builtin___memset_chk", \
+                      "__inline_memset_chk")
+#else
+#define CPC_NO_RETAIN_ATTRIBUTE
+#endif /* NO_CPS_PROTO */
 
 #endif /* CPC_RUNTIME_H */

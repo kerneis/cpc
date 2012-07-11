@@ -23,10 +23,11 @@ THE SOFTWARE.
 #ifndef CPC_IO_H
 #define CPC_IO_H
 #include "cpc_runtime.h"
-
-typedef struct cpc_timeout cpc_timeout;
+#include "compatibility.h"
 
 /* Timeouts */
+typedef struct cpc_timeout cpc_timeout;
+
 #ifndef NO_CPS_PROTO
 cps cpc_timeout *cpc_timeout_get(int secs, int usecs);
 cps void cpc_timeout_restart(cpc_timeout *timeout, int secs, int usecs);
@@ -80,7 +81,7 @@ cps int64_t cpc_accept(cpc_handle_t serverHandle, cpc_handle_t acceptedSocket,
                        void *buf, size_t count);
 #endif
 
-#ifdef __unix
+#ifdef __unix__
 #else /* windows */
 #define cpc_fullsendv cpc_sendv
 #endif
