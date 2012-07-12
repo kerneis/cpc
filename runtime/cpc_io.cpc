@@ -701,7 +701,7 @@ cpc_sendto_cond(cpc_handle_t handle, void *buf, size_t count,
 }
 
 
-#define PROTOCOL_SIZE         (sizeof(struct sockaddr))
+#define PROTOCOL_SIZE         (sizeof(struct sockaddr_in6))
 #define LOCAL_ADDRESS_LENGTH  (PROTOCOL_SIZE + 16)
 #define REMOTE_ADDRESS_LENGTH (PROTOCOL_SIZE + 16)
 struct cpc_accept_aux_struct {
@@ -718,6 +718,7 @@ cpc_accept_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
     SOCKET serverSocket = (void*) handle;
     struct cpc_accept_aux_struct *data = closure;
     memset(ovl, 0, sizeof(OVERLAPPED));
+
     rc = AcceptEx(serverSocket,
                   data->acceptedSocket,
                   data->buffer,
