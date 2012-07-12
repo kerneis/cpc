@@ -39,6 +39,7 @@ void cpc_timeout_destroy(cpc_timeout *timeout);
 /* IO */
 cpc_handle_t cpc_open_file_std(const char *path, int openflags);
 cpc_handle_t cpc_open_socket_std(int no_nagle);
+void cpc_close_handle(cpc_handle_t handle);
 int cpc_setup_descriptor(HANDLE h, int nonagle);
 #ifndef NO_CPS_PROTO
 cps int64_t cpc_write(cpc_handle_t handle, void *buf, size_t count);

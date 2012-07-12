@@ -28,7 +28,6 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <sys/types.h>
 #include <assert.h>
@@ -123,9 +122,9 @@ typedef struct cpc_handle_file {
     uint64_t cpch_offset;
 } cpc_handle_file, *cpc_handle_file_t;
 
-static inline void print_errno(char *str, long errno)
+static inline void print_errno(char *str, long error_code)
 {
-    fprintf(stderr, "%s: %ld\n", str, errno);
+    fprintf(stderr, "%s: %ld\n", str, error_code);
 }
 
 static inline void print_error(char *str)
