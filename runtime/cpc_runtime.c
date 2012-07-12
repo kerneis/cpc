@@ -915,10 +915,12 @@ cpc_main_loop(void)
 
     cpc_default_threadpool = cpc_threadpool_get(MAX_THREADS);
 
-    completionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);
-    if(completionPort == NULL) {
-        print_error("CreateIoCompletionPort");
-        exit(1);
+    if(completionPort == INVALID_HANDLE_VALUE) {
+        completionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL,0,0);
+        if(completionPort == NULL) {
+            print_error("CreateIoCompletionPort");
+            exit(1);
+        }
     }
 
     /* Make sure cpc_now has a reasonable initial value. */
@@ -1075,7 +1077,15 @@ int
 cpc_io_associate_with_completion_port(HANDLE handle)
 {
     assert(completionPort != NULL);
-    HANDLE cp = CreateIoCompletionPort(handle, completionPort, IOCPKEY_IO, 0);
+    HANDLE cp;
+    if(completionPort == INVALID_HANDLE_VALUE) {
+        completionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL,0,0);
+        if(completionPort == NULL) {
+            print_error("CreateIoCompletionPort");
+            exit(1);
+        }
+    }
+    cp = CreateIoCompletionPort(handle, completionPort, IOCPKEY_IO, 0);
     if(cp == NULL)
         return -1;
     return 0;
