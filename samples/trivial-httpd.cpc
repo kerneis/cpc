@@ -71,7 +71,7 @@ launch_server(int serverPort)
         exit(1);
     }
 
-    serverSocket = cpc_open_socket_std(1);
+    serverSocket = cpc_open_socket_tcp(AF_INET, 1);
     if(serverSocket == NULL) { print_error("serverSocket"); exit(1); }
 
     rc = setsockopt(serverSocket->cpch_handle, SOL_SOCKET, SO_REUSEADDR,
@@ -106,9 +106,9 @@ accept_connection(cpc_handle_t serverSocket)
     }
     while(1) {
     again:
-        acceptedSocket = cpc_open_socket_std(1);
+        acceptedSocket = cpc_open_socket_tcp(AF_INET, 1);
         if(acceptedSocket == NULL) {
-            print_error("cpc_open_socket_std");
+            print_error("cpc_open_socket_tcp");
             cpc_yield();
             goto again;
         }
@@ -151,7 +151,7 @@ handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes)
         if(buf[i] == ' ' || buf[i] == '\r' || buf[i] == '\n')
             break;
     if(i == readed && readed < BUFFER_SIZE) {
-        rc = cpc_read_timeout(sock, buf + readed, BUFFER_SIZE - readed, 60, 0);
+        rc = cpc_read(sock, buf + readed, BUFFER_SIZE - readed);
         if(rc < 0) {
             print_errno("read", -(long)rc);
             goto fail;
@@ -183,7 +183,7 @@ handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes)
         }
 
     if(readed < BUFFER_SIZE) {
-        rc = cpc_read_timeout(sock, buf + rc, BUFFER_SIZE - rc, 60, 0);
+        rc = cpc_read(sock, buf + rc, BUFFER_SIZE - rc);
         if(rc < 0) {
             print_errno("read", -(long)rc);
             goto fail_fn;
@@ -196,7 +196,7 @@ handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes)
  
  send:
 #ifdef STATIC
-    rc = cpc_write_timeout(sock, &resp, resp_size, 60, 0);
+    rc = cpc_write(sock, &resp, resp_size);
     if(rc != resp_size) { perror("write"); goto fail; }
 #else
     file = cpc_open_file_std(fn, O_RDONLY);
@@ -243,7 +243,7 @@ handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes)
             n += rc;
     }
 
-    rc = cpc_write_timeout(sock, buf, n, 60, 0);
+    rc = cpc_write(sock, buf, n);
     if(rc < 0) {
         print_errno("write", -rc);
         goto fail_file;
@@ -253,7 +253,7 @@ handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes)
         while(1) {
             rc = cpc_read(file, buf, BUFFER_SIZE);
             if(rc <= 0) break;
-            rc = cpc_write_timeout(sock, buf, rc, 60, 0);
+            rc = cpc_write(sock, buf, rc);
             if(rc <= 0) break;
             cpc_yield();
         }
