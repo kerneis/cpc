@@ -676,7 +676,7 @@ cps_expand4(cpc_call_async_prim,
     OVERLAPPED *overlapped = get_overlapped(thread);
     int64_t rc;
     assert(cont);
-    rc = f(handle, closure, overlapped, cond);
+    rc = f(handle, closure, overlapped);
     if(rc != -ERROR_IO_PENDING && rc != -WSA_IO_PENDING) {
         /* IO is synchronous or an error occurs */
         cpc_continuation_patch(cont, sizeof(int64_t), &rc);

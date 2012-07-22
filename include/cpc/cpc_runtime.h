@@ -84,7 +84,7 @@ typedef cpc_continuation *cpc_function(cpc_continuation *);
    Else (error), return the negative value of the error code.
    You should reset the OVERLAPPED structure, and set Offset and OffsetHigh
    fields as the syscall required it. */
-typedef int64_t (*cpc_async_prim)(HANDLE, void *, OVERLAPPED *, cpc_condvar *);
+typedef int64_t (*cpc_async_prim)(HANDLE, void *, OVERLAPPED *);
 
 struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);

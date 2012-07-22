@@ -406,8 +406,7 @@ struct cpc_io_file {
     }
 
 static int64_t
-cpc_write_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
-                cpc_condvar *cond)
+cpc_write_aux(HANDLE handle, void *closure, OVERLAPPED *ovl)
 {
     int rc;
     DWORD nbytes;
@@ -455,8 +454,7 @@ cpc_write_at_cond(cpc_handle_t handle, void *buf, size_t count,
 }
 
 static int64_t
-cpc_read_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
-                cpc_condvar *cond)
+cpc_read_aux(HANDLE handle, void *closure, OVERLAPPED *ovl)
 {
     int rc;
     DWORD nbytes;
@@ -519,7 +517,7 @@ struct cpc_io_tcp_basic {
     }
 
 static int64_t
-cpc_send_aux(HANDLE handle, void *closure, OVERLAPPED *ovl, cpc_condvar *cond)
+cpc_send_aux(HANDLE handle, void *closure, OVERLAPPED *ovl)
 {
     int rc;
     DWORD nbytes;
@@ -546,8 +544,7 @@ cpc_send(cpc_handle_t handle, void *buf, size_t count)
 }
 
 static int64_t
-cpc_recv_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
-             cpc_condvar *cond)
+cpc_recv_aux(HANDLE handle, void *closure, OVERLAPPED *ovl)
 {
     int rc;
     DWORD nbytes;
@@ -590,7 +587,7 @@ struct cpc_io_tcp_vector {
     }
 
 static int64_t
-cpc_sendv_aux(HANDLE handle, void *closure, OVERLAPPED *ovl, cpc_condvar *cond)
+cpc_sendv_aux(HANDLE handle, void *closure, OVERLAPPED *ovl)
 {
     int rc;
     DWORD nbytes;
@@ -642,8 +639,7 @@ struct cpc_io_to {
     }
 
 static int64_t
-cpc_recvfrom_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
-                 cpc_condvar *cond)
+cpc_recvfrom_aux(HANDLE handle, void *closure, OVERLAPPED *ovl)
 {
     int rc;
     DWORD nbytes;
@@ -659,7 +655,7 @@ cpc_recvfrom_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
 }
 
 static int64_t
-cpc_sendto_aux(HANDLE handle, void *closure, OVERLAPPED *ovl, cpc_condvar *cond)
+cpc_sendto_aux(HANDLE handle, void *closure, OVERLAPPED *ovl)
 {
     int rc;
     DWORD nbytes;
