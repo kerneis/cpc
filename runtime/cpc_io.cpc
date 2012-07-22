@@ -415,7 +415,7 @@ cpc_write_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
     memset(ovl, 0, sizeof(OVERLAPPED));
     ovl->Offset = data->offset & 0xFFFFFFFFLLU;
     ovl->OffsetHigh = (data->offset >> 32) & 0xFFFFFFFFLLU;
-    rc = WriteFile(handle, data->buffer, data->count, nbytes, ovl);
+    rc = WriteFile(handle, data->buffer, data->count, &nbytes, ovl);
     if(!rc) /* asynchronous read or error */
         return -(int64_t)GetLastError();
     return nbytes;
@@ -464,7 +464,7 @@ cpc_read_aux(HANDLE handle, void *closure, OVERLAPPED *ovl,
     memset(ovl, 0, sizeof(OVERLAPPED));
     ovl->Offset = data->offset & 0xFFFFFFFFLLU;
     ovl->OffsetHigh = (data->offset >> 32) & 0xFFFFFFFFLLU;
-    rc = ReadFile(handle, data->buffer, data->count, nbytes, ovl);
+    rc = ReadFile(handle, data->buffer, data->count, &nbytes, ovl);
     if(!rc) /* asynchronous read or error */
         return -(int64_t)GetLastError();
     return nbytes;
