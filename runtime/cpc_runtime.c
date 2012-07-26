@@ -590,14 +590,14 @@ cps_expand1(int,cpc_wait, cpc_condvar *, cond)
 void
 cpc_signal(cpc_condvar *cond)
 {
-    int rc = CPC_CONDVAR;
+    int64_t rc64 = CPC_CONDVAR;
     assert(!IS_DETACHED);
     cpc_thread *thread = cond_dequeue(&cond->queue);
     if(thread == NULL)
         return;
     assert(thread->condvar == cond);
     thread->condvar = NULL;
-    cpc_continuation_patch(get_cont(thread), sizeof(int), &rc);
+    cpc_continuation_patch(get_cont(thread), sizeof(int64_t), &rc64);
     dequeue_other(thread);
     enqueue(&ready, thread);
 }
@@ -605,7 +605,7 @@ cpc_signal(cpc_condvar *cond)
 void
 cpc_signal_all(cpc_condvar *cond)
 {
-    int rc = CPC_CONDVAR;
+    int64_t rc64 = CPC_CONDVAR;
     cpc_thread *thread;
 
     assert(!IS_DETACHED);
@@ -615,7 +615,7 @@ cpc_signal_all(cpc_condvar *cond)
             break;
         assert(thread->condvar == cond);
         thread->condvar = NULL;
-        cpc_continuation_patch(get_cont(thread), sizeof(int), &rc);
+        cpc_continuation_patch(get_cont(thread), sizeof(int64_t), &rc64);
         dequeue_other(thread);
         enqueue(&ready, thread);
     }
