@@ -660,10 +660,9 @@ cpc_handle_yield(HANDLE handle, cpc_thread *thread, cpc_condvar *cond)
         thread->condvar = cond;
         cond_enqueue(&cond->queue, thread);
     }
-    num_fds++;
-    if(thread->state == STATE_DETACHED) {
-        assert(IS_DETACHED);
-        thread->state = STATE_IO_PENDING;
+    if(thread->state != STATE_DETACHED) {
+        assert(!IS_DETACHED);
+        num_fds++;
     }
     return NULL;
 }
@@ -1016,6 +1015,16 @@ cpc_main_loop(void)
                 num_fds--;
                 thread = get_thread_from_overlapped(poverlapped);
                 cont = get_cont(thread);
+                if(thread->state == STATE_DETACHED) {
+                    rc = threadpool_schedule(thread->sched->pool,
+                                             &perform_detach, (void*)thread);
+                    if (rc < 0) {
+                        perror("threadpool_schedule");
+                        exit(1);
+                    }
+                    cpc_continuation_patch(cont, sizeof(int64_t), &io_rc);
+                    break;
+                }
                 if(thread->condvar) {
                     cond_dequeue_1(&thread->condvar->queue, thread);
                     thread->condvar = NULL;
