@@ -37,7 +37,7 @@ THE SOFTWARE.
 
 
 #ifndef SOL_TCP
-# define SOL_TCP IPPROTO_TCP
+#define SOL_TCP IPPROTO_TCP
 #endif
 
 enum cpc_handle_kind {
@@ -98,18 +98,6 @@ static inline size_t cpc_iobuf_getlen(cpc_iobuf *iobuf)
 #include <windows.h>
 #include <ws2tcpip.h>
 
-#ifndef FD_COPY
-#define FD_COPY(src, dest) do { *dest = *src; } while(0)
-#endif
-
-#ifndef socklen_t
-typedef int socklen_t;
-#endif
-
-#ifndef IPV6_V6ONLY
-#define IPV6_V6ONLY 27
-#endif
-
 /* WARNING: internally, cpc_handle can differ due to his kind. */
 typedef struct cpc_handle {
     HANDLE   cpch_handle;
@@ -155,13 +143,12 @@ static inline u_long cpc_iobuf_getlen(cpc_iobuf *iobuf)
 
 
 /* MinGw doesn't have these headers. */
-#ifndef SetFileCompletionNotificationModes
+#warning "perhaps should you uncomment these lines:"
+/*
 BOOL WINAPI SetFileCompletionNotificationModes(HANDLE FileHandle, UCHAR Flags);
 #define FILE_SKIP_COMPLETION_PORT_ON_SUCCESS 0x1
-#endif
-#ifndef CancelIoEx
 BOOL WINAPI CancelIoEx(HANDLE hFile, LPOVERLAPPED lpOverlapped);
-#endif
+*/
 
 #else
 #error "Unknown Operating System."
