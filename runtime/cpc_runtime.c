@@ -76,10 +76,11 @@ static DWORD main_loop_id;
                      (main_loop_id != GetCurrentThreadId()))
 #define MAX_THREADS 20
 cpc_sched *cpc_default_threadpool = NULL;
-#define IOCPKEY_IO             0
-#define IOCPKEY_ATTACH         1
-#define IOCPKEY_SPAWN          2
-#define IOCPKEY_DETACHED_DEATH 3
+#define IOCPKEY_IO                   0
+#define IOCPKEY_ATTACH               1
+#define IOCPKEY_SPAWN                2
+#define IOCPKEY_DETACHED_DEATH       3
+#define IOCPKEY_DETACHED_AIOWAIT     4
 
 const int cpc_pessimise_runtime = 0;
 
@@ -108,6 +109,17 @@ typedef struct cpc_sched_queue {
 struct cpc_condvar {
     int refcount;
     cpc_thread_queue queue;
+};
+
+struct cpc_overlapped {
+    OVERLAPPED overlapped;
+    cpc_thread *thread;
+    HANDLE handle;
+    int status;
+#define AIO_STATUS_NONE     0
+#define AIO_STATUS_ON_HOLD  1
+#define AIO_STATUS_DONE     2
+    int64_t result;
 };
 
 #define STATE_UNKNOWN    -1
@@ -652,36 +664,66 @@ cps_expand3(int,cpc_sleep, int, sec, int, usec, cpc_condvar *, cond)
 
 /*** IO ***/
 
-static inline cpc_continuation *
-cpc_handle_yield(HANDLE handle, cpc_thread *thread, cpc_condvar *cond)
+cpc_overlapped *
+cpc_get_overlapped(DWORD offset, DWORD offsetHigh)
 {
+    cpc_overlapped *ovl = malloc(sizeof(cpc_overlapped));
+    ovl->overlapped.Internal = 0;
+    ovl->overlapped.InternalHigh = 0;
+    ovl->overlapped.Offset = offset;
+    ovl->overlapped.OffsetHigh = offsetHigh;
+    ovl->overlapped.hEvent = 0;
+    ovl->status = AIO_STATUS_NONE;
+    ovl->result = 0;
+    return ovl;
+}
+
+void
+cpc_set_overlapped(cpc_overlapped *ovl, DWORD offset, DWORD offsetHigh)
+{
+    ovl->overlapped.Internal = 0;
+    ovl->overlapped.InternalHigh = 0;
+    ovl->overlapped.Offset = offset;
+    ovl->overlapped.OffsetHigh = offsetHigh;
+    ovl->overlapped.hEvent = 0;
+    ovl->status = AIO_STATUS_NONE;
+    ovl->result = 0;
+}
+
+void
+cpc_free_overlapped(cpc_overlapped *ovl)
+{
+    free(ovl);
+}
+
+cps_expand3(int64_t,
+            cpc_aio_wait,
+            HANDLE, handle,
+            cpc_overlapped *, ovl,
+            cpc_condvar*, cond)
+    ovl->thread = thread;
+    if(thread->state == STATE_DETACHED) {
+        assert(IS_DETACHED && cond == NULL);
+        /* Warning to race conditions. Don't check nor modify ovl->status. */
+        if(ovl->result != 0) {
+            cpc_continuation_patch(cont, sizeof(int64_t), &ovl->result);
+            return cont;
+        }
+        PostQueuedCompletionStatus(completionPort, 0,
+                                   IOCPKEY_DETACHED_AIOWAIT, (void*)ovl);
+        return NULL;
+    }
+    if(ovl->status == AIO_STATUS_DONE) {
+        cpc_continuation_patch(cont, sizeof(int64_t), &ovl->result);
+        return cont;
+    }
     if(cond) {
-        thread->performed_handle = handle;
+        ovl->handle = handle;
         thread->condvar = cond;
         cond_enqueue(&cond->queue, thread);
     }
-    if(thread->state != STATE_DETACHED) {
-        assert(!IS_DETACHED);
-        num_fds++;
-    }
+    num_fds++;
     return NULL;
-}
-
-cps_expand4(cpc_call_async_prim,
-            HANDLE, handle,
-            cpc_async_prim, f,
-            void *, closure,
-            cpc_condvar *, cond)
-    OVERLAPPED *overlapped = get_overlapped(thread);
-    int64_t rc;
-    assert(cont);
-    rc = f(handle, closure, overlapped);
-    if(rc != -ERROR_IO_PENDING && rc != -WSA_IO_PENDING) {
-        /* IO is synchronous or an error occurs */
-        cpc_continuation_patch(cont, sizeof(int64_t), &rc);
-        return cont;
-    }
-    return cpc_handle_yield(handle, thread, cond);
 }
 
 void
@@ -981,6 +1023,7 @@ cpc_main_loop(void)
         }
 
         while(1) {
+            struct cpc_overlapped *ovl;
             rc = GetQueuedCompletionStatus(completionPort,
                                            &nbytes,
                                            &completionKey,
@@ -1010,21 +1053,43 @@ cpc_main_loop(void)
             case IOCPKEY_DETACHED_DEATH:
                 detached_count --;
                 break;
-            default:
-                assert(completionKey == IOCPKEY_IO && num_fds > 0);
-                num_fds--;
-                thread = get_thread_from_overlapped(poverlapped);
-                cont = get_cont(thread);
-                if(thread->state == STATE_DETACHED) {
+            case IOCPKEY_DETACHED_AIOWAIT:
+                ovl = (void*)poverlapped;
+                if(ovl->status == AIO_STATUS_DONE) {
+                    thread = ovl->thread;
+                    cont = get_cont(thread);
+                    cpc_continuation_patch(cont, sizeof(int64_t), &ovl->result);
                     rc = threadpool_schedule(thread->sched->pool,
                                              &perform_detach, (void*)thread);
                     if (rc < 0) {
                         perror("threadpool_schedule");
                         exit(1);
                     }
-                    cpc_continuation_patch(cont, sizeof(int64_t), &io_rc);
                     break;
                 }
+                ovl->status = AIO_STATUS_ON_HOLD;
+                break;
+            default:
+                assert(completionKey == IOCPKEY_IO && num_fds > 0);
+                cpc_overlapped *ovl = (cpc_overlapped*) poverlapped;
+                thread = ovl->thread;
+                cont = get_cont(thread);
+                if(thread->state == STATE_DETACHED) {
+                    if(ovl->status == AIO_STATUS_ON_HOLD) {
+                        cpc_continuation_patch(cont, sizeof(int64_t), &io_rc);
+                        rc = threadpool_schedule(thread->sched->pool,
+                                                 &perform_detach, (void*)thread);
+                        if (rc < 0) {
+                            perror("threadpool_schedule");
+                            exit(1);
+                        }
+                        break;
+                    }
+                    ovl->result = io_rc;
+                    ovl->status = AIO_STATUS_DONE;
+                    break;
+                }
+                num_fds--;
                 if(thread->condvar) {
                     cond_dequeue_1(&thread->condvar->queue, thread);
                     thread->condvar = NULL;

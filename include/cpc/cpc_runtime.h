@@ -78,13 +78,10 @@ extern void cpc_print_continuation(struct cpc_continuation *c, char *s);
 
 typedef cpc_continuation *cpc_function(cpc_continuation *);
 
-/* If synchronous success, return the number of bytes of the IO.
-   If the operation is pending, return the negative value: -ERROR_IO_PENDING or
-   -WSA_IO_PENDING.
-   Else (error), return the negative value of the error code.
-   You should reset the OVERLAPPED structure, and set Offset and OffsetHigh
-   fields as the syscall required it. */
-typedef int64_t (*cpc_async_prim)(HANDLE, void *, OVERLAPPED *);
+typedef struct cpc_overlapped cpc_overlapped;
+cpc_overlapped *cpc_get_overlapped(DWORD offset, DWORD offsetHigh);
+void cpc_set_overlapped(cpc_overlapped *ovl, DWORD offset, DWORD offsetHigh);
+void cpc_free_overlapped(cpc_overlapped *ovl);
 
 struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);
@@ -163,8 +160,8 @@ extern int cpc_io_associate_with_completion_port(HANDLE handle);
 #ifndef NO_CPS_PROTO
 #define CPC_NO_RETAIN_ATTRIBUTE __attribute__((cpc_no_retain))
 
-extern cps int64_t cpc_call_async_prim(HANDLE handle, cpc_async_prim f,
-                                       void * closure, cpc_condvar *cond);
+extern cps int cpc_aio_wait(HANDLE handle, cpc_overlapped *ovl,
+                            cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_yield(void);
