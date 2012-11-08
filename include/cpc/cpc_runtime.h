@@ -160,7 +160,7 @@ extern int cpc_io_associate_with_completion_port(HANDLE handle);
 #ifndef NO_CPS_PROTO
 #define CPC_NO_RETAIN_ATTRIBUTE __attribute__((cpc_no_retain))
 
-extern cps int cpc_aio_wait(HANDLE handle, cpc_overlapped *ovl,
+extern cps int64_t cpc_aio_wait(HANDLE handle, cpc_overlapped *ovl,
                             cpc_condvar *cond);
 extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);

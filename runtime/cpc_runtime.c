@@ -479,8 +479,6 @@ dequeue_other(cpc_thread *thread)
 {
     if(thread->state == STATE_SLEEPING)
         timed_dequeue_1(&sleeping, thread);
-    else if (thread->state == STATE_IO_PENDING)
-        CancelIoEx(thread->performed_handle, &thread->overlapped);
     else
         assert(thread->state == STATE_UNKNOWN);
     thread->state = STATE_UNKNOWN;
@@ -602,14 +600,20 @@ cps_expand1(int,cpc_wait, cpc_condvar *, cond)
 void
 cpc_signal(cpc_condvar *cond)
 {
-    int64_t rc64 = CPC_CONDVAR;
+    int rc = CPC_CONDVAR;
     assert(!IS_DETACHED);
     cpc_thread *thread = cond_dequeue(&cond->queue);
     if(thread == NULL)
         return;
     assert(thread->condvar == cond);
     thread->condvar = NULL;
-    cpc_continuation_patch(get_cont(thread), sizeof(int64_t), &rc64);
+    if (thread->state == STATE_IO_PENDING) {
+        /* The cancelled IO will produce a completion packet. */
+        rc = CancelIoEx(thread->performed_handle, &thread->overlapped);
+        assert(rc);
+        continue;
+    }
+    cpc_continuation_patch(get_cont(thread), sizeof(int), &rc);
     dequeue_other(thread);
     enqueue(&ready, thread);
 }
@@ -617,7 +621,7 @@ cpc_signal(cpc_condvar *cond)
 void
 cpc_signal_all(cpc_condvar *cond)
 {
-    int64_t rc64 = CPC_CONDVAR;
+    int rc = CPC_CONDVAR;
     cpc_thread *thread;
 
     assert(!IS_DETACHED);
@@ -627,7 +631,13 @@ cpc_signal_all(cpc_condvar *cond)
             break;
         assert(thread->condvar == cond);
         thread->condvar = NULL;
-        cpc_continuation_patch(get_cont(thread), sizeof(int64_t), &rc64);
+        if (thread->state == STATE_IO_PENDING) {
+            /* The cancelled IO will produce a completion packet. */
+            rc = CancelIoEx(thread->performed_handle, &thread->overlapped);
+            assert(rc);
+            continue;
+        }
+        cpc_continuation_patch(get_cont(thread), sizeof(int), &rc);
         dequeue_other(thread);
         enqueue(&ready, thread);
     }
@@ -696,6 +706,8 @@ cpc_free_overlapped(cpc_overlapped *ovl)
     free(ovl);
 }
 
+/* cpc_aio_wait breaks the invariant consisting to execute the thread at the
+   next loop iteration when aborded. However, this is probably the case. */
 cps_expand3(int64_t,
             cpc_aio_wait,
             HANDLE, handle,
@@ -729,7 +741,7 @@ cps_expand3(int64_t,
 void
 cpc_signal_fd(HANDLE handle, int direction)
 {
-    CancelIo(handle);
+    CancelIoEx(handle, NULL);
 }
 
 /*** cpc_link ****/
@@ -1078,7 +1090,7 @@ cpc_main_loop(void)
                     if(ovl->status == AIO_STATUS_ON_HOLD) {
                         cpc_continuation_patch(cont, sizeof(int64_t), &io_rc);
                         rc = threadpool_schedule(thread->sched->pool,
-                                                 &perform_detach, (void*)thread);
+                                                 &perform_detach,(void*)thread);
                         if (rc < 0) {
                             perror("threadpool_schedule");
                             exit(1);
