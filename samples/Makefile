@@ -3,7 +3,7 @@ CPC='../bin/cpc'
 CDEBUGFLAGS=-Wall -g
 CLIBS=-I ../include
 
-CFLAGS+=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
+CFLAGS+=$(CDEBUGFLAGS) $(EXTRA_DEFINES) -Os
 
 LDLIBS=-L../runtime -lcpc -lm -lWs2_32 -lMswsock
 
