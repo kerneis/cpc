@@ -271,6 +271,5 @@ handle_connection(cpc_handle_t sock, char *buf, DWORD nbytes)
       free(fn);
  fail:
     cpc_close_handle(sock);
-    free(buf);
     return;
 }
