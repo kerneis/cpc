@@ -611,7 +611,7 @@ cpc_signal(cpc_condvar *cond)
         /* The cancelled IO will produce a completion packet. */
         rc = CancelIoEx(thread->performed_handle, &thread->overlapped);
         assert(rc);
-        continue;
+        return;
     }
     cpc_continuation_patch(get_cont(thread), sizeof(int), &rc);
     dequeue_other(thread);
