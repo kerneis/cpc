@@ -1758,7 +1758,7 @@ class addDefaultArgs file =
   | _ -> SkipChildren
 end
 
-(******** Insert goto after cps assignment and returns before cpc_done *******)
+(******** Insert goto after cps assignment *******)
 
 let rec insert_gotos il =
   let rec split acc l = match l with
@@ -2422,9 +2422,10 @@ let stages () = [
     visitCilFileSameGlobals (new removeNastyExpressions) file);
     ]
   ) @ [
+  (* This needs to be done after addEnvStruct in the case of --ecpc *)
   ("Handle assignment cps return values\n", fun file ->
   visitCilFileSameGlobals (new cpsReturnValues) file);
-  ("Insert gotos after cps assignments and returns after cpc_done\n",
+  ("Insert gotos after cps assignments\n",
   fun file -> visitCilFileSameGlobals (new insertGotos) file);
   ("Cps marking\n", fun file ->
   cps_marking file);
