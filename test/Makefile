@@ -440,9 +440,9 @@ testdir/% :
 
 
 merge-ar:
-	cd small2; $(CILHOME)/bin/cilly --merge -c merge-ar.c merge-twice-1.c
-	cd small2; $(CILHOME)/bin/cilly --merge --mode=AR cr libmerge.a merge-ar.o merge-twice-1.o
-	cd small2; $(CILHOME)/bin/cilly --merge libmerge.a -o merge-ar
+	cd small2; $(CILHOME)/bin/cilly --dontcpc --merge -c merge-ar.c merge-twice-1.c
+	cd small2; $(CILHOME)/bin/cilly --dontcpc --merge --mode=AR cr libmerge.a merge-ar.o merge-twice-1.o
+	cd small2; $(CILHOME)/bin/cilly --dontcpc --merge libmerge.a -o merge-ar
 
 #######
 #######  C-TORTURE
