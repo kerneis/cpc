@@ -4341,7 +4341,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
         (* text "/*[" ++ self#pAttrParam () a ++ text "]*/" *) nil, false
 
     (* remove cpc attributes *)
-    | s, _ when Str.first_chars s 4 = "cpc_" -> text "", false
+    | s, _ when String.length s >= 4 && Str.first_chars s 4 = "cpc_" -> text "", false
 
     | _ -> (* This is the dafault case *)
         (* Add underscores to the name *)
