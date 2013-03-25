@@ -237,6 +237,7 @@ let rec xform_switch_stmt s = begin
   ) s.labels ;
   match s.skind with
   | Instr _ | Return _ | Goto _ -> ()
+  | ComputedGoto _ -> E.s (E.bug "CPC should run with computed gotos disabled.")
   | Break(l) -> if (not(!break_dest == dummyStmt)) then
                 s.skind <- Goto(ref !break_dest,l);
                 ignore(recordGoto s)
@@ -752,6 +753,7 @@ class markCps = fun file -> object(self)
     (* Control flow in cps context *)
     | Goto (g, _) when c.cps_con ->
         raise (FunctionalizeGoto (!g,c))
+    | ComputedGoto _ -> E.s (E.bug "CPC should run with computed gotos disabled.")
     | Break _ | Continue _ when c.cps_con ->
         raise (TrivializeStmt c.enclosing_stmt);
     | If _ | Switch _ | Loop _ when c.cps_con ->
@@ -2059,6 +2061,7 @@ let rec stmtFallsThrough (s: stmt) : bool =
     Instr _ -> true (* conservative, ignoring exit() etc. *)
   | Return _ | Break _ | Continue _ -> false
   | Goto _ -> false
+  | ComputedGoto _ -> E.s (E.bug "CPC should run with computed gotos disabled.")
   | If (_, b1, b2, _) -> 
       blockFallsThrough b1 || blockFallsThrough b2
   | Switch (e, b, targets, _) -> 
@@ -2105,6 +2108,7 @@ and blockFallsThrough b =
 and stmtCanBreak (s: stmt) : bool = 
   match s.skind with
     Instr _ | Return _ | Continue _ | Goto _ -> false
+  | ComputedGoto _ -> E.s (E.bug "CPC should run with computed gotos disabled.")
   | Break _ -> true
   | If (_, b1, b2, _) -> 
       blockCanBreak b1 || blockCanBreak b2
