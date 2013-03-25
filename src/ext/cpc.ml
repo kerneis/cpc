@@ -1647,8 +1647,14 @@ class cpsReturnValues = object(self)
       begin match r with
       | Some _ when (typeSig typ = typeSig voidType) -> (* Wrong assignment *)
           E.s (E.bug "Assignment of a function returning void: %a" d_instr i);
-      | Some (Var _, NoOffset) -> SkipChildren (* Simple good assignment *)
-      | Some l -> (* Some other valid but complex assignment *)
+      | Some (Var v, NoOffset) when (not v.vglob && v.vstorage != Static) ->
+          (* Simple assignment to a local, non-static variable: do nothing *)
+          SkipChildren
+      | Some l ->
+          (* Some other valid but complex assignment, including
+             assignment to global and static variables, which cannot
+             be patched directly.
+          *)
           let v = makeTempVar ef typ in
           ChangeTo [
             Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc);

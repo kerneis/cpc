@@ -1,6 +1,6 @@
 #include <cpc/cpc_runtime.h>
 /* EXPECTED OUTPUT
-0 17 16 33
+0 17 16 8 33
 * END OF OUTPUT */
 
 #include <stdio.h>
@@ -13,6 +13,8 @@ cps int foo(int r){
     set_glob();
     x = identity(glob);
     h(r, x+1, x);
+    glob = identity(8);
+    printf("%d ", (int) glob);
     return 33;
 }
 int main(){
