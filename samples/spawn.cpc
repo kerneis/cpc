@@ -1,0 +1,25 @@
+#include <cpc/cpc_runtime.h>
+/* EXPECTED OUTPUT
+1
+* END OF OUTPUT */
+
+#include <stdio.h>
+int main(){
+    /* Check that local variables and labels are well recorded and restored in
+    cpc_spawn. Also check that cpc_spawn returns void. */
+    int x = 1;
+    cpc_spawn {
+        int x = 2;
+        if(x == 2) goto call_f;
+        return;
+call_f:
+        f();
+    }
+    cpc_main_loop();
+    if(x != 2) goto exit;
+    /* This one must be after the goto to trigger the bug */
+    cps void f() { printf("%d\n", x); }
+    printf("fail\n");
+exit:
+    return 0;
+}

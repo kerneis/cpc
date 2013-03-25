@@ -5740,6 +5740,9 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
       (*let oldenv = H.copy env in
       let oldgenv = H.copy genv in*)
       let targethash = H.copy gotoTargetHash in
+      let backpatchgotos = H.copy backPatchGotos in
+      let labelstmt = H.copy labelStmt in
+      initLabels ();
       if !detachedVars <> [] then (
       E.s (error "Internal function %s forbidden inside an attached or detached \
       block (at %a)." n d_loc funloc));
@@ -6191,6 +6194,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               (*copy_into oldenv env;
               copy_into oldgenv genv;*)
               copy_into targethash gotoTargetHash;
+              copy_into backpatchgotos backPatchGotos;
+              copy_into labelstmt labelStmt;
               res
             end
           with e when continueOnError -> begin
@@ -6213,6 +6218,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
               (*copy_into oldenv env;
               copy_into oldgenv genv;*)
               copy_into targethash gotoTargetHash;
+              copy_into backpatchgotos backPatchGotos;
+              copy_into labelstmt labelStmt;
               res
             end
           end)
@@ -6742,7 +6749,7 @@ and doStatement (s : A.statement) : chunk =
           the spawned thread to the default scheduler anyway (at %a)." d_loc loc'); 
         let mkSpawn f args = mkStmt (CpcSpawn (f, args, loc')) in
         currentLoc := loc';
-        let name = Printf.sprintf "__cpc_spawn%d" (newVID()) in
+        let name = Printf.sprintf "__%s_spawn%d" !currentFunctionFDEC.svar.vname (newVID()) in
         let decl = A.PROTO(A.JUSTBASE, [], false) in
         let fundef = A.FUNDEF (([A.SpecCPS; A.SpecType A.Tvoid],(name,decl,[],loc)),
             { A.blabels = []; A.battrs = []; A.bstmts = [s] }, loc, loc) in

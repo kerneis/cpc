@@ -390,7 +390,7 @@ let timestamp () =
 
 let make_label =
   let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "add_goto%d" !i
+  fun () -> incr i; Printf.sprintf "pc%d"  !i
 
 let add_goto src dst =
   assert (src != dummyStmt && dst != dummyStmt);
@@ -891,8 +891,7 @@ class cpsConverter = fun file ->
     match i with
     (* Cps call with or without assignment (we don't care at this level) *)
     | Call (_, Lval (Var f, NoOffset), args, _) -> pre @ [
-      (* cc = new_arglist_fun(... args ..., cc);
-         cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
+      (* cc = new_arglist_fun(... args ..., cc); *)
         Call (
           Some(Var cc , NoOffset),
           (try List.assoc f newarglist_map
@@ -901,13 +900,7 @@ class cpsConverter = fun file ->
           args@[Lval(Var cc, NoOffset)],
           locUnknown
         );
-        Call (
-          Some(Var cc , NoOffset),
-          Lval(Var cpc_push, NoOffset),
-          [Lval(Var cc, NoOffset);
-          mkCast (addr_of f) cpc_fun_ptr],
-          locUnknown
-        )] @ debug "continuation_push" @ post
+        ] @ debug "continuation_push" @ post
     | _ -> E.s (E.bug "Unexpected instruction in cps conversion: %a\n"
         d_instr i)
 
@@ -1002,8 +995,8 @@ class cpsConverter = fun file ->
           (if !aligned_continuations then []
            else [Attr("packed",[])]) in
       let comptag = GCompTag (arglist_struct, locUnknown) in
-      let new_arglist_fun = emptyFunction (v.vname^"_new_arglist") in
-      let cont_name = Printf.sprintf "cpc__continuation_%d" (newVID()) in
+      let new_arglist_fun = emptyFunction (v.vname^"_push") in
+      let cont_name = Printf.sprintf "cpc_cont_%d" (newVID()) in
       let new_args = Some (args@[cont_name,cpc_cont_ptr,[]]) in
       let new_arglist_type = TFun (cpc_cont_ptr, new_args, false, []) in
       let temp_arglist =
@@ -1015,15 +1008,16 @@ class cpsConverter = fun file ->
       new_arglist_fun.svar.vinline <- true;
       new_arglist_fun.svar.vstorage <- Static;
       new_arglist_fun.sbody <- (
-        let field_args, last_arg = cut_last new_arglist_fun.sformals in
+        let field_args, continuation= cut_last new_arglist_fun.sformals in
         mkBlock ([mkStmt(Instr (
           (* XXX DEBUGING *)
           (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
-          (* temp_arglist = cpc_alloc(&last_arg,(int)sizeof(arglist_struct)) *)
+          (* temp_arglist = cpc_alloc(&continuation,(int)sizeof(arglist_struct)) *)
           Call(
-            Some (Var temp_arglist, NoOffset),
+            (if field_args = [] then None (* avoid unused variable warning *)
+            else Some (Var temp_arglist, NoOffset)),
             Lval (Var cpc_alloc, NoOffset),
-            [addr_of last_arg;
+            [addr_of continuation;
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
             locUnknown
             ) ::
@@ -1034,10 +1028,19 @@ class cpsConverter = fun file ->
               Lval(Var v, NoOffset),
               locUnknown
             )
-          ) field_args arglist_struct.cfields)));
-        (* return last_arg *)
+          ) field_args arglist_struct.cfields)
+          @
+          (* cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
+          [Call (
+          Some(Var continuation , NoOffset),
+          Lval(Var cpc_push, NoOffset),
+          [Lval(Var continuation, NoOffset);
+          mkCast (addr_of v) cpc_fun_ptr],
+          locUnknown)]
+          ));
+        (* return continuation *)
         mkStmt(Return (
-          Some (Lval(Var last_arg,NoOffset)),
+          Some (Lval(Var continuation,NoOffset)),
           locUnknown))
       ]));
       struct_map <- (v, arglist_struct) :: struct_map;
@@ -1047,16 +1050,16 @@ class cpsConverter = fun file ->
         (* mark it as completed (will be done later for non-extern function *)
         v.vcps <- false;
         v.vtype <- TFun(cpc_cont_ptr,
-          Some ["cpc_current_continuation", cpc_cont_ptr, []], va, attr)
+          Some ["cpc_cont", cpc_cont_ptr, []], va, attr)
         end;
-      ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
+      ChangeTo [g;comptag;GFun (new_arglist_fun, locUnknown)]
       end
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
   true};sformals = args} as fd, _) as g ->
-      let new_arg = ["cpc_current_continuation", cpc_cont_ptr, []] in
+      let new_arg = ["cpc_cont", cpc_cont_ptr, []] in
       let arglist_struct = List.assoc fd.svar struct_map in
       let cpc_arguments =
-        makeLocalVar fd "cpc_arguments"
+        makeLocalVar fd "cpc_args"
         (TPtr(TComp(arglist_struct, []),[])) in
       (* add former arguments to slocals *)
       fd.slocals <- args @ fd.slocals;
@@ -1074,7 +1077,8 @@ class cpsConverter = fun file ->
           (* cpc_arguments = cpc_dealloc(cpc_current_continuation,
                 (int)sizeof(arglist_struct)) *)
           Call(
-            Some (Var cpc_arguments, NoOffset),
+            (if args = [] then None (* avoid unused variable warning *)
+            else Some (Var cpc_arguments, NoOffset)),
             Lval (Var cpc_dealloc, NoOffset),
             [Lval (Var current_continuation, NoOffset);
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
@@ -1652,6 +1656,7 @@ class cpsReturnValues = object(self)
           ]
       | None when  (typeSig typ <> typeSig voidType) -> (* Missing assignment *)
           let v = makeTempVar ef typ in
+          v.vattr <- [Attr("unused", [])];
           trace (dprintf "Ignoring a cps return value: %a\n" d_instr i);
           ChangeTo [
           Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc)]
@@ -2039,8 +2044,12 @@ end
 
 exception GotoContent of stmt list
 
-let make_function_name base =
-  Printf.sprintf "__cpc_%s_%s" base (timestamp ())
+let make_function_name toplevel label =
+  (* Remove leading underscores *)
+  let r = Str.regexp "^_*" in
+  let t = Str.replace_first r "" toplevel in
+  let l = Str.replace_first r "" label in
+  Printf.sprintf "__%s_%s" t l
 
 exception FoundType of typ
 
@@ -2130,11 +2139,11 @@ and blockCanBreak b =
        first we can't be fallen through. *)
 let goto_method = ref 1
 
-class functionalizeGoto start enclosing_fun file =
+class functionalizeGoto start enclosing_fun toplevel file =
       let last_var = find_last_var start file in
       let label = match List.find is_label start.labels with
         | Label(l,_,_) -> l | _ -> assert false in
-      let fd = emptyFunction (make_function_name label) in
+      let fd = emptyFunction (make_function_name toplevel.svar.vname label) in
       (* the return type of the functionalized chunk *)
       let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
       let () = fd.svar.vcps <- true in
@@ -2255,18 +2264,24 @@ and return the nearest enclosing loop/switch statement *)
 let rec functionalize start f =
   begin try
     let enclosing = ref dummyFunDec in
+    let toplevel = ref dummyFunDec in
     let findEnclosing = 
       object(self)
         inherit (enclosingFunction dummyFunDec)
 
         val mutable nearest_loop = dummyStmt
+        val mutable current_top = dummyFunDec
         val mutable seen_start = false
         val mutable check_loops = false
+
+        method vglob = function
+        | GFun (fd,_) -> current_top <- fd; DoChildren
+        | _ -> SkipChildren
 
         method vstmt s =
           assert(check_loops =>  seen_start);
           if s == start then (seen_start <- true; check_loops <- true;
-          enclosing := ef);
+          enclosing := ef; toplevel := current_top);
           match s.skind with
           | Break _ | Continue _ when check_loops ->
               raise (BreakContinue nearest_loop)
@@ -2289,7 +2304,7 @@ let rec functionalize start f =
 
       end
     in  visitCilFileSameGlobals findEnclosing f;
-    visitCilFileSameGlobals (new functionalizeGoto start !enclosing f) f;
+    visitCilFileSameGlobals (new functionalizeGoto start !enclosing !toplevel f) f;
   with
   | BreakContinue s ->
       assert( s != dummyStmt);
