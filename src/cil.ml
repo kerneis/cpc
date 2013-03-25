@@ -80,7 +80,11 @@ let c99Mode = ref false (* True to handle ISO C 99 vs 90 changes.
    Note that CIL assumes that optimization is always enabled ;-) *)
 let oldstyleExternInline = ref false
 
+let makeStaticGlobal = ref true
+
 let useLogicalOperators = ref false
+
+let useComputedGoto = ref false
 
 
 module M = Machdep
@@ -431,6 +435,11 @@ and varinfo = {
 
     mutable vdecl: location;            (** Location of variable declaration *)
 
+    vinit: initinfo;
+    (** Optional initializer.  Only used for static and global variables.
+     * Initializers for other types of local variables are turned into
+     * assignments. *)
+
     mutable vid: int;  (** A unique integer identifier.  *)
     mutable vaddrof: bool;              (** True if the address of this
                                             variable is taken. CIL will set 
@@ -507,6 +516,7 @@ and exp =
                                         * construct one of these. Apply to an 
                                         * lvalue of type [T] yields an 
                                         * expression of type [TPtr(T)] *)
+  | AddrOfLabel of stmt ref
 
   | StartOf    of lval   (** There is no C correspondent for this. C has 
                           * implicit coercions from an array to the address 
@@ -740,6 +750,9 @@ and stmtkind =
 
   | Goto of stmt ref * location         (** A goto statement. Appears from 
                                             actual goto's in the code. *)
+
+  | ComputedGoto of exp * location         
+
   | Break of location                   (** A break to the end of the nearest 
                                              enclosing Loop or Switch *)
   | Continue of location                (** A continue to the start of the 
@@ -1119,6 +1132,7 @@ let rec get_stmtLoc (statement : stmtkind) =
     | Instr(hd::tl) -> get_instrLoc(hd)
     | Return(_, loc) -> loc
     | Goto(_, loc) -> loc
+    | ComputedGoto(_, loc) -> loc
     | Break(loc) -> loc
     | Continue(loc) -> loc
     | If(_, _, _, loc) -> loc
@@ -1277,6 +1291,9 @@ let doubleType = TFloat(FDouble, [])
 
 (* An integer type that fits pointers. Initialized by initCIL *)
 let upointType = ref voidType 
+
+(* An integer type that fits a pointer difference. Initialized by initCIL *)
+let ptrdiffType = ref voidType
 
 (* An integer type that fits wchar_t. Initialized by initCIL *)
 let wcharKind = ref IChar
@@ -1800,6 +1817,7 @@ let getParenthLevel (e: exp) =
                                         (* Unary *)
   | CastE(_,_) -> 30
   | AddrOf(_) -> 30
+  | AddrOfLabel(_) -> 30
   | StartOf(_) -> 30
   | UnOp((Neg|BNot|LNot),_,_) -> 30
 
@@ -1900,6 +1918,7 @@ let rec typeOf (e: exp) : typ =
   | Question (_, _, _, t)
   | CastE (t, _) -> t
   | AddrOf (lv) -> TPtr(typeOfLval lv, [])
+  | AddrOfLabel (lv) -> voidPtrType
   | StartOf (lv) -> begin
       match unrollType (typeOfLval lv) with
         TArray (t,_, a) -> TPtr(t, a)
@@ -3338,6 +3357,19 @@ class defaultCilPrinterClass : cilPrinter = object (self)
         text "__alignof__(" ++ self#pExp () e ++ chr ')'
     | AddrOf(lv) -> 
         text "& " ++ (self#pLvalPrec addrOfLevel () lv)
+    | AddrOfLabel(sref) -> begin
+        (* Grab one of the labels *)
+        let rec pickLabel = function
+            [] -> None
+          | Label (l, _, _) :: _ -> Some l
+          | _ :: rest -> pickLabel rest
+        in
+        match pickLabel !sref.labels with
+          Some lbl -> text ("&& " ^ lbl)
+        | None -> 
+            ignore (error "Cannot find label for target of address of label");
+            text "&& __invalid_label"
+    end
           
     | StartOf(lv) -> self#pLval () lv
 
@@ -3783,6 +3815,12 @@ class defaultCilPrinterClass : cilPrinter = object (self)
             text "goto __invalid_label;"
     end
 
+    | ComputedGoto(e, l) ->
+        self#pLineDirective l
+          ++ text "goto *("
+          ++ self#pExp () e
+          ++ text ");"
+
     | Break l ->
         self#pLineDirective l
           ++ text "break;"
@@ -4101,8 +4139,12 @@ class defaultCilPrinterClass : cilPrinter = object (self)
       ++ (align
             (* locals. *)
             ++ line
-            ++ (docList ~sep:line (fun vi -> self#pVDecl () vi ++ text ";") 
-                  () f.slocals)
+            ++ (docList ~sep:line
+                (fun vi -> match vi.vinit.init with
+                | None -> self#pVDecl () vi ++ text ";"
+                | Some i -> self#pVDecl () vi ++ text " = " ++
+                    self#pInit () i ++ text ";")
+                () f.slocals)
             ++ line ++ line
             (* the body *)
             ++ ((* remember the declaration *) currentFormals <- f.sformals; 
@@ -4653,6 +4695,7 @@ class plainCilPrinterClass =
 
   | StartOf lv -> dprintf "StartOf(%a)" self#pLval lv
   | AddrOf (lv) -> dprintf "AddrOf(%a)" self#pLval lv
+  | AddrOfLabel (sref) -> dprintf "AddrOfLabel(%a)" self#pStmt !sref
 
 
 
@@ -4813,7 +4856,7 @@ let newVID () =
   t
 
    (* Make a varinfo. Used mostly as a helper function below  *)
-let makeVarinfo global name typ =
+let makeVarinfo global name ?init typ =
   (* Strip const from type for locals *)
   let vi = 
     { vname = name;
@@ -4821,6 +4864,7 @@ let makeVarinfo global name typ =
       vglob = global;
       vtype = if global then typ else typeRemoveAttributes ["const"] typ;
       vdecl = lu;
+      vinit = {init=init};
       vinline = false;
       vcps = false;
       vattr = [];
@@ -4836,14 +4880,14 @@ let copyVarinfo (vi: varinfo) (newname: string) : varinfo =
   let vi' = {vi with vname = newname; vid = newVID () } in
   vi'
 
-let makeLocal fdec name typ = (* a helper function *)
+let makeLocal fdec name typ init = (* a helper function *)
   fdec.smaxid <- 1 + fdec.smaxid;
-  let vi = makeVarinfo false name typ in
+  let vi = makeVarinfo false name ?init:init typ in
   vi
   
    (* Make a local variable and add it to a function *)
-let makeLocalVar fdec ?(insert = true) name typ =
-  let vi = makeLocal fdec name typ in
+let makeLocalVar fdec ?(insert = true) name ?init typ =
+  let vi = makeLocal fdec name typ init in
   if insert then fdec.slocals <- fdec.slocals @ [vi];
   vi
 
@@ -4911,7 +4955,7 @@ let setFunctionTypeMakeFormals (f: fundec) (t: typ) =
       f.svar.vtype <- t; 
       f.sformals <- [];
       
-      f.sformals <- Util.list_map (fun (n,t,a) -> makeLocal f n t) args;
+      f.sformals <- Util.list_map (fun (n,t,a) -> makeLocal f n t None) args;
 
       setFunctionType f t
 
@@ -4932,7 +4976,7 @@ let makeFormalVar fdec ?(where = "$") name typ : varinfo =
   (* Search for the insertion place *)
   let thenewone = ref fdec.svar in (* Just a placeholder *)
   let makeit () : varinfo = 
-    let vi = makeLocal fdec name typ in
+    let vi = makeLocal fdec name typ None in
     thenewone := vi;
     vi
   in
@@ -5147,6 +5191,7 @@ and childrenExp (vis: cilVisitor) (e: exp) : exp =
   | AddrOf lv -> 
       let lv' = vLval lv in
       if lv' != lv then AddrOf lv' else e
+  | AddrOfLabel _ -> e
   | StartOf lv -> 
       let lv' = vLval lv in
       if lv' != lv then StartOf lv' else e
@@ -5285,6 +5330,9 @@ and childrenStmt (toPrepend: instr list ref) : cilVisitor -> stmt -> stmt =
   let skind' = 
     match s.skind with
       Break _ | Continue _ | Goto _ | Return (None, _) -> s.skind
+    | ComputedGoto (e, l) ->
+         let e' = fExp e in
+         if e' != e then ComputedGoto (e', l) else s.skind
     | Return (Some e, l) -> 
         let e' = fExp e in
         if e' != e then Return (Some e', l) else s.skind
@@ -5435,7 +5483,11 @@ and visitCilVarDecl (vis : cilVisitor) (v : varinfo) : varinfo =
   doVisit vis (vis#vvdec v) childrenVarDecl v 
 and childrenVarDecl (vis : cilVisitor) (v : varinfo) : varinfo =
   v.vtype <- visitCilType vis v.vtype;
-  v.vattr <- visitCilAttributes vis v.vattr;  
+  v.vattr <- visitCilAttributes vis v.vattr;
+  (match v.vinit.init with
+    None -> ()
+  | Some i -> let i' = visitCilInit vis v NoOffset i in
+    if i' != i then v.vinit.init <- Some i');
   v
 
 and visitCilAttributes (vis: cilVisitor) (al: attribute list) : attribute list=
@@ -5577,11 +5629,6 @@ and childrenGlobal (vis: cilVisitor) (g: global) : global =
       if v' != v then GVarDecl (v', l) else g
   | GVar (v, inito, l) -> 
       let v' = visitCilVarDecl vis v in
-      (match inito.init with
-        None -> ()
-      | Some i -> let i' = visitCilInit vis v NoOffset i in 
-        if i' != i then inito.init <- Some i');
-
       if v' != v then GVar (v', inito, l) else g
 
   | GPragma (a, l) -> begin
@@ -5842,7 +5889,7 @@ let rec peepHole1 (* Process one instruction and possibly replace it *)
           peepHole1 doone b.bstmts; 
           peepHole1 doone h.bstmts;
           s.skind <- TryExcept(b, (doInstrList il, e), h, l);
-      | Return _ | Goto _ | Break _ | Continue _ -> ()
+      | Return _ | Goto _ | ComputedGoto _ | Break _ | Continue _ -> ()
       | CpcSpawn _ -> ()
       | CpcFun _ -> ())
     ss
@@ -5878,7 +5925,7 @@ let rec peepHole2  (* Process two instructions and possibly replace them both *)
           peepHole2 dotwo h.bstmts;
           s.skind <- TryExcept (b, (doInstrList il, e), h, l)
 
-      | Return _ | Goto _ | Break _ | Continue _ -> ()
+      | Return _ | Goto _ | ComputedGoto _ | Break _ | Continue _ -> ()
       | CpcSpawn _ -> ()
       (*| CpcFork (s, _) -> peepHole2 dotwo [s]*)
       | CpcFun _ -> ())
@@ -6056,6 +6103,7 @@ let rec isConstant = function
         -> vi.vglob && isConstantOffset off
   | AddrOf (Mem e, off) | StartOf(Mem e, off) 
         -> isConstant e && isConstantOffset off
+  | AddrOfLabel _ -> true
 
 and isConstantOffset = function
     NoOffset -> true
@@ -6481,21 +6529,22 @@ let trylink source dest_option = match dest_option with
 
 
 (** Cmopute the successors and predecessors of a block, given a fallthrough *)
-let rec succpred_block b fallthrough =
+let rec succpred_block b fallthrough rlabels =
   let rec handle sl = match sl with
     [] -> ()
-  | [a] -> succpred_stmt a fallthrough 
+  | [a] -> succpred_stmt a fallthrough rlabels
   | hd :: ((next :: _) as tl) -> 
-      succpred_stmt hd (Some next) ;
+      succpred_stmt hd (Some next) rlabels;
       handle tl 
   in handle b.bstmts
 
 
-and succpred_stmt s fallthrough = 
+and succpred_stmt s fallthrough rlabels =
   match s.skind with
     Instr _ -> trylink s fallthrough
   | Return _ -> ()
   | Goto(dest,l) -> link s !dest
+  | ComputedGoto(e,l) ->  List.iter (link s) rlabels
   | Break _  
   | Continue _ 
   | Switch _ ->
@@ -6504,23 +6553,23 @@ and succpred_stmt s fallthrough =
   | If(e1,b1,b2,l) -> 
       (match b1.bstmts with
         [] -> trylink s fallthrough
-      | hd :: tl -> (link s hd ; succpred_block b1 fallthrough )) ;
+      | hd :: tl -> (link s hd ; succpred_block b1 fallthrough rlabels )) ;
       (match b2.bstmts with
         [] -> trylink s fallthrough
-      | hd :: tl -> (link s hd ; succpred_block b2 fallthrough ))
+      | hd :: tl -> (link s hd ; succpred_block b2 fallthrough rlabels ))
 
   | Loop(b,l,_,_) -> 
       begin match b.bstmts with
         [] -> failwith "computeCFGInfo: empty loop" 
       | hd :: tl -> 
           link s hd ; 
-          succpred_block b (Some(hd))
+          succpred_block b (Some(hd)) rlabels
       end
 
   | Block(b) -> begin match b.bstmts with
                   [] -> trylink s fallthrough
                 | hd :: tl -> link s hd ;
-                    succpred_block b fallthrough
+                    succpred_block b fallthrough rlabels
                 end
   | TryExcept _ | TryFinally _ -> 
       failwith "computeCFGInfo: structured exception handling not implemented"
@@ -6567,7 +6616,7 @@ let rec xform_switch_stmt s break_dest cont_dest = begin
   | Default(l) -> Label(freshLabel "switch_default",l,false)
   ) s.labels ; 
   match s.skind with
-  | Instr _ | Return _ | Goto _ -> ()
+  | Instr _ | Return _ | Goto _ | ComputedGoto _ -> ()
   | Break(l) -> begin try 
                   s.skind <- Goto(break_dest (),l)
                 with e ->
@@ -6718,6 +6767,25 @@ class registerLabelsVisitor : cilVisitor = object
   method vinst _ = SkipChildren
 end
 
+(* Find all labels-as-value in a function to use them as successors of computed
+ * gotos. Duplicated in src/ext/cfg.ml. *)
+class addrOfLabelFinder slr = object(self)
+    inherit nopCilVisitor
+
+    method vexpr e = match e with
+    | AddrOfLabel sref ->
+        slr := !sref :: (!slr);
+        SkipChildren
+    | _ -> DoChildren
+
+end
+
+let findAddrOfLabelStmts (b : block) : stmt list =
+    let slr = ref [] in
+    let vis = new addrOfLabelFinder slr in
+    ignore(visitCilBlock vis b);
+    !slr
+
 (* prepare a function for computeCFGInfo by removing break, continue,
  * default and switch statements/labels and replacing them with Ifs and
  * Gotos. *)
@@ -6738,7 +6806,8 @@ let computeCFGInfo (f : fundec) (global_numbering : bool) : unit =
   let clear_it = new clear in 
   ignore (visitCilBlock clear_it f.sbody) ;
   f.smaxstmtid <- Some (!sid_counter) ;
-  succpred_block f.sbody (None);
+  let rlabels = findAddrOfLabelStmts f.sbody in
+  succpred_block f.sbody None rlabels;
   let res = List.rev !statements in
   statements := [];
   f.sallstmts <- res;
@@ -6778,6 +6847,7 @@ let initCIL () =
       else E.s(E.unimp "initCIL: cannot find the right ikind for type %s\n" name)
     in      
     upointType := TInt(findIkindSz true !M.theMachine.M.sizeof_ptr, []);
+    ptrdiffType := TInt(findIkindSz false !M.theMachine.M.sizeof_ptr, []);
     kindOfSizeOf := findIkindName !M.theMachine.M.size_t;
     typeOfSizeOf := TInt(!kindOfSizeOf, []);
     wcharKind := findIkindName !M.theMachine.M.wchar_t;

@@ -150,7 +150,7 @@ let rec oneret (f: Cil.fundec) : unit =
     | ({skind=Block b} as s) :: rests -> 
         s.skind <- Block (scanBlock false b);
         s :: scanStmts mainbody rests
-    | ({skind=(Goto _ | Instr _ | Continue _ | Break _ 
+    | ({skind=(Goto _ | ComputedGoto _ | Instr _ | Continue _ | Break _ 
                | TryExcept _ | TryFinally _
                | CpcSpawn _)} as s)
       :: rests -> s :: scanStmts mainbody rests

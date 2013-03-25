@@ -144,6 +144,13 @@ endif
 ifdef CABSONLY
   CILLY+= --cabsonly
 endif
+ifdef COMPUTEDGOTO
+  CILLY+= --useComputedGoto
+endif
+ifdef LOCALINIT
+  CILLY+= --noMakeStaticGlobal
+endif
+
 
 # Disable CPC specific options when running the regular tests
 ifndef CPC
@@ -297,8 +304,8 @@ else
 endif
 
 testrun/% : $(SMALL1)/%.ml
-	$(CAMLC) -noautolink -I $(OBJDIR) unix.$(CMXA) str.$(CMXA) nums.$(CMXA) \
-                 -cclib -lunix -cclib -lstr -cclib -lnums cil.$(CMXA) \
+	$(CAMLC) -I $(OBJDIR) unix.$(CMXA) str.$(CMXA) nums.$(CMXA) \
+                 cil.$(CMXA) \
                  $(EXEOUT) $(basename $<).exe $<
 	$(basename $<).exe
 	echo SUCCESS

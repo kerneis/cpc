@@ -545,7 +545,7 @@ and checkExp (isconst: bool) (e: exp) : typ =
           | MinusPP  -> 
               checkPointerType t1; checkPointerType t2;
               typeMatch t1 t2;
-              typeMatch tres intType;
+              typeMatch tres !ptrdiffType;
               tres
       end
 
@@ -573,6 +573,20 @@ and checkExp (isconst: bool) (e: exp) : typ =
           | _ -> E.s (bug "AddrOf on unknown type")
       end
 
+      | AddrOfLabel (gref) -> begin
+          (* Find a label *)
+          let lab =
+            match List.filter (function Label _ -> true | _ -> false)
+                  !gref.labels with
+              Label (lab, _, _) :: _ -> lab
+            | _ ->
+                ignore (warn "Address of label to block without a label");
+                "<missing label>"
+          in
+          (* Remember it as a target *)
+          gotoTargets := (lab, !gref) :: !gotoTargets;
+          voidPtrType
+      end
       | StartOf lv -> begin
           let tlv = checkLval isconst true lv in
           match unrollType tlv with
@@ -730,8 +744,10 @@ and checkStmt (s: stmt) =
           in
           (* Remember it as a target *)
           gotoTargets := (lab, !gref) :: !gotoTargets
-            
-
+      | ComputedGoto (e, l) ->
+          currentLoc := l;
+          let te = checkExp false e in
+          typeMatch te voidPtrType
       | Return (re,l) -> begin
           currentLoc := l;
           match re, !currentReturnType with
@@ -929,6 +945,8 @@ and checkGlobal = function
         (fun _ -> 
           checkGlobal (GVarDecl (vi, l));
           (* Check the initializer *)
+          if vi.vinit != init then
+              E.s (bug "GVar initializer doesn't match vinit (%s)" vi.vname);
           begin match init.init with
             None -> ()
           | Some i -> ignore (checkInitType i vi.vtype)
@@ -988,7 +1006,7 @@ and checkGlobal = function
               if v.vglob then
                 ignore (warnContext
                           "Local %s has the vglob flag set" v.vname);
-              if v.vstorage <> NoStorage && v.vstorage <> Register then
+              if v.vstorage <> NoStorage && v.vstorage <> Register && v.vstorage <> Static then
                 ignore (warnContext
                           "Local %s has storage %a\n" v.vname
                           d_storage v.vstorage);

@@ -295,7 +295,9 @@ let popGlobals () =
     | GVarDecl (vi, l) :: rest 
       when vi.vstorage != Extern && IH.mem mustTurnIntoDef vi.vid -> 
         IH.remove mustTurnIntoDef vi.vid;
-        revonto (GVar (vi, {init = None}, l) :: tail) rest
+        if vi.vinit.init != None then
+            E.s (E.bug "GVarDecl %s should have empty initializer" vi.vname);
+        revonto (GVar (vi, vi.vinit, l) :: tail) rest
 
     | x :: rest -> revonto (x :: tail) rest
   in
@@ -2604,7 +2606,7 @@ and makeVarInfoCabs
   if cps && not (isFunctionType vtype) then
     ignore (error "cps for a non-function: %s" n);
   let t = 
-    if not isglobal && not isformal then begin
+    if not isglobal && not isformal && not (sto = Static) then begin
       (* Sometimes we call this on the formal argument of a function with no 
        * arguments. Don't call stripConstLocalType in that case *)
 (*      ignore (E.log "stripConstLocalType(%a) for %s\n" d_type vtype n); *)
@@ -2872,24 +2874,12 @@ and doType (nameortype: attributeClass) (* This is AttrName if we are doing
                 E.s (error "Array length %a does not have an integral type.");
               if not allowVarSizeArrays then begin
                 (* Assert that len' is a constant *)
-                let elsz = 
-                  try (bitsSizeOf bt + 7) / 8
-                  with _ -> 1 (** We get this if we cannot compute the size of 
-                                * one element. This can happen, when we define 
-                                * an extern, for example. We use 1 for now *)
-                in 
                 (match constFold true len' with 
                    Const(CInt64(i, ik, _)) ->
-		     (* We want array sizes to be positive, and the byte size
-			to fit in an OCaml int *)
+		     (* We want array sizes to be positive *)
 		     let elems = mkCilint ik i in
                      if compare_cilint elems zero_cilint < 0 then 
                        E.s (error "Length of array is negative");
-		     let size = mul_cilint elems (cilint_of_int elsz) in
-		     begin
-		       try ignore(int_of_cilint size)
-		       with _ -> E.s (error "Length of array is too large")
-		     end
                  | l -> 
                      if isConstant l then 
                        (* e.g., there may be a float constant involved. 
@@ -4641,7 +4631,13 @@ and doExp (asconst: bool)   (* This expression is used as a constant *)
         | Some (e, t) -> finishExp se e t
     end
 
-    | A.LABELADDR l -> begin (* GCC's taking the address of a label *)
+    | A.LABELADDR l when !Cil.useComputedGoto -> begin (* GCC's taking the address of a label *)
+        let ln = lookupLabel l in
+        let gref = ref dummyStmt in
+        addGoto ln gref;
+        finishExp empty (AddrOfLabel gref) voidPtrType
+    end
+    | A.LABELADDR l -> begin
         let l = lookupLabel l in (* To support locallly declared labels *)
         let addrval =
           try H.find gotoTargetHash l
@@ -4730,9 +4726,9 @@ and doBinOp (bop: binop) (e1: exp) (t1: typ) (e2: exp) (t2: typ) : typ * exp =
         (makeCastT e2 t2 (integralPromotion t2)) t1
   | MinusA when isPointerType t1 && isPointerType t2 ->
       let commontype = t1 in
-      intType,
+      !ptrdiffType,
       optConstFoldBinOp false MinusPP (makeCastT e1 t1 commontype) 
-                                      (makeCastT e2 t2 commontype) intType
+                                      (makeCastT e2 t2 commontype) !ptrdiffType
   | (Le|Lt|Ge|Gt|Eq|Ne) when isPointerType t1 && isPointerType t2 ->
       pointerComparison e1 t1 e2 t2
   | (Eq|Ne) when isPointerType t1 && isZero e2 -> 
@@ -4919,7 +4915,7 @@ and doInitializer
   in
   let acc, restl = 
     let so = makeSubobj vi vi.vtype NoOffset in
-    doInit vi.vglob topSetupInit so empty [ (A.NEXT_INIT, inite) ] 
+    doInit (vi.vglob || vi.vstorage = Static) topSetupInit so empty [ (A.NEXT_INIT, inite) ]
   in
   if restl <> [] then 
     ignore (warn "Ignoring some initializers");
@@ -5410,7 +5406,8 @@ and createGlobal (specs : (typ * storage * bool * bool * A.attribute list))
 
         H.add alreadyDefined vi.vname !currentLoc;
         IH.remove mustTurnIntoDef vi.vid;
-        cabsPushGlobal (GVar(vi, {init = init}, !currentLoc));
+        vi.vinit.init <- init;
+        cabsPushGlobal (GVar(vi, vi.vinit, !currentLoc));
         vi
       end else begin
         if not (isFunctionType vi.vtype) 
@@ -5469,7 +5466,7 @@ and createLocal ((_, sto, _, _, _) as specs)
       addLocalToEnv n (EnvVar vi);
       empty
     
-  | _ when sto = Static -> 
+  | _ when sto = Static && !makeStaticGlobal ->
       if debugGlobal then 
         ignore (E.log "createGlobal (local static): %s\n" n);
 
@@ -5505,7 +5502,7 @@ and createLocal ((_, sto, _, _, _) as specs)
           if unrollType vi.vtype != unrollType et then
             vi.vtype <- et;
           if isNotEmpty se then 
-            E.s (error "global static initializer");
+            E.s (error "global static initializer has side-effect");
           (* Maybe the initializer refers to the function itself. 
              Push a prototype for the function, just in case. Hopefully,
              if does not refer to the locals *)
@@ -5513,7 +5510,8 @@ and createLocal ((_, sto, _, _, _) as specs)
           Some ie'
         end
       in
-      cabsPushGlobal (GVar(vi, {init = init}, !currentLoc));
+      vi.vinit.init <- init;
+      cabsPushGlobal (GVar(vi, vi.vinit, !currentLoc));
       empty
 
   (* Maybe we have an extern declaration. Make it a global *)
@@ -5590,9 +5588,15 @@ and createLocal ((_, sto, _, _, _) as specs)
                                   Some (integer (String.length s + 1)),
                                   a)
         | _, _, _ -> ());
-
-        (* Now create assignments instead of the initialization *)
-        se1 @@ se4 @@ (assignInit (Var vi, NoOffset) ie' et empty)
+        if vi.vstorage = Static && not !makeStaticGlobal then begin
+            (* For static variables, use initializer *)
+            if isNotEmpty se4 then
+              E.s (error "local static initializer has side-effect");
+            vi.vinit.init <- Some ie';
+            se1
+        end else
+            (* otherwise create assignments instead of the initialization *)
+            se1 @@ se4 @@ (assignInit (Var vi, NoOffset) ie' et empty)
       end
           
 and doAliasFun vtype (thisname:string) (othername:string) 
@@ -6070,7 +6074,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
                   List.fold_left (fun acc elt -> 
                                       acc && instrFallsThrough elt) true il
               | Return _ | Break _ | Continue _ -> false
-              | Goto _ -> false
+              | Goto _ | ComputedGoto _ -> false
               | If (_, b1, b2, _) -> 
                   blockFallsThrough b1 || blockFallsThrough b2
               | Switch (e, b, targets, _) -> 
@@ -6134,7 +6138,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
             (* will we leave this statement or block with a break command? *)
             and stmtCanBreak (s: stmt) : bool = 
               match s.skind with
-                Instr _ | Return _ | Continue _ | Goto _ -> false
+                Instr _ | Return _ | Continue _ | Goto _ | ComputedGoto _ -> false
               | Break _ -> true
               | If (_, b1, b2, _) -> 
                   blockCanBreak b1 || blockCanBreak b2
@@ -6593,6 +6597,13 @@ and doStatement (s : A.statement) : chunk =
         (* Maybe we need to rename this label *)
         gotoChunk (lookupLabel l) loc'
 
+    | A.COMPGOTO (e, loc) when !Cil.useComputedGoto -> begin
+        let loc' = convLoc loc in
+        currentLoc := loc';
+        (* Do the expression *)
+        let se, e', t' = doExp false e (AExp (Some voidPtrType)) in
+        se @@ s2c(mkStmt(ComputedGoto (e', loc')))
+    end
     | A.COMPGOTO (e, loc) -> begin
         let loc' = convLoc loc in
         if !detachedVars <> [] then (

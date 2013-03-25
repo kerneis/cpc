@@ -693,7 +693,7 @@ sub compile {
     open(OUT, ">$outfile") || die "Cannot create $outfile";
     my $toprintsrc = $srcname; 
     $toprintsrc =~ s|\\|/|g;
-    print OUT "#pragma merger($mtime,\"$toprintsrc\",\"" . 
+    print OUT "#pragma merger(\"$mtime\",\"$toprintsrc\",\"" .
               join(',', @{$ccargs}), "\")\n";
     open(IN, '<', $srcname) || die "Cannot read $srcname";
     while(<IN>) {
@@ -840,7 +840,7 @@ sub separateTrueObjects {
         if($fstline =~ m|CIL|) {
             goto ToMerge;
         } 
-        if($fstline =~ m|^\#pragma merger\((\d+),\".*\",\"(.*)\"\)$|) {
+        if($fstline =~ m|^\#pragma merger\(\"(\d+)\",\".*\",\"(.*)\"\)$|) {
             my $mymtime = $1;
             # Get the CC flags
             my @thisccargs = split(/,/, $2);
@@ -1990,7 +1990,7 @@ sub new {
             "-[DIU]" => { ONEMORE => 1, TYPE => "PREPROC" },
 	    '-H$' =>  { TYPE => 'EARLY_PREPROC'},
             '-idirafter$' => { ONEMORE => 1, TYPE => "PREPROC" },
-            '-include$' => { ONEMORE => 1, TYPE => "PREPROC" },
+            '-include$' => { ONEMORE => 1, TYPE => "EARLY_PREPROC" },
             '-imacros$' => { ONEMORE => 1, TYPE => "PREPROC" },
             '-iprefix$' => { ONEMORE => 1, TYPE => "PREPROC" },
             '-iquote$' => { ONEMORE => 1, TYPE => "PREPROC" },
