@@ -498,6 +498,7 @@ let stmt_in_fun stmt fd =
 exception FoundCompinfo of compinfo
 
 let find_struct name file =
+  let s = lazy begin
   let visitor = object(self)
     inherit mynopCilVisitor
 
@@ -512,10 +513,13 @@ let find_struct name file =
     visitCilFileSameGlobals visitor file;
     E.s (E.bug "compinfo not found for: %s\n" name)
   with FoundCompinfo c -> c
+  end in
+  fun () -> Lazy.force s
 
 exception FoundField of fieldinfo
 
 let find_field struct_name field_name file =
+  let f = lazy begin
   let visitor = object(self)
     inherit mynopCilVisitor
 
@@ -531,10 +535,13 @@ let find_field struct_name field_name file =
   | FoundField f -> f
   | Not_found ->
       E.s (E.bug "fieldinfo not found for: %s in %s\n" field_name struct_name)
+  end in
+  fun () -> Lazy.force f
 
 exception FoundType of typ
 
 let find_type name file =
+  let t = lazy begin
   let visitor = object(self)
     inherit mynopCilVisitor
 
@@ -547,8 +554,11 @@ let find_type name file =
     visitCilFileSameGlobals visitor file;
     E.s (E.bug "typeinfo not found for: %s\n" name)
   with FoundType t -> t
+  end in
+  fun () -> Lazy.force t
 
 let find_function name file =
+  let f = lazy begin
   let visitor = object(self)
     inherit mynopCilVisitor
 
@@ -562,6 +572,8 @@ let find_function name file =
     visitCilFileSameGlobals visitor file;
     E.s (E.bug "function not found: %s\n" name)
   with FoundVar v -> v
+  end in
+  fun () -> Lazy.force f
 
 (******************** CPS Marking ********************************************)
 
@@ -828,9 +840,9 @@ let biggest_alignment = !Machdep.theMachine.Machdep.alignof_aligned
 
 class cpsConverter = fun file ->
   (* Extraction of types, struct, and functions from runtime *)
-  let cpc_cont_ptr =
-    TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
-  let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
+  let cpc_cont = find_struct "cpc_continuation" file in
+  let cpc_cont_ptr () = TPtr(TComp(cpc_cont (), []),[]) in
+  let cpc_fun = find_type "cpc_function" file in
   let cpc_alloc = find_function "cpc_alloc" file in
   let cpc_dealloc =  find_function "cpc_dealloc" file in
   let cpc_push = find_function "cpc_continuation_push" file in
@@ -841,7 +853,7 @@ class cpsConverter = fun file ->
     (Set((Var temp, NoOffset), value, locUnknown)) ::
     let cpc_patch = find_function "cpc_continuation_patch" file in
      (* cpc_patch(cont, sizeof(typ), &temp); *)
-    [ Call(None,Lval(Var cpc_patch, NoOffset), [
+    [ Call(None,Lval(Var (cpc_patch ()), NoOffset), [
       Lval(Var cont, NoOffset);
       mkCast (sizeOf typ) !typeOfSizeOf;
       mkCast (addr_of temp) voidPtrType],
@@ -850,7 +862,7 @@ class cpsConverter = fun file ->
   let cpc_spawn = find_function "cpc_prim_spawn" file in
   let spawn cc context =
     (* cpc_prim_spawn(cc, context); *)
-    [Call(None,Lval(Var cpc_spawn, NoOffset), [
+    [Call(None,Lval(Var (cpc_spawn ()), NoOffset), [
       Lval(Var cc, NoOffset);
       context
       ],locUnknown)] in
@@ -877,16 +889,16 @@ class cpsConverter = fun file ->
     let cc,pre,post =
       if apply_later
       then
-        let var = (makeTempVar ef ~name:"cpc_apply_later" cpc_cont_ptr) in
+        let var = (makeTempVar ef ~name:"cpc_apply_later" (cpc_cont_ptr ())) in
         var,
         [(* apply_later = (void* ) 0; *)
         Set((Var var, NoOffset),
-          mkCast (integer 0) cpc_cont_ptr,locUnknown)],
+          mkCast (integer 0) (cpc_cont_ptr ()),locUnknown)],
         spawn
           var
           (if cps_function
           then Lval(Var current_continuation, NoOffset)
-          else mkCast (mkCast (integer 0) voidPtrType) cpc_cont_ptr)
+          else mkCast (mkCast (integer 0) voidPtrType) (cpc_cont_ptr ()))
       else (current_continuation,[],[]) in
     match i with
     (* Cps call with or without assignment (we don't care at this level) *)
@@ -974,7 +986,7 @@ class cpsConverter = fun file ->
   (* Special case: some functions need to be given the current continuation *)
   | (GVarDecl ({vtype=TFun(ret, Some args,va,attr)} as v, l)) when
       hasAttribute "cpc_need_cont" v.vattr ->
-        v.vtype <- TFun(ret, Some (("c", cpc_cont_ptr, [])::args), va, attr);
+        v.vtype <- TFun(ret, Some (("c", (cpc_cont_ptr ()), [])::args), va, attr);
         DoChildren
   | (GVarDecl ({vtype=TFun(_,args,va,attr) ; vcps = true} as v, _) as g) ->
       (* do not deal with a declaration twice *)
@@ -997,8 +1009,8 @@ class cpsConverter = fun file ->
       let comptag = GCompTag (arglist_struct, locUnknown) in
       let new_arglist_fun = emptyFunction (v.vname^"_push") in
       let cont_name = Printf.sprintf "cpc_cont_%d" (newVID()) in
-      let new_args = Some (args@[cont_name,cpc_cont_ptr,[]]) in
-      let new_arglist_type = TFun (cpc_cont_ptr, new_args, false, []) in
+      let new_args = Some (args@[cont_name,(cpc_cont_ptr ()),[]]) in
+      let new_arglist_type = TFun ((cpc_cont_ptr ()), new_args, false, []) in
       let temp_arglist =
         makeTempVar new_arglist_fun ~name:"cpc_arglist"
         (TPtr(TComp(arglist_struct, []),[])) in
@@ -1016,7 +1028,7 @@ class cpsConverter = fun file ->
           Call(
             (if field_args = [] then None (* avoid unused variable warning *)
             else Some (Var temp_arglist, NoOffset)),
-            Lval (Var cpc_alloc, NoOffset),
+            Lval (Var (cpc_alloc ()), NoOffset),
             [addr_of continuation;
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
             locUnknown
@@ -1033,9 +1045,9 @@ class cpsConverter = fun file ->
           (* cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
           [Call (
           Some(Var continuation , NoOffset),
-          Lval(Var cpc_push, NoOffset),
+          Lval(Var (cpc_push ()), NoOffset),
           [Lval(Var continuation, NoOffset);
-          mkCast (addr_of v) cpc_fun_ptr],
+          mkCast (addr_of v) (TPtr((cpc_fun ()), []))],
           locUnknown)]
           ));
         (* return continuation *)
@@ -1049,14 +1061,14 @@ class cpsConverter = fun file ->
       if v.vstorage = Extern then begin
         (* mark it as completed (will be done later for non-extern function *)
         v.vcps <- false;
-        v.vtype <- TFun(cpc_cont_ptr,
-          Some ["cpc_cont", cpc_cont_ptr, []], va, attr)
+        v.vtype <- TFun((cpc_cont_ptr ()),
+          Some ["cpc_cont", (cpc_cont_ptr ()), []], va, attr)
         end;
       ChangeTo [g;comptag;GFun (new_arglist_fun, locUnknown)]
       end
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
   true};sformals = args} as fd, _) as g ->
-      let new_arg = ["cpc_cont", cpc_cont_ptr, []] in
+      let new_arg = ["cpc_cont", (cpc_cont_ptr ()), []] in
       let arglist_struct = List.assoc fd.svar struct_map in
       let cpc_arguments =
         makeLocalVar fd "cpc_args"
@@ -1064,7 +1076,7 @@ class cpsConverter = fun file ->
       (* add former arguments to slocals *)
       fd.slocals <- args @ fd.slocals;
       fd.sformals <- [];
-      setFunctionTypeMakeFormals fd (TFun(cpc_cont_ptr, Some new_arg, va, attr));
+      setFunctionTypeMakeFormals fd (TFun((cpc_cont_ptr ()), Some new_arg, va, attr));
       current_continuation <- begin match fd.sformals with
         | [x] -> x
         | _ -> assert false end;
@@ -1079,7 +1091,7 @@ class cpsConverter = fun file ->
           Call(
             (if args = [] then None (* avoid unused variable warning *)
             else Some (Var cpc_arguments, NoOffset)),
-            Lval (Var cpc_dealloc, NoOffset),
+            Lval (Var (cpc_dealloc ()), NoOffset),
             [Lval (Var current_continuation, NoOffset);
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
             locUnknown
@@ -1731,9 +1743,10 @@ end
 (********** Add defaults arguments to cpc primitives *************************)
 
 class addDefaultArgs file =
-  let condvar_null_ptr =
+  let condvar_type = find_type "cpc_condvar" file in
+  let condvar_null_ptr () =
     mkCast (mkCast (integer 0) voidPtrType)
-    (TPtr(find_type "cpc_condvar" file,[])) in
+    (TPtr(condvar_type (),[])) in
   let cpc_sleep = find_function "cpc_sleep" file in
   object(self)
   inherit mynopCilVisitor
@@ -1741,19 +1754,19 @@ class addDefaultArgs file =
   method vinst = function
   | Call(ret, Lval(Var ({vname = "cpc_io_wait"} as v), NoOffset), [fd; dir], loc) ->
       ChangeTo [Call(ret, Lval(Var v, NoOffset),
-      [fd; dir; condvar_null_ptr], loc)]
+      [fd; dir; condvar_null_ptr ()], loc)]
   | Call(ret, Lval(Var ({vname = "cpc_sleep"} as v), NoOffset), [s], loc) ->
       ChangeTo [Call(ret, Lval(Var v, NoOffset),
-      [s; zero; condvar_null_ptr], loc)]
+      [s; zero; condvar_null_ptr ()], loc)]
   | Call(ret, Lval(Var ({vname = "cpc_sleep"} as v), NoOffset), [s; ms], loc) ->
       ChangeTo [Call(ret, Lval(Var v, NoOffset),
-      [s; ms; condvar_null_ptr], loc)]
+      [s; ms; condvar_null_ptr ()], loc)]
   (* cpc_wait is handled via cpc_sleep when it has several arguments *)
   | Call(ret, Lval(Var {vname = "cpc_wait"}, NoOffset), [c; s], loc) ->
-      ChangeTo [Call(ret, Lval(Var cpc_sleep, NoOffset),
+      ChangeTo [Call(ret, Lval(Var (cpc_sleep ()), NoOffset),
       [s; zero; c], loc)]
   | Call(ret, Lval(Var {vname = "cpc_wait"}, NoOffset), [c; s; ms], loc) ->
-      ChangeTo [Call(ret, Lval(Var cpc_sleep, NoOffset),
+      ChangeTo [Call(ret, Lval(Var (cpc_sleep ()), NoOffset),
       [s; ms; c], loc)]
   | _ -> SkipChildren
 end
