@@ -1929,8 +1929,14 @@ let percolateLocals file =
       let fdecl = try List.assq var !decl with Not_found ->
        E.s (E.bug "percolate: cannot find variable %s, declared in function %s"
         var.vname fd.svar.vname) in
-      fdecl.slocals <- List.filter (fun v -> not(v == var)) fdecl.slocals;
-      fd.slocals <- var :: fd.slocals) !l
+      if fdecl == fd then
+        (* Do not update to avoid altering the order of locals: there might be
+         * data dependencies because of sizeof() for instance. *)
+        ()
+      else begin
+        fdecl.slocals <- List.filter (fun v -> not(v == var)) fdecl.slocals;
+        fd.slocals <- var :: fd.slocals
+      end) !l
 
 (********************* Lambda-lifting ****************************************)
 
