@@ -2410,8 +2410,10 @@ let rec cps_marking f =
       end
 
 let stages () = [
+  (*
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
+  *)
   ("Initialize safe functions\n", fun file ->
   visitCilFile (new initSafeFunctions) file);
   ("Add defaults arguments\n", fun file ->
