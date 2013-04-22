@@ -134,12 +134,12 @@ let cabslu = {lineno = -10;
 (** Interface to the Cprint printer *)
 let withCprint (f: 'a -> unit) (x: 'a) : unit = 
   Cprint.commit (); Cprint.flush ();
-  let old = !Cprint.out in
-  Cprint.out := !E.logChannel;
+  let old = (Whitetrack.getOutput()) in
+  Whitetrack.setOutput  !E.logChannel;
   f x;
   Cprint.commit (); Cprint.flush ();
-  flush !Cprint.out;
-  Cprint.out := old
+  flush (Whitetrack.getOutput());
+  Whitetrack.setOutput  old
 
 
 (** Keep a list of the variable ID for the variables that were created to 
@@ -1342,6 +1342,11 @@ let rec castTo ?(fromsource=false)
         result
 
     | TPtr (told, _), TPtr(tnew, _) -> result
+
+    (* in the case of __typeof__, we do not perform conversion of functions to
+     * function pointers, so we have to accept this explicit cast when it occurs
+     * in the source. *)
+    | TFun _, TPtr _ when fromsource -> result
           
     | TInt _, TPtr _ -> result
           
@@ -1951,6 +1956,8 @@ let rec setOneInit (this: preInit)
  * with unspecified size actually changes the array's type
  * (ANSI C, 6.7.8, para 22) *)
 let rec collectInitializer
+    (isfield: bool)
+    (isconst: bool)
     (this: preInit)
     (thistype: typ) : (init * typ) =
   if this = NoInitPre then (makeZeroInit thistype), thistype
@@ -1970,9 +1977,13 @@ let rec collectInitializer
                             d_exp len)
             end
           | _ -> 
-              (* unsized array case, length comes from initializers *)
-              (!pMaxIdx + 1,
-               TArray (bt, Some (integer (!pMaxIdx + 1)), at))
+              (* unsized array case, length comes from initializers - except
+               * they are forbidden inside a struct or union *)
+              if isfield && not isconst then
+                E.s (error "non-static initialization of a flexible array member")
+              else
+                (!pMaxIdx + 1,
+                 TArray (bt, Some (integer (!pMaxIdx + 1)), at))
         in
         if !pMaxIdx >= len then 
           E.s (E.bug "collectInitializer: too many initializers(%d >= %d)\n"
@@ -1982,7 +1993,7 @@ let rec collectInitializer
         let rec collect (acc: (offset * init) list) (idx: int) = 
           if idx = -1 then acc
           else
-            let thisi = fst (collectInitializer !pArray.(idx) bt)
+            let thisi = fst (collectInitializer isfield isconst !pArray.(idx) bt)
             in
             collect ((Index(integer idx, NoOffset), thisi) :: acc) (idx - 1)
         in
@@ -2000,7 +2011,7 @@ let rec collectInitializer
                   if idx > !pMaxIdx then 
                     makeZeroInit f.ftype
                   else
-                    collectFieldInitializer !pArray.(idx) f
+                    collectFieldInitializer isconst !pArray.(idx) f
                 in
                 (Field(f, NoOffset), thisi) :: collect (idx + 1) restf
         in
@@ -2014,7 +2025,7 @@ let rec collectInitializer
               findField (idx + 1) rest
           | f :: _ when idx = !pMaxIdx -> 
               Field(f, NoOffset), 
-              collectFieldInitializer !pArray.(idx) f
+              collectFieldInitializer isconst !pArray.(idx) f
           | _ -> E.s (error "Can initialize only one field for union")
         in
         if !msvcMode && !pMaxIdx != 0 then 
@@ -2024,10 +2035,11 @@ let rec collectInitializer
     | _ -> E.s (unimp "collectInitializer")
                       
 and collectFieldInitializer 
+    (isconst: bool)
     (this: preInit)
     (f: fieldinfo) : init =
   (* collect, and rewrite type *)
-  let init,newtype = (collectInitializer this f.ftype) in
+  let init,newtype = (collectInitializer true isconst this f.ftype) in
   f.ftype <- newtype;
   init
             
@@ -2357,6 +2369,8 @@ let rec doSpecList (suggestedAnonName: string) (* This string will be part of
     | [A.Tbool] -> TInt(IBool, [])
     | [A.Tsigned; A.Tchar] -> TInt(ISChar, [])
     | [A.Tunsigned; A.Tchar] -> TInt(IUChar, [])
+
+    | [A.Tsizet] -> !typeOfSizeOf
 
     | [A.Tshort] -> TInt(IShort, [])
     | [A.Tsigned; A.Tshort] -> TInt(IShort, [])
@@ -4377,7 +4391,10 @@ and doExp (asconst: bool)   (* This expression is used as a constant *)
                   (* Drop the side-effects *)
                   prechunk := (fun _ -> empty);
 	          piscall := false; 
-	          if Util.equals (typeSig t1) (typeSig t2) then
+            let compatible =
+              try ignore(combineTypes CombineOther t1 t2); true
+              with Failure _ -> false
+            in if compatible then
 	            pres := integer 1
 	          else
                     pres := integer 0;
@@ -4925,7 +4942,7 @@ and doInitializer
   let typ' = unrollType vi.vtype in
   if debugInit then 
     ignore (E.log "Collecting the initializer for %s\n" vi.vname);
-  let (init, typ'') = collectInitializer !topPreInit typ' in
+  let (init, typ'') = collectInitializer false (vi.vglob || vi.vstorage = Static) !topPreInit typ' in
   if debugInit then
     ignore (E.log "Finished the initializer for %s\n  init=%a\n  typ=%a\n  acc=%a\n" 
            vi.vname d_init init d_type typ' d_chunk acc);
@@ -5206,13 +5223,23 @@ and doInit
 
         (* A structure with a composite initializer. We initialize the fields*)
   | TComp (comp, _), (A.NEXT_INIT, A.COMPOUND_INIT initl) :: restil ->
+      let initl' =
+        (* Handle empty initializers (nested inside arrays):
+            { {3}, {}, {5}, {}, {} }
+           by translating them to:
+            { {3}, {0}, {5}, {0}, {0} }
+           See test/small1/init18.c.
+        *)
+        if initl = []
+        then [(A.NEXT_INIT, A.SINGLE_INIT (CONSTANT (CONST_INT "0")))]
+        else initl in
       (* Create a separate subobject iterator *)
       let so' = makeSubobj so.host so.soTyp so.soOff in
       (* Go inside the comp *)
       so'.stack <- [InComp(so'.curOff, comp, fieldsToInit comp None)];
       normalSubobj so';
-      let acc', initl' = doInit isconst setone so' acc initl in
-      if initl' <> [] then 
+      let acc', initl'' = doInit isconst setone so' acc initl' in
+      if initl'' <> [] then
         ignore (warn "Too many initializers for structure");
       (* Advance past the structure *)
       advanceSubobj so;
@@ -5769,7 +5796,6 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
                };
 	    !currentFunctionFDEC.svar.vdecl <- funloc;
 
-            constrExprId := 0;
             (* Setup the environment. Add the formals to the locals. Maybe
             * they need alpha-conv  *)
             enterScope ();  (* Start the scope *)
@@ -6379,7 +6405,11 @@ and assignInit (lv: lval)
                 b +++ init @@ loopc
           | _ -> E.s (bug "Array length is not a constant expression")
         end
-      | None -> E.s (bug "Array length is not a constant expression")
+      | None when initl = [] -> acc
+      | None ->
+          (* Attempt to initialize a flexible array in a struct:
+             struct s { int x; char[] a; }; *)
+          E.s (error "non-static initialization of a flexible array member")
     end
     | _ ->
       foldLeftCompound
@@ -6850,12 +6880,12 @@ let convFile (f : A.file) : Cil.file =
           let temp_cabs = open_out temp_cabs_name in
           (* Now print the CABS in there *)
           Cprint.commit (); Cprint.flush ();
-          let old = !Cprint.out in (* Save the old output channel *)
-          Cprint.out := temp_cabs;
+          let old = (Whitetrack.getOutput()) in (* Save the old output channel *)
+          Whitetrack.setOutput  temp_cabs;
           Cprint.print_def d;
           Cprint.commit (); Cprint.flush ();
-          flush !Cprint.out;
-          Cprint.out := old;
+          flush (Whitetrack.getOutput());
+          Whitetrack.setOutput  old;
           close_out temp_cabs;
           (* Now read everythign in *and create a GText from it *)
           let temp_cabs = open_in temp_cabs_name in
