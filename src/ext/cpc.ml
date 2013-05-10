@@ -136,8 +136,16 @@ let is_safe f =
       hasAttribute "cpc_no_retain" f.vattr ||
       StringSet.mem f.vname !safe_functions
 
-let is_cps f = f.vcps
-let set_cps f b = f.vcps <- b
+let is_cps f =
+  f.vcps || begin
+  let (_, _, _, attr) = splitFunctionTypeVI f in
+  hasAttribute "cps" attr
+  end
+let set_cps f b =
+  f.vcps <- b;
+  f.vtype <-
+    if b then typeAddAttributes [Attr ("cps", [])] f.vtype
+    else typeRemoveAttributes ["cps"] f.vtype
 
 class initAmpSet = object(self)
     inherit mynopCilVisitor
