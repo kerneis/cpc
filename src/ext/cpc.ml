@@ -906,7 +906,7 @@ class cpsConverter = fun file ->
       (* cc = new_arglist_fun(... args ..., cc); *)
         Call (
           Some(Var cc , NoOffset),
-          (try List.assoc f newarglist_map
+          (try List.assq f newarglist_map
           with Not_found -> E.s (E.bug "newarglist for \
           function %s not found" f.vname)),
           args@[Lval(Var cc, NoOffset)],
@@ -1069,7 +1069,7 @@ class cpsConverter = fun file ->
   | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
   true};sformals = args} as fd, _) as g ->
       let new_arg = ["cpc_cont", (cpc_cont_ptr ()), []] in
-      let arglist_struct = List.assoc fd.svar struct_map in
+      let arglist_struct = List.assq fd.svar struct_map in
       let cpc_arguments =
         makeLocalVar fd "cpc_args"
         (TPtr(TComp(arglist_struct, []),[])) in
