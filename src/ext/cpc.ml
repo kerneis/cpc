@@ -136,6 +136,8 @@ let is_safe f =
       hasAttribute "cpc_no_retain" f.vattr ||
       StringSet.mem f.vname !safe_functions
 
+let is_cps f = f.vcps
+let set_cps f b = f.vcps <- b
 
 class initAmpSet = object(self)
     inherit mynopCilVisitor
@@ -144,13 +146,13 @@ class initAmpSet = object(self)
     val mutable call_name = ""
 
     method vinst :  instr -> instr list visitAction = function
-    | Call(_, Lval(Var f, NoOffset), args, _) when not f.vcps && is_safe f ->
+    | Call(_, Lval(Var f, NoOffset), args, _) when not (is_cps f) && is_safe f ->
         assert(not record && call_name = "");
         call_name <- f.vname;
         ignore(List.map (visitCilExpr (self:>cilVisitor)) args);
         call_name <- "";
         SkipChildren
-    | Call(_, Lval(Var f, NoOffset), args, _) when not f.vcps ->
+    | Call(_, Lval(Var f, NoOffset), args, _) when not (is_cps f) ->
         assert(not record && call_name = "");
         record <- true;
         call_name <- f.vname;
@@ -199,7 +201,7 @@ class initAmpSet = object(self)
     
     method vfunc fd =
       (* No CpcFun thanks to initial lambda-lifting *)
-      if fd.svar.vcps then begin
+      if (is_cps fd.svar) then begin
         trace(dprintf "[boxing] %s %d\n" fd.svar.vname (List.length fd.sformals + List.length
         fd.slocals));
         List.iter (fun v -> if isArrayType v.vtype then begin 
@@ -422,7 +424,7 @@ let make_ret_var fd typ =
 (* return the cps var just before a statement *)
 let rec find_var = function
   | [Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), _, _)]
-      when f.vcps ->
+      when (is_cps f) ->
         FoundVar v
   | [] | [_] -> Not_found
   | hd::tl -> find_var tl
@@ -644,7 +646,7 @@ class markCps = fun file -> object(self)
     in match i with
     | Set _ | Asm _ -> c.last_var <- None; false
     (* Non cps call *)
-    | Call (_, Lval (Var f, NoOffset), _, _) when not f.vcps ->
+    | Call (_, Lval (Var f, NoOffset), _, _) when not (is_cps f) ->
         c.last_var <- None; false
     (* Cps call without assignment *)
     | Call (None, Lval (Var f, NoOffset), args, _) ->
@@ -825,7 +827,7 @@ class markCps = fun file -> object(self)
     Cfg.clearCFGinfo f;
     ignore(Cfg.cfgFun f);
     let context = copy_context c in
-    c <- {(fresh_context f) with cps_fun = f.svar.vcps};
+    c <- {(fresh_context f) with cps_fun = (is_cps f.svar)};
     ChangeDoChildrenPost (f, fun f -> c <- context; f)
 
 end
@@ -988,7 +990,7 @@ class cpsConverter = fun file ->
       hasAttribute "cpc_need_cont" v.vattr ->
         v.vtype <- TFun(ret, Some (("c", (cpc_cont_ptr ()), [])::args), va, attr);
         DoChildren
-  | (GVarDecl ({vtype=TFun(_,args,va,attr) ; vcps = true} as v, _) as g) ->
+  | (GVarDecl ({vtype=TFun(_,args,va,attr)} as v, _) as g) when is_cps v ->
       (* do not deal with a declaration twice *)
       if List.mem_assq v struct_map then ChangeTo [] else begin
       let args = argsToList args in
@@ -1060,14 +1062,14 @@ class cpsConverter = fun file ->
         (v, Lval (Var new_arglist_fun.svar, NoOffset)) :: newarglist_map;
       if v.vstorage = Extern then begin
         (* mark it as completed (will be done later for non-extern function *)
-        v.vcps <- false;
+        set_cps v false;
         v.vtype <- TFun((cpc_cont_ptr ()),
           Some ["cpc_cont", (cpc_cont_ptr ()), []], va, attr)
         end;
       ChangeTo [g;comptag;GFun (new_arglist_fun, locUnknown)]
       end
-  | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
-  true};sformals = args} as fd, _) as g ->
+  | GFun ({svar={vtype=TFun(ret_typ, _, va, attr)}; sformals = args} as fd, _) as g
+      when is_cps fd.svar ->
       let new_arg = ["cpc_cont", (cpc_cont_ptr ()), []] in
       let arglist_struct = List.assq fd.svar struct_map in
       let cpc_arguments =
@@ -1105,7 +1107,7 @@ class cpsConverter = fun file ->
             )
           )  args arglist_struct.cfields)))
         :: fd.sbody.bstmts;
-      fd.svar.vcps <- false; (* this is not a cps function anymore *)
+      set_cps fd.svar false; (* this is not a cps function anymore *)
       ChangeDoChildrenPost([g], fun g -> stack <- []; g)
   | GFun _ ->
       cps_function <- false;
@@ -1202,7 +1204,7 @@ class avoidAmpersand f =
   inherit mynopCilVisitor
 
   method vfunc fd =
-    if fd.svar.vcps then begin
+    if (is_cps fd.svar) then begin
       let retTyp =
         match fd.svar.vtype with
         | TFun(rt, _, _, _) -> rt
@@ -1280,9 +1282,8 @@ object (self)
   method vglob = function
     (* special case for extern functions *)
     | (GVarDecl ({vtype=TFun(ret_typ, param_type, va, attr);
-                  vcps = true;
                   vstorage = Extern;} as v,
-                 _)) when notVoid ret_typ ->
+                 _)) when notVoid ret_typ && is_cps v ->
       let new_ret_type = TPtr (ret_typ, []) in
       let new_param_type : (string * Cil.typ * Cil.attributes) list option =
         let params = match param_type with
@@ -1298,10 +1299,9 @@ object (self)
 
 
     (* change function body *)
-    | GFun ({svar     = {vtype = TFun(ret_typ, param_type, va, attr);
-                         vcps  = true};
+    | GFun ({svar     = {vtype = TFun(ret_typ, param_type, va, attr)};
              sformals = args} as fd,
-            _) ->
+            _) when is_cps fd.svar ->
       (* create the structure local variable *)
       let cpc_env = makeLocalVar fd "cpc_env" (TPtr(voidPtrType,[])) in
       (* XXX would voidPtrType be enough? *)
@@ -1397,10 +1397,9 @@ object (self)
 
   method vinst = function
     | Call (lval_opt,
-            (Lval(Var({vtype=TFun(ret_typ, arg_lst_typ,_,_);
-                       vcps = true;} as vinfo),_)as f),
+            (Lval(Var({vtype=TFun(ret_typ, arg_lst_typ,_,_)} as vinfo),_)as f),
             arg_lst,
-            loc) ->
+            loc) when is_cps vinfo ->
         (* y = f(x); with f a cps function, yields:
            f(&y, x);
         *)
@@ -1462,10 +1461,9 @@ object (self)
   inherit mynopCilVisitor
 
   method vglob = function
-    | GFun ({svar     = {vtype = TFun(ret_typ, _, va, attr);
-                         vcps  = true};
+    | GFun ({svar     = {vtype = TFun(ret_typ, _, va, attr)};
              sformals = args} as fd,
-            _) as g ->
+            _) as g when is_cps fd.svar ->
       (* retreive environment from Env1's step *)
       let cpc_env =
         try List.assoc fd !envList
@@ -1654,7 +1652,7 @@ class cpsReturnValues = object(self)
   inherit (enclosingFunction dummyFunDec)
 
   method vinst = function
-  | Call (r, Lval (Var f, NoOffset), args, loc) as i when f.vcps ->
+  | Call (r, Lval (Var f, NoOffset), args, loc) as i when (is_cps f) ->
       let typ = fst4 (splitFunctionTypeVI f) in
       begin match r with
       | Some _ when (typeSig typ = typeSig voidType) -> (* Wrong assignment *)
@@ -1728,7 +1726,7 @@ class removeNastyExpressions = object(self)
   inherit (enclosingFunction dummyFunDec)
 
   method vinst = function
-  | Call(ret, Lval(Var f, NoOffset), args, loc) when f.vcps ->
+  | Call(ret, Lval(Var f, NoOffset), args, loc) when (is_cps f) ->
       (try contains_nasty args; SkipChildren
       with ContainsNasty ->
         trace (dprintf "nasty variables in call to %s\n" f.vname);
@@ -1775,7 +1773,7 @@ end
 
 let rec insert_gotos il =
   let rec split acc l = match l with
-  | Call(_, Lval(Var f, NoOffset), _, _)::_ when f.vcps ->
+  | Call(_, Lval(Var f, NoOffset), _, _)::_ when (is_cps f) ->
       (mkStmt (Instr (List.rev (List.hd l :: acc))), List.tl l, true)
   | hd :: tl -> split (hd :: acc) tl
   | [] -> (mkStmt (Instr (List.rev acc)), [], false) in
@@ -1830,16 +1828,16 @@ let removeIdentity = fun file ->
   inherit mynopCilVisitor
 
   method vfunc fd =
-    if not fd.svar.vcps then SkipChildren
+    if not (is_cps fd.svar) then SkipChildren
     else match fd.sbody.bstmts with
     | {skind=Instr [Call(None,Lval(Var fd',NoOffset),args,_)]} ::
-      {skind=Return(None,_)} :: _ when fd'.vcps &&
+      {skind=Return(None,_)} :: _ when (is_cps fd') &&
       args = Util.list_map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaced :=  (fd.svar,fd')::!replaced;
         (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | {skind=Instr [Call(Some(l),Lval(Var fd',NoOffset),args,_)]} ::
-      {skind=Return(Some(Lval l'),_)} :: _ when fd'.vcps && l=l' &&
+      {skind=Return(Some(Lval l'),_)} :: _ when (is_cps fd') && l=l' &&
       args = Util.list_map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaced :=  (fd.svar,fd')::!replaced;
         (* Do not remove fd.sbody since it might be used outside. *)
@@ -1967,7 +1965,7 @@ class uniqueVarinfo = object(self)
     | _ -> DoChildren
 
   method vglob = function
-  | GFun (fd, loc) as g when fd.svar.vcps ->
+  | GFun (fd, loc) as g when (is_cps fd.svar) ->
       let map = make_fresh_varinfo fd in
       current_map <- map;
       ChangeDoChildrenPost([g], fun g ->
@@ -2171,7 +2169,7 @@ class functionalizeGoto start enclosing_fun toplevel file =
       let fd = emptyFunction (make_function_name toplevel.svar.vname label) in
       (* the return type of the functionalized chunk *)
       let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
-      let () = fd.svar.vcps <- true in
+      let () = set_cps fd.svar true in
       object(self)
         inherit mynopCilVisitor
 
@@ -2345,7 +2343,7 @@ class printCfg = object(self)
   inherit mynopCilVisitor
 
   method vfunc fd =
-  if fd.svar.vcps then begin
+  if (is_cps fd.svar) then begin
     Cfg.clearCFGinfo fd;
     ignore(Cfg.cfgFun fd);
     Cfg.printCfgFilename ("cfg/"^fd.svar.vname^".dot") fd
