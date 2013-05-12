@@ -38,6 +38,8 @@ This is broken on some architectures.
 #define CPC_INDIRECT_PATCH 1
 */
 
+#define cps __attribute__((__cps__))
+
 #ifdef CPC_COMPACT_CONTINUATIONS
 
 #define MAX_ALIGN 1

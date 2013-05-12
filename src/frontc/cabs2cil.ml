@@ -5750,7 +5750,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
        doDecl isglobal (A.DECDEF ((specs, [((n,dt,a,loc'), A.NO_INIT)]), loc))
 
   | A.FUNDEF (((specs,(n,dt,a, _)) : A.single_name),
-              (body : A.block), loc1, loc2) when isglobal || isCps specs ->
+              (body : A.block), loc1, loc2) when isglobal || isCps specs || true (* XXX *) ->
     begin
       let funloc = convLoc loc1 in
       let endloc = convLoc loc2 in

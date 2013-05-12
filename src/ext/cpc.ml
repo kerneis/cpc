@@ -136,16 +136,40 @@ let is_safe f =
       hasAttribute "cpc_no_retain" f.vattr ||
       StringSet.mem f.vname !safe_functions
 
+let visitReturnType visitor t = match unrollType t with
+  | TFun(rt, args, isva, a) -> TFun(visitCilType visitor rt, args, isva, visitCilAttributes visitor a)
+  | _ -> E.s (E.bug "visitReturnType called on a non-function type")
+
 let is_cps f =
-  f.vcps || begin
-  let (_, _, _, attr) = splitFunctionTypeVI f in
-  hasAttribute "cps" attr
-  end
-let set_cps f b =
-  f.vcps <- b;
-  f.vtype <-
-    if b then typeAddAttributes [Attr ("cps", [])] f.vtype
-    else typeRemoveAttributes ["cps"] f.vtype
+  let cps_attr = ref false in
+  ignore(visitReturnType
+    (object(self)
+      inherit nopCilVisitor
+      method vtype t = match t with
+      | TFun _ -> SkipChildren
+      | _ -> DoChildren
+      method vattr (Attr (a, _)) = if a = "cps" then cps_attr := true; SkipChildren
+    end)
+    f.vtype);
+  f.vcps || !cps_attr
+
+let clear_cps = visitReturnType (object(self)
+  inherit nopCilVisitor
+  (* XXX Remove every cps type attribute, except inside function parameter types:
+   * cps int f(cps int()(int)) -> int f(cps int()(int)) *)
+  method vtype t = match t with
+  | TFun _ -> SkipChildren
+  | _ -> DoChildren
+  method vattr (Attr (a, _)) = if a = "cps" then ChangeTo [] else SkipChildren
+end)
+
+let set_cps f iscps =
+  f.vcps <- iscps;
+  (* normalize cps type attribute: remove everywhere, and
+   * at top-level if iscps is true. *)
+  f.vtype <- typeAddAttributes
+    (if iscps then [Attr ("cps", [])] else [])
+    (clear_cps f.vtype)
 
 class initAmpSet = object(self)
     inherit mynopCilVisitor
@@ -1678,7 +1702,7 @@ class cpsReturnValues = object(self)
             Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc);
             Set(l, Lval(Var v, NoOffset), loc)
           ]
-      | None when  (typeSig typ <> typeSig voidType) -> (* Missing assignment *)
+      | None when  (typeSigWithAttrs (fun _ -> []) typ <> typeSig voidType) -> (* Missing assignment *)
           let v = makeTempVar ef typ in
           v.vattr <- [Attr("unused", [])];
           trace (dprintf "Ignoring a cps return value: %a\n" d_instr i);
