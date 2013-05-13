@@ -682,17 +682,14 @@ class markCps = fun file -> object(self)
     | Call (_, f, _, _) when not (is_cps_exp f) ->
         c.last_var <- None; false
     (* Cps call without assignment *)
-    | Call (None, Lval (Var f, NoOffset), args, _) ->
+    | Call (None, _, args, _) ->
         let res = check_var args in
         c.last_var <- None; res
     (* Cps call with assignment *)
-    | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
+    | Call (Some (Var v, NoOffset), _, args, _) ->
         check_var args && (c.last_var <- Some v; true)
-    | Call (Some l, Lval (Var f, NoOffset), _, _) ->
+    | Call (Some l, _, _, _) ->
         E.s (E.bug "%a should be a variable" dn_lval l)
-    (* Other cps call *)
-    | Call _ ->
-        E.s (E.unimp "cps call through function pointer")
 
   method vinst (i: instr) : instr list visitAction =
     match self#is_cps i, c.cps_fun with
@@ -870,6 +867,15 @@ let extract var name = match !var with
 let biggest_alignment = !Machdep.theMachine.Machdep.alignof_aligned
 
 class cpsConverter = fun file ->
+  (* XXX DEBUGING *)
+  let debug =
+    if !E.debugFlag then
+      let print =
+        findOrCreateFunc file "printf"
+        (TFun(intType, Some ["format", charConstPtrType, []], true, [])) in
+      fun s -> [Call(None,Lval(Var print,
+      NoOffset),[mkString (Printf.sprintf "** %s\n" s)],locUnknown)]
+    else fun _ -> [] in
   (* Extraction of types, struct, and functions from runtime *)
   let cpc_cont = find_struct "cpc_continuation" file in
   let cpc_cont_ptr () = TPtr(TComp(cpc_cont (), []),[]) in
@@ -877,6 +883,7 @@ class cpsConverter = fun file ->
   let cpc_alloc = find_function "cpc_alloc" file in
   let cpc_dealloc =  find_function "cpc_dealloc" file in
   let cpc_push = find_function "cpc_continuation_push" file in
+  let anon_name = let r = ref 0 in fun () -> incr r; Printf.sprintf "anon%d" !r in
   let patch cont value f =
     let typ = typeOf value in
     let temp = makeTempVar f ~name:"patch" typ in
@@ -897,19 +904,88 @@ class cpsConverter = fun file ->
       Lval(Var cc, NoOffset);
       context
       ],locUnknown)] in
-  (* XXX DEBUGING *)
-  let debug =
-    if !E.debugFlag then
-      let print =
-        findOrCreateFunc file "printf"
-        (TFun(intType, Some ["format", charConstPtrType, []], true, [])) in
-      fun s -> [Call(None,Lval(Var print,
-      NoOffset),[mkString (Printf.sprintf "** %s\n" s)],locUnknown)]
-    else fun _ -> [] in
+  (* Build a function name_arglist which pushes fun_ptr and args on the
+   * continuation.  Return the definitions of this function and of the structure
+   * used to push the args on the continuation.  *)
+  let make_arglist name fun_name args =
+    let fix_name name = if name = "" then anon_name() else name in
+    let args = List.map (fun (n, t, a) -> (fix_name n, t, a)) args in
+    (* XXX copy the attributes too? Should be empty anyway *)
+    let rec build_struct = function
+      | [] -> []
+      | [name, typ, attr] when !aligned_continuations ->
+          (* alignment trick *)
+          [name, typ, None, [Attr("aligned",[AInt biggest_alignment])], locUnknown]
+      | (name, typ, attr) :: q ->
+          (name, typ, None, [], locUnknown) :: build_struct q in
+    let fields =  build_struct args in
+    let arglist_struct =
+      mkCompInfo true (name^"_arglist")
+        (fun _ -> fields)
+        (if !aligned_continuations then []
+         else [Attr("packed",[])]) in
+    let new_arglist_fun = emptyFunction (name^"_push") in
+    let cont_name = Printf.sprintf "cpc_cont_%d" (newVID()) in
+    let fun_ptr_name = Printf.sprintf "fun_ptr_%d" (newVID()) in
+    let fun_ptr_arg = if fun_name = None then [fun_ptr_name,TPtr((cpc_fun()), []), []] else [] in
+    let new_args = Some (args @ fun_ptr_arg @[cont_name,(cpc_cont_ptr ()),[]]) in
+    let new_arglist_type = TFun ((cpc_cont_ptr ()), new_args, false, []) in
+    let temp_arglist =
+      makeTempVar new_arglist_fun ~name:"cpc_arglist"
+      (TPtr(TComp(arglist_struct, []),[])) in
+    (* Beware, order matters! One must set function type before getting the
+     * sformals (when setting new_arglist_fun.sbody) *)
+    setFunctionTypeMakeFormals new_arglist_fun new_arglist_type;
+    new_arglist_fun.svar.vinline <- true;
+    new_arglist_fun.svar.vstorage <- Static;
+    new_arglist_fun.sbody <- (
+      let rest, continuation = cut_last new_arglist_fun.sformals in
+      let field_args, fun_exp = match fun_name with
+        | None ->
+            (* anonymous cps call, function ptr is the penultimate parameter *)
+            let f_a, ptr = cut_last rest in
+            f_a, Lval(var ptr)
+        | Some f -> rest, mkCast (addr_of f) (TPtr((cpc_fun ()), [])) in
+      mkBlock ([mkStmt(Instr (
+        (* XXX DEBUGING *)
+        (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
+        (* temp_arglist = cpc_alloc(&continuation,(int)sizeof(arglist_struct)) *)
+        Call(
+          (if field_args = [] then None (* avoid unused variable warning *)
+          else Some (Var temp_arglist, NoOffset)),
+          Lval (Var (cpc_alloc ()), NoOffset),
+          [addr_of continuation;
+          mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
+          locUnknown
+          ) ::
+        (* temp_arglist -> field = field *)
+        List.map2 (fun v f ->
+          Set(
+            (mkMem (Lval (Var temp_arglist,NoOffset)) (Field (f, NoOffset))),
+            Lval(Var v, NoOffset),
+            locUnknown
+          )
+        ) field_args arglist_struct.cfields)
+        @
+        (* cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
+        [Call (
+        Some(Var continuation , NoOffset),
+        Lval(Var (cpc_push ()), NoOffset),
+        [Lval(Var continuation, NoOffset);
+        fun_exp],
+        locUnknown)]
+        ));
+      (* return continuation *)
+      mkStmt(Return (
+        Some (Lval(Var continuation,NoOffset)),
+        locUnknown))
+    ]));
+    new_arglist_fun, arglist_struct in
   object(self)
   inherit (enclosingFunction dummyFunDec)
 
   val mutable stack = []
+  val mutable anon_arglist = []
   val mutable struct_map = []
   val mutable newarglist_map = []
   val mutable current_continuation = makeVarinfo false "dummyVar" voidType
@@ -941,6 +1017,24 @@ class cpsConverter = fun file ->
           with Not_found -> E.s (E.bug "newarglist for \
           function %s not found" f.vname)),
           args@[Lval(Var cc, NoOffset)],
+          locUnknown
+        );
+        ] @ debug "continuation_push" @ post
+    | Call (_, fptr, args, _) ->
+        let targs = match unrollType (typeOf fptr) with
+        | TFun(_, args, _, _) -> argsToList args
+        | t -> E.s (E.bug "unexpected type for indirect function call: %a" d_type t) in
+        let new_arglist_fun, arglist_struct = make_arglist (anon_name()) None targs in
+        (* keep a copy to insert at toplevel later *)
+        anon_arglist <-
+          [GCompTag(arglist_struct, locUnknown); GFun(new_arglist_fun, locUnknown)] @
+          anon_arglist;
+        pre @ [
+      (* cc = new_arglist_fun(... args ..., cc); *)
+        Call (
+          Some(Var cc , NoOffset),
+          Lval (var new_arglist_fun.svar),
+          args@[fptr; Lval(var cc)],
           locUnknown
         );
         ] @ debug "continuation_push" @ post
@@ -1022,71 +1116,9 @@ class cpsConverter = fun file ->
   | (GVarDecl ({vtype=TFun(_,args,va,attr)} as v, _) as g) when is_cps_type v.vtype ->
       (* do not deal with a declaration twice *)
       if List.mem_assq v struct_map then ChangeTo [] else begin
-      let args = argsToList args in
-      (* XXX copy the attributes too? Should be empty anyway *)
-      let rec build_struct = function
-        | [] -> []
-        | [name, typ, attr] when !aligned_continuations ->
-            (* alignment trick *)
-            [name, typ, None, [Attr("aligned",[AInt biggest_alignment])], locUnknown]
-        | (name, typ, attr) :: q ->
-            (name, typ, None, [], locUnknown) :: build_struct q in
-      let fields =  build_struct args in
-      let arglist_struct =
-        mkCompInfo true (v.vname^"_arglist")
-          (fun _ -> fields)
-          (if !aligned_continuations then []
-           else [Attr("packed",[])]) in
-      let comptag = GCompTag (arglist_struct, locUnknown) in
-      let new_arglist_fun = emptyFunction (v.vname^"_push") in
-      let cont_name = Printf.sprintf "cpc_cont_%d" (newVID()) in
-      let new_args = Some (args@[cont_name,(cpc_cont_ptr ()),[]]) in
-      let new_arglist_type = TFun ((cpc_cont_ptr ()), new_args, false, []) in
-      let temp_arglist =
-        makeTempVar new_arglist_fun ~name:"cpc_arglist"
-        (TPtr(TComp(arglist_struct, []),[])) in
-      (* Beware, order matters! One must set function type before getting the
-       * sformals (when setting new_arglist_fun.sbody) *)
-      setFunctionTypeMakeFormals new_arglist_fun new_arglist_type;
-      new_arglist_fun.svar.vinline <- true;
-      new_arglist_fun.svar.vstorage <- Static;
-      new_arglist_fun.sbody <- (
-        let field_args, continuation= cut_last new_arglist_fun.sformals in
-        mkBlock ([mkStmt(Instr (
-          (* XXX DEBUGING *)
-          (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
-          (* temp_arglist = cpc_alloc(&continuation,(int)sizeof(arglist_struct)) *)
-          Call(
-            (if field_args = [] then None (* avoid unused variable warning *)
-            else Some (Var temp_arglist, NoOffset)),
-            Lval (Var (cpc_alloc ()), NoOffset),
-            [addr_of continuation;
-            mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
-            locUnknown
-            ) ::
-          (* temp_arglist -> field = field *)
-          List.map2 (fun v f ->
-            Set(
-              (mkMem (Lval (Var temp_arglist,NoOffset)) (Field (f, NoOffset))),
-              Lval(Var v, NoOffset),
-              locUnknown
-            )
-          ) field_args arglist_struct.cfields)
-          @
-          (* cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
-          [Call (
-          Some(Var continuation , NoOffset),
-          Lval(Var (cpc_push ()), NoOffset),
-          [Lval(Var continuation, NoOffset);
-          mkCast (addr_of v) (TPtr((cpc_fun ()), []))],
-          locUnknown)]
-          ));
-        (* return continuation *)
-        mkStmt(Return (
-          Some (Lval(Var continuation,NoOffset)),
-          locUnknown))
-      ]));
+      let new_arglist_fun, arglist_struct = make_arglist v.vname (Some v) (argsToList args) in
       struct_map <- (v, arglist_struct) :: struct_map;
+      let comptag = GCompTag (arglist_struct, locUnknown) in
       newarglist_map <-
         (v, Lval (Var new_arglist_fun.svar, NoOffset)) :: newarglist_map;
       if v.vstorage = Extern then begin
@@ -1137,7 +1169,12 @@ class cpsConverter = fun file ->
           )  args arglist_struct.cfields)))
         :: fd.sbody.bstmts;
       set_cps fd.svar false; (* this is not a cps function anymore *)
-      ChangeDoChildrenPost([g], fun g -> stack <- []; g)
+      ChangeDoChildrenPost([g], fun g ->
+        (* insert arglist functions used for cps function pointers *)
+        let l = anon_arglist in
+        anon_arglist <- [];
+        stack <- [];
+        l@g)
   | GFun _ ->
       cps_function <- false;
       DoChildren
@@ -1441,7 +1478,13 @@ object (self)
               change (mkAddrOf v)
         end
     | Call (lval_opt, f, arg_lst, loc) when is_cps_exp f ->
-        E.s (E.unimp "cps call through function pointer")
+        (* cps function pointer *)
+        let change retVal = ChangeTo [Call(None,f, retVal::arg_lst, loc)] in
+        begin match lval_opt, unrollType(typeOf f) with
+          | None, TFun(TVoid _, _, _, _) -> DoChildren
+          | None, _       -> change null_ptr
+          | Some v, _     -> change (mkAddrOf v)
+        end
     | _ -> DoChildren
 
 end
