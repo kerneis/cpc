@@ -151,7 +151,7 @@ let is_cps f =
       method vattr (Attr (a, _)) = if a = "cps" then cps_attr := true; SkipChildren
     end)
     f.vtype);
-  f.vcps || !cps_attr
+  !cps_attr
 
 let clear_cps = visitReturnType (object(self)
   inherit nopCilVisitor
@@ -164,7 +164,6 @@ let clear_cps = visitReturnType (object(self)
 end)
 
 let set_cps f iscps =
-  f.vcps <- iscps;
   (* normalize cps type attribute: remove everywhere, and
    * at top-level if iscps is true. *)
   f.vtype <- typeAddAttributes

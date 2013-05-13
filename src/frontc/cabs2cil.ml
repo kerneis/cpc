@@ -681,7 +681,6 @@ let newTempVar (descr:doc) (descrpure:bool) typ =
       vtype = t';
       vdecl = locUnknown;
       vinline = false;
-      vcps = false;
       vattr = [];
       vaddrof = false;
       vreferenced = false;   (* sm *)
@@ -1820,7 +1819,6 @@ let makeGlobalVarinfo (isadef: bool) (vi: varinfo) : varinfo * bool =
           vi.vstorage
     in
     oldvi.vinline <- oldvi.vinline || vi.vinline;
-    oldvi.vcps <- oldvi.vcps || vi.vcps;
     oldvi.vstorage <- newstorage;
     (* If the new declaration has a section attribute, remove any
      * preexisting section attribute. This mimics behavior of gcc that is
@@ -2269,12 +2267,11 @@ let rec doSpecList (suggestedAnonName: string) (* This string will be part of
                                                 * the names for anonymous 
                                                 * structures and enums  *)
                    (specs: A.spec_elem list) 
-       (* Returns the base type, the storage, whether it is inline and cps and
+       (* Returns the base type, the storage, whether it is inline and
         * the (unprocessed) attributes *)
-    : typ * storage * bool * bool * A.attribute list =
+    : typ * storage * bool * A.attribute list =
   (* Do one element and collect the type specifiers *)
   let isinline = ref false in (* If inline appears *)
-  let iscps = ref false in (* If cps appears *)
   (* The storage is placed here *)
   let storage : storage ref = ref NoStorage in
 
@@ -2311,7 +2308,6 @@ let rec doSpecList (suggestedAnonName: string) (* This string will be part of
     | A.SpecAttr a -> attrs := a :: !attrs; acc
     | A.SpecType ts -> ts :: acc
     | A.SpecPattern _ -> E.s (E.bug "SpecPattern in cabs2cil input")
-    | A.SpecCPS -> iscps := true; acc
   in
   (* Now scan the list and collect the type specifiers. Preserve the order *)
   let tspecs = List.fold_right doSpecElem specs [] in
@@ -2590,7 +2586,7 @@ let rec doSpecList (suggestedAnonName: string) (* This string will be part of
     | _ -> 
         E.s (error "Invalid combination of type specifiers")
   in
-  bt,!storage,!isinline,!iscps,List.rev (!attrs @ (convertCVtoAttr !cvattrs))
+  bt,!storage,!isinline,List.rev (!attrs @ (convertCVtoAttr !cvattrs))
                                                            
 (* given some cv attributes, convert them into named attributes for
  * uniform processing *)
@@ -2606,7 +2602,7 @@ and makeVarInfoCabs
                 ~(isformal: bool)
                 ~(isglobal: bool) 
 		(ldecl : location)
-                (bt, sto, inline, cps, attrs)
+                (bt, sto, inline, attrs)
                 (n,ndt,a) 
       : varinfo = 
   let vtype, nattr = 
@@ -2617,8 +2613,6 @@ and makeVarInfoCabs
       bt (A.PARENTYPE(attrs, ndt, a)) in
   if inline && not (isFunctionType vtype) then
     ignore (error "inline for a non-function: %s" n);
-  if cps && not (isFunctionType vtype) then
-    ignore (error "cps for a non-function: %s" n);
   let t = 
     if not isglobal && not isformal && not (sto = Static) then begin
       (* Sometimes we call this on the formal argument of a function with no 
@@ -2634,7 +2628,6 @@ and makeVarInfoCabs
   vi.vstorage <- sto;
   vi.vattr <- nattr;
   vi.vdecl <- ldecl;
-  vi.vcps <- cps;
 
   if false then 
     ignore (E.log "Created varinfo %s : %a\n" vi.vname d_type vi.vtype); 
@@ -3042,9 +3035,9 @@ and isVariableSizedArray (dt: A.decl_type)
   | Some (se, e) -> Some (dt', se, e)
 
 and doOnlyType (specs: A.spec_elem list) (dt: A.decl_type) : typ = 
-  let bt',sto,inl,cps,attrs = doSpecList "" specs in
-  if sto <> NoStorage || inl || cps then
-    E.s (error "Storage, inline or cps specifier in type only");
+  let bt',sto,inl,attrs = doSpecList "" specs in
+  if sto <> NoStorage || inl then
+    E.s (error "Storage or inline specifier in type only");
   let tres, nattr = doType AttrType bt' (A.PARENTYPE(attrs, dt, [])) in
   if nattr <> [] then
     E.s (error "Name attributes in only_type: %a"
@@ -3069,13 +3062,13 @@ and makeCompType (isstruct: bool)
       [] -> ""
     | ((n, _, _, _), _) :: _ -> n
     in
-    let bt, sto, inl, cps, attrs = doSpecList sugg s in
+    let bt, sto, inl, attrs = doSpecList sugg s in
     (* Do the fields *)
     let makeFieldInfo
         (((n,ndt,a,cloc) : A.name), (widtho : A.expression option))
       : fieldinfo = 
-      if sto <> NoStorage || inl || cps then 
-        E.s (error "Storage, inline or cps not allowed for fields");
+      if sto <> NoStorage || inl then 
+        E.s (error "Storage or inline not allowed for fields");
       let ftype, nattr = 
         doType (AttrName false) bt (A.PARENTYPE(attrs, ndt, a)) in 
       (* check for fields whose type is an undefined struct.  This rules
@@ -3631,8 +3624,8 @@ and doExp (asconst: bool)   (* This expression is used as a constant *)
                 if !scopes == [] then begin
                   (* This is a global.  Mark the new vars as static *)
                   let spec_res' =
-                    let t, sto, inl, cps, attrs = spec_res in
-                    t, Static, inl, cps, attrs
+                    let t, sto, inl, attrs = spec_res in
+                    t, Static, inl, attrs
                   in
                   ignore (createGlobal spec_res'
                             ((newvar, dt', [], cabslu), ie'));
@@ -5356,7 +5349,7 @@ and doInit
 
 (* Create and add to the file (if not already added) a global. Return the 
  * varinfo *)
-and createGlobal (specs : (typ * storage * bool * bool * A.attribute list)) 
+and createGlobal (specs : (typ * storage * bool * A.attribute list)) 
                  (((n,ndt,a,cloc), inite) : A.init_name) : varinfo = 
   try
     if debugGlobal then 
@@ -5469,7 +5462,7 @@ and createGlobal (specs : (typ * storage * bool * bool * A.attribute list))
 *)
 
 (* Must catch the Static local variables. Make them global *)
-and createLocal ((_, sto, _, _, _) as specs)
+and createLocal ((_, sto, _, _) as specs)
                 ((((n, ndt, a, cloc) : A.name), 
                   (inite: A.init_expression)) as init_name) 
   : chunk =
@@ -5565,7 +5558,7 @@ and createLocal ((_, sto, _, _, _) as specs)
                         ~isformal:false
                         ~isglobal:false 
 	                loc
-                        (!typeOfSizeOf, NoStorage, false, false, [])
+                        (!typeOfSizeOf, NoStorage, false, [])
                         ("__lengthof" ^ vi.vname,JUSTBASE, []) 
           in
           (* Register it *)
@@ -5666,7 +5659,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
       let doOneDeclarator (acc: chunk) (name: init_name) = 
         let (n,ndt,a,l),_ = name in
         if isglobal then begin
-          let bt,_,_,_,attrs = spec_res in
+          let bt,_,_,attrs = spec_res in
           let vtype, nattr = 
             doType (AttrName false) bt (A.PARENTYPE(attrs, ndt, a)) in
           (match filterAttributes "alias" nattr with
@@ -5754,7 +5747,7 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
     begin
       let funloc = convLoc loc1 in
       let endloc = convLoc loc2 in
-      (* save global vars to restore them later if dealing with an intern cps
+      (* save global vars to restore them later if dealing with an inner
        * function *)
       let fdec = !currentFunctionFDEC in
       let exprid = !constrExprId in
@@ -5812,9 +5805,8 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
 
             (* Fix the NAME and the STORAGE *)
             let _ = 
-              let bt,sto,inl,cps,attrs = doSpecList n specs in
+              let bt,sto,inl,attrs = doSpecList n specs in
               !currentFunctionFDEC.svar.vinline <- inl;
-              !currentFunctionFDEC.svar.vcps <- cps;
               
               let ftyp, funattr = 
                 doType (AttrName false) bt (A.PARENTYPE(attrs, dt, a)) in
@@ -6272,9 +6264,9 @@ and doDecl (isglobal: bool) : A.definition -> chunk = function
 and doTypedef ((specs, nl): A.name_group) = 
   try
     (* Do the specifiers exactly once *)
-    let bt, sto, inl, cps, attrs = doSpecList (suggestAnonName nl) specs in
-    if sto <> NoStorage || inl || cps then
-      E.s (error "Storage, inline or cps specifier not allowed in typedef");
+    let bt, sto, inl, attrs = doSpecList (suggestAnonName nl) specs in
+    if sto <> NoStorage || inl then
+      E.s (error "Storage or inline specifier not allowed in typedef");
     let createTypedef ((n,ndt,a,loc) : A.name) =
       (*    E.s (error "doTypeDef") *)
       try
@@ -6316,9 +6308,9 @@ and doTypedef ((specs, nl): A.name_group) =
 
 and doOnlyTypedef (specs: A.spec_elem list) : unit = 
   try
-    let bt, sto, inl, cps, attrs = doSpecList "" specs in
-    if sto <> NoStorage || inl || cps then 
-      E.s (error "Storage, inline or cps specifier not allowed in typedef");
+    let bt, sto, inl, attrs = doSpecList "" specs in
+    if sto <> NoStorage || inl then 
+      E.s (error "Storage or inline specifier not allowed in typedef");
     let restyp, nattr = doType AttrType bt (A.PARENTYPE(attrs, 
                                                         A.JUSTBASE, [])) in
     if nattr <> [] then
@@ -6658,7 +6650,7 @@ and doStatement (s : A.statement) : chunk =
         | None -> begin
             (* Make a temporary variable *)
             let vchunk = createLocal 
-                (intType, NoStorage, false, false, [])
+                (intType, NoStorage, false, [])
                 (("__compgoto", A.JUSTBASE, [], loc), A.NO_INIT) 
             in
             if not (isEmpty vchunk) then 
@@ -6781,11 +6773,12 @@ and doStatement (s : A.statement) : chunk =
         currentLoc := loc';
         let name = Printf.sprintf "__%s_spawn%d" !currentFunctionFDEC.svar.vname (newVID()) in
         let decl = A.PROTO(A.JUSTBASE, [], false) in
-        let fundef = A.FUNDEF (([A.SpecCPS; A.SpecType A.Tvoid],(name,decl,[],loc)),
+        let fundef = A.FUNDEF (([A.SpecType A.Tvoid],(name,decl,[],loc)),
             { A.blabels = []; A.battrs = []; A.bstmts = [s] }, loc, loc) in
         begin match doDecl false fundef with
         | { stmts = [{ skind = CpcFun (fd, _)} as fdef]; postins = []; cases = [] } ->
                 detachedVars := dv;
+                fd.svar.vtype <- typeAddAttributes [Attr ("cps", [])] fd.svar.vtype;
                 begin match fd.sbody.bstmts with
                 | [] | [ { skind = Return (None, _) } ] ->
                     ignore(E.warn "empty cpc_spawn (at %a)." d_loc loc');

@@ -162,7 +162,6 @@ let rec print_specifiers (specs: spec_elem list) =
     | SpecAttr al -> print_attribute al; space ()
     | SpecType bt -> print_type_spec bt
     | SpecPattern name -> printl ["@specifier";"(";name;")"]
-    | SpecCPS -> printu "cps"
   in
   List.iter print_spec_elem specs
   ;comprint ")"

@@ -102,7 +102,6 @@ and spec_elem =
   | SpecInline
   | SpecType of typeSpecifier
   | SpecPattern of string       (* specifier pattern variable *)
-  | SpecCPS                     (*** CPC ***)
 
 (* decided to go ahead and replace 'spec_elem list' with specifier *)
 and specifier = spec_elem list

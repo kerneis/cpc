@@ -293,7 +293,6 @@ let transformOffsetOf (speclist, dtype) member =
 %token ELSE 
 
 /* CPC */
-%token<Cabs.cabsloc> CPC_CPS
 %token<Cabs.cabsloc> CPC_FUN CPC_SPAWN CPC_LINKED
 
 %token<Cabs.cabsloc> ATTRIBUTE INLINE ASM TYPEOF FUNCTION__ PRETTY_FUNCTION__
@@ -951,8 +950,6 @@ init_declarator:                             /* ISO 6.7 */
 ;
 
 decl_spec_list:                         /* ISO 6.7 */
-                                        /* CPC */
-|   CPC_CPS decl_spec_list_opt          { SpecCPS :: $2, $1 }
                                         /* ISO 6.7.1 */
 |   TYPEDEF decl_spec_list_opt          { SpecTypedef :: $2, $1  }    
 |   EXTERN decl_spec_list_opt           { SpecStorage EXTERN :: $2, $1 }
