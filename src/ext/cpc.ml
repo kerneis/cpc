@@ -2201,7 +2201,6 @@ class functionalizeGoto start enclosing_fun toplevel file =
       let fd = emptyFunction (make_function_name toplevel.svar.vname label) in
       (* the return type of the functionalized chunk *)
       let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
-      let () = set_cps fd.svar true in
       object(self)
         inherit mynopCilVisitor
 
@@ -2222,6 +2221,7 @@ class functionalizeGoto start enclosing_fun toplevel file =
             in
           let args =
           setFunctionType fd (TFun (ret_type,Some [],false,[]));
+          set_cps fd.svar true;
           match last_var with
           | None -> []
           | Some v -> setFormals fd [v]; [Lval(Var v, NoOffset)] in
