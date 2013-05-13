@@ -60,7 +60,7 @@ g(char c)
 {
     int i;
 
-    cps void f(void) { printf("%c: %d\n", c, i); }
+    void f(void) { printf("%c: %d\n", c, i); }
 
     for(i = 0; i < 10; i++) {
         cpc_yield();
