@@ -1022,7 +1022,12 @@ class cpsConverter = fun file ->
         ] @ debug "continuation_push" @ post
     | Call (_, fptr, args, _) ->
         let targs = match unrollType (typeOf fptr) with
-        | TFun(_, args, _, _) -> argsToList args
+        | TFun(TVoid _, args, _, _) -> argsToList args
+        | TFun(t, args, _, _) ->
+            (* Fix the type by adding a pointer to the return type as the first
+             * parameter if we are using environments *)
+            (if !use_environments then ["",TPtr(t, []),[]] else []) @
+            argsToList args
         | t -> E.s (E.bug "unexpected type for indirect function call: %a" d_type t) in
         let new_arglist_fun, arglist_struct = make_arglist (anon_name()) None targs in
         (* keep a copy to insert at toplevel later *)
@@ -1350,7 +1355,7 @@ object (self)
     | (GVarDecl ({vtype=TFun(ret_typ, param_type, va, attr);
                   vstorage = Extern;} as v,
                  _)) when notVoid ret_typ && is_cps_type v.vtype ->
-      let new_ret_type = TPtr (ret_typ, []) in
+      let new_ret_type = TPtr (typeRemoveAttributes ["cps"] ret_typ, []) in
       let new_param_type : (string * Cil.typ * Cil.attributes) list option =
         let params = match param_type with
           | None -> []
@@ -1360,6 +1365,7 @@ object (self)
       in
       let new_fun_type = TFun (voidType, new_param_type, va, attr) in
       v.vtype <- new_fun_type;
+      set_cps v true;
       setAsModified v.vid;
       SkipChildren
 
@@ -1376,7 +1382,7 @@ object (self)
       (* add return arg *)
       let (lazy_FRV, lazy_SFRV) = if notVoid ret_typ then begin
         (* remove return value type *)
-        let new_ret_type = TPtr (ret_typ, []) in
+        let new_ret_type = TPtr (typeRemoveAttributes ["cps"] ret_typ, []) in
         let new_param_type : (string * Cil.typ * Cil.attributes) list option =
           let params = match param_type with
             | None -> []
@@ -1386,6 +1392,7 @@ object (self)
         in
         let new_fun_type = TFun (voidType, new_param_type, va, attr) in
         fd.svar.vtype <- new_fun_type;
+        set_cps fd.svar true;
         setAsModified fd.svar.vid;
 
         (* add new return value as first argument *)
@@ -1645,13 +1652,9 @@ object (self)
       (* add env arguments to sub-functions-call *)
       let add_args stmt =
         let isOurFunction nfos = (* is a sub-function *)
-          let varFromLhost = function
-            | Var v -> List.mem v.vid !funId_list
-            | _ -> false
-          in
           match nfos with
-          | Lval l -> varFromLhost (fst l)
-          | _ -> assert false
+          | Lval (Var v, NoOffset) -> List.mem v.vid !funId_list
+          | _ -> false
         in
         let fun_visitor = (
           object (self)
@@ -1661,7 +1664,8 @@ object (self)
               | Call (ret, nfos, args, loc) ->
                   if isOurFunction nfos
                   then begin
-                    assert (args = []); (* because i'm sad if not *)
+                    if (args <> []) then
+                      E.s (E.bug "arg list should be empty: %a" d_instr i);
                     let new_args = [Lval (Var cpc_env, NoOffset)] in
                     ChangeTo [Call (ret, nfos, new_args, loc)]
                   end else SkipChildren
@@ -1683,7 +1687,8 @@ object (self)
             method vstmt s = match s.skind with
               | CpcFun (local_fd, _) ->
                   (* I think that it's true: *)
-                  assert (local_fd.sformals = []);
+                  if (local_fd.sformals <> []) then
+                    E.s (E.bug "formals should be empty: %a" dn_stmt s);
                   (* create the new env param *)
                   let local_cpc_env =
                     makeFormalVar
@@ -1726,7 +1731,7 @@ class cpsReturnValues = object(self)
   | Call (r, f, args, loc) as i when is_cps_exp f ->
       let typ = fst4 (splitFunctionType (typeOf f)) in
       begin match r with
-      | Some _ when (typeSig typ = typeSig voidType) -> (* Wrong assignment *)
+      | Some _ when (typeSigWithAttrs (fun _ -> [])  typ = typeSig voidType) -> (* Wrong assignment *)
           E.s (E.bug "Assignment of a function returning void: %a" d_instr i);
       | Some (Var v, NoOffset) when (not v.vglob && v.vstorage != Static) ->
           (* Simple assignment to a local, non-static variable: do nothing *)
@@ -1742,11 +1747,17 @@ class cpsReturnValues = object(self)
             Set(l, Lval(Var v, NoOffset), loc)
           ]
       | None when  (typeSigWithAttrs (fun _ -> []) typ <> typeSig voidType) -> (* Missing assignment *)
+          if !use_environments then
+            (* the return type has not been fixed yet, but this case is handled
+             * with a NULL pointer; do nothing *)
+            SkipChildren
+          else begin
           let v = makeTempVar ef typ in
           v.vattr <- [Attr("unused", [])];
           trace (dprintf "Ignoring a cps return value: %a\n" d_instr i);
           ChangeTo [
           Call(Some(Var v, NoOffset), f, args, loc)]
+          end
       | None -> SkipChildren (* No assignement (void function) *)
       end
   | _ -> SkipChildren
@@ -2250,7 +2261,7 @@ class functionalizeGoto start enclosing_fun toplevel file =
 
         method private unstack_block b =
           let compute_returns s =
-            if typeSig ret_type = typeSig voidType
+            if typeSigWithAttrs (fun _ -> [])  ret_type = typeSig voidType
             then None, None
             else
               let f = enclosing_function s file in
