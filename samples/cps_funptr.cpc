@@ -1,0 +1,26 @@
+#include "cpc/cpc_runtime.h"
+/* EXPECTED OUTPUT
+42
+* END OF OUTPUT */
+
+#include <stdio.h>
+
+typedef cps int cps_fun(int);
+
+int cps f(int x) {
+  return x+2;
+}
+
+void cps g(cps_fun *p, int x) {
+  printf("%d\n", (*p)(x));
+}
+
+int main() {
+  cps_fun *fp = &f;
+
+  cpc_spawn g(fp, 40);
+
+  cpc_main_loop();
+
+  return 0;
+}
