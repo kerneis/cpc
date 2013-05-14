@@ -1,24 +1,33 @@
 #include "cpc/cpc_runtime.h"
 /* EXPECTED OUTPUT
 42
+42
+42
+42
 * END OF OUTPUT */
 
 #include <stdio.h>
 
 typedef cps int cps_fun(int);
 
+struct s { cps_fun *f1; cps int (*f2)(int); };
+
 int cps f(int x) {
   return x+2;
 }
 
-void cps g(cps_fun *p, int x) {
-  printf("%d\n", (*p)(x));
+void cps g(cps_fun *p1, cps int (*p2)(int), struct s *p3, int x) {
+  printf("%d\n", (*p1)(x));
+  printf("%d\n", (*p2)(x));
+  printf("%d\n", (*(p3->f1))(x));
+  printf("%d\n", (*(p3->f2))(x));
 }
 
 int main() {
   cps_fun *fp = &f;
+  struct s p = { &f, &f };
 
-  cpc_spawn g(fp, 40);
+  cpc_spawn g(fp, &f, &p, 40);
 
   cpc_main_loop();
 
