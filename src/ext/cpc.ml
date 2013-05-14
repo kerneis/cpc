@@ -1186,6 +1186,21 @@ class cpsConverter = fun file ->
   | _ -> DoChildren
 end
 
+(* Fix cps pointer types, and drop left-over cps attributes in return types
+ * copied all over the place by previous transformations. *)
+class cleanCpsTypes = fun file ->
+  let cpc_fun = find_type "cpc_function" file in
+  object(self)
+    inherit nopCilVisitor
+    method vtype = function
+      | TFun _ as tf when is_cps_type tf ->
+          ChangeTo (cpc_fun())
+      | t -> DoChildren
+
+    method vattr (Attr (a, _)) =
+      if a = "cps" then ChangeTo [] else DoChildren
+end
+
 (********************* Avoid ampersand on local variables ********************)
 
 (* return a set of free variables in a function *)
@@ -2547,6 +2562,8 @@ let stages () = [
   visitCilFileSameGlobals (new printCfg) file end);
   ("Cps conversion\n", fun file ->
   visitCilFile (new cpsConverter file) file);
+  ("Clean CPS types\n", fun file ->
+  visitCilFile (new cleanCpsTypes file) file);
   ("Alpha-conversion\n", fun file ->
   uniqueVarNames file);
   ("Removing unused variables\n", fun file ->
