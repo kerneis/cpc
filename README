@@ -104,13 +104,13 @@ when ./configure is executed. As a result:
   compiling with the autotools, this is already done for mips-linux and 
   mipsel-linux architectures.
 
-Please do not hesitate to report any bug at <kerneis@pps.jussieu.fr>.
+Please do not hesitate to report any bug at <kerneis@pps.univ-paris-diderot.fr>.
 
 Further details:
 ----------------
 Current information about cpc can be found on the cpc web page:
 
-    http://www.pps.jussieu.fr/~kerneis/software/cpc
+    http://www.pps.univ-paris-diderot.fr/~kerneis/software/cpc
 
 The current version of cpc is built upon the CIL framework. Development
 version in kept in sync with CIL svn, but some CIL features have been
@@ -118,5 +118,5 @@ disabled in cpc.  If you want more information about CIL, you'll find
 the (automatically generated) documentation in doc/html. Also checkout:
 http://manju.cs.berkeley.edu/cil/ for the original CIL.
 
-                           Gabriel Kerneis <kerneis@pps.jussieu.fr>
-                           Juliusz Chroboczek <jch@pps.jussieu.fr>
+                           Gabriel Kerneis <kerneis@pps.univ-paris-diderot.fr>
+                           Juliusz Chroboczek <jch@pps.univ-paris-diderot.fr>

@@ -1,8 +1,8 @@
 /*
 Copyright (c) 2008-2011,
-  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
 Copyright (c) 2004-2005,
-  Juliusz Chroboczek  <jch@pps.jussieu.fr>
+  Juliusz Chroboczek  <jch@pps.univ-paris-diderot.fr>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

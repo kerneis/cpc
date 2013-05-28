@@ -1157,7 +1157,7 @@ let feature : featureDescr = {
 
 (*
  * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2002,
  *  George C. Necula    <necula@cs.berkeley.edu>

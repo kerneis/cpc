@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010,
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
