@@ -38,6 +38,8 @@ This is broken on some architectures.
 #define CPC_INDIRECT_PATCH 1
 */
 
+#define cps __attribute__((__cps__))
+
 #ifdef CPC_COMPACT_CONTINUATIONS
 
 #define MAX_ALIGN 1
@@ -70,7 +72,7 @@ typedef struct cpc_continuation {
 
 extern void cpc_print_continuation(struct cpc_continuation *c, char *s);
 
-typedef cpc_continuation *cpc_function(void*);
+typedef cpc_continuation *cpc_function(cpc_continuation *);
 
 struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);

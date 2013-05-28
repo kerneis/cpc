@@ -224,7 +224,7 @@ and childrenTypeSpecifier vis ts =
         
 and childrenSpecElem (vis: cabsVisitor) (se: spec_elem) : spec_elem = 
   match se with
-    SpecTypedef | SpecInline | SpecStorage _ | SpecPattern _ | SpecCPS -> se
+    SpecTypedef | SpecInline | SpecStorage _ | SpecPattern _ -> se
   | SpecCV _ -> se    (* cop out *)
   | SpecAttr a -> begin
       let al' = visitCabsAttribute vis a in

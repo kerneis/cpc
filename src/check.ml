@@ -809,10 +809,6 @@ and checkStmt (s: stmt) =
       | CpcSpawn (e, el, l) ->
           checkInstr(Call(None,e,el,l))
       | CpcFun (f, l) ->
-          if not f.svar.vcps then
-            E.s (bug "Internal function %s without cps tag"
-              f.svar.vname)
-          else
             let (vnl,ret,stmts,gotos) =
               (!varNamesList,!currentReturnType,!statements,!gotoTargets) in
             checkGlobal (GFun (f, l));

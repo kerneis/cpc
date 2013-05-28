@@ -221,7 +221,6 @@ let init_lexicon _ =
                        else 
                          IDENT ("__thread", loc));
       (**** CPC ***)
-      ("cps", fun loc -> CPC_CPS loc);
       ("cpc_spawn", fun loc -> CPC_SPAWN loc);
       ("cpc_linked", fun loc -> CPC_LINKED loc);
     ]
