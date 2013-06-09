@@ -11,8 +11,6 @@ use File::Basename;         # File name parsing
 use Cwd;                    # Directory navigation
 use strict;
 # use Data::Dumper;
-use FindBin;
-use lib "$FindBin::Bin/../ocamlutil";
 
 use RegTest;
 
@@ -570,7 +568,7 @@ addTest("merge-ar ");
 
 addTest("testrun/sizeof1");
 addTest("testrun/sizeof2");
-addTest("testrun/sizeof3");
+addTest("test/sizeof3");
 addTest("test/outofmem ");
 addTest("testrun/builtin ");
 addTest("test/builtin2 ");
@@ -701,7 +699,7 @@ addTest("scott/enumerator_sizeof");
 addTest("testrun/decl_mix_stmt");
 addTest("scott/enumattr");
 addTest("runall/alpha");
-addTest("testrun/blockattr2");
+addTest("testrun/blockattr2 USECFG=1");
 addTest("testrun/extinline2");
 addTest("test/extinline3");
 addTest("testrun/bool");

@@ -588,7 +588,7 @@ let labelsToKeep (ll: label list) : (string * location * bool) * label list =
     | l :: rest -> 
         let newlabel, keepl = 
           match l with
-          | Case _ | Default _ -> sofar, true 
+          | CaseRange _ | Case _ | Default _ -> sofar, true
           | Label (ln, lloc, isorig) -> begin
               match isorig, sofar with 
               | false, ("", _, _) -> 
@@ -691,7 +691,7 @@ class removeUnusedLabels (labelMap: (string, unit) H.t) = object
        switch statement labels, and the 'for_all' accepts this case. *)
     assert (match lrest with
                   [ Default _ ] -> true
-                | _ -> List.for_all (function Case _ -> true | _ -> false) lrest);
+                | _ -> List.for_all (function Case _ | CaseRange _ -> true | _ -> false) lrest);
     s.labels <-
        (if ln <> "" && H.mem labelMap ln then (* We had labels *)
          (Label(ln, lloc, lorig) :: lrest)
