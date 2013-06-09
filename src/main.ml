@@ -65,43 +65,8 @@ let parseOneFile (fname: string) : C.file =
 (** These are the statically-configured features. To these we append the 
   * features defined in Feature_config.ml (from Makefile) *)
   
-let makeCFGFeature : C.featureDescr = 
-  { C.fd_name = "makeCFG";
-    C.fd_enabled = Cilutil.makeCFG;
-    C.fd_description = "make the program look more like a CFG" ;
-    C.fd_extraopt = [];
-    C.fd_doit = (fun f -> 
-      ignore (Partial.calls_end_basic_blocks f) ; 
-      ignore (Partial.globally_unique_vids f) ; 
-      Cil.iterGlobals f (fun glob -> match glob with
-        Cil.GFun(fd,_) -> Cil.prepareCFG fd ;
-                      (* jc: blockinggraph depends on this "true" arg *)
-                      ignore (Cil.computeCFGInfo fd true)
-      | _ -> ()) 
-    );
-    C.fd_post_check = true;
-  } 
-
 let features : C.featureDescr list = 
-  [ Epicenter.feature;
-    Simplify.feature;
-    Canonicalize.feature;
-    Callgraph.feature;
-    Logwrites.feature;
-    Heapify.feature1;
-    Heapify.feature2;
-    Oneret.feature;
-    makeCFGFeature; (* ww: make CFG *must* come before Partial *) 
-    Partial.feature;
-    Simplemem.feature;
-    Sfi.feature;
-    Dataslicing.feature;
-    Logcalls.feature;
-    Ptranal.feature;
-    Liveness.feature;
-    Cpc.feature;
-  ] 
-  @ Feature_config.features 
+  [ Cpc.feature ]
 
 let rec processOneFile (cil: C.file) =
   begin
