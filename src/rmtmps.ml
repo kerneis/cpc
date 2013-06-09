@@ -48,7 +48,7 @@ module E = Errormsg
 module U = Util
 
 (* Set on the command-line: *)
-let keepUnused = ref true (* Defaults to true for CPC *)
+let keepUnused = ref false
 let rmUnusedInlines = ref false
 
 

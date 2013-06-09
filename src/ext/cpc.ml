@@ -2586,7 +2586,7 @@ let stages () = [
   ("Alpha-conversion\n", fun file ->
   uniqueVarNames file);
   ("Removing unused variables\n", fun file ->
-  Rmtmps.keepUnused := false; Rmtmps.removeUnusedTemps file);
+  Rmtmps.removeUnusedTemps file);
 ]
 
 let rec doit (f: file) =
