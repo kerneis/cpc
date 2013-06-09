@@ -1,4 +1,4 @@
-CPC='../bin/cpc.asm.exe'
+CPC='../obj/cpc.asm.exe'
 
 CDEBUGFLAGS=-Wall -g -O2 -Wno-unknown-pragmas
 CLIBS=-I ../include/cpc

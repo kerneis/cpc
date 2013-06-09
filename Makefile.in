@@ -440,7 +440,7 @@ install_cpc_lib := libcpcfull.a libcpc.a
 install_cpc_include := include/cpc/*
 
 install: cilly/Makefile
-	$(MAKE) -C cilly install CILBINDIR="$(libexecdir)/cil"
+	$(MAKE) -C cilly install CILBINDIR="$(pkglibexecdir)"
 	$(INSTALL) -d $(DESTDIR)$(pkglibexecdir)
 	$(INSTALL) -m 0755 $(OBJDIR)/cpc.*.exe $(DESTDIR)$(pkglibexecdir)
 	$(INSTALL) -d $(DESTDIR)$(libdir)
