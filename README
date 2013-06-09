@@ -17,7 +17,7 @@ Requirements:
 -------------
     - autoconf
     - gcc (or another C compiler, but this is untested)
-    - Ocaml >= 3.08 (or >= 3.10 if you want to compile using ocamlbuild)
+    - Ocaml >= 3.08
     - (optional) Latex, to build the cpc manual (in doc directory)
 
 Installation:
@@ -29,9 +29,8 @@ To build cpc, you juste have to run from the root directory:
     make testcpc (optional)
     make install (optional, as root)
 
-This will build the main executable, which is then copied to
-bin/cpc.asm.exe. It also builds the cpc runtime (in runtime directory)
-and a bunch of samples (in samples directory).
+This will build the main executable (obj/cpc.asm.exe).  It also builds the cpc
+runtime (in runtime directory) and a bunch of samples (in samples directory).
 
 At last, if you want to clean everything:
     make uninstall
@@ -40,17 +39,19 @@ At last, if you want to clean everything:
 How to use:
 -----------
 You can either use cpc.asm.exe directly in your Makefiles (see e.g.
-samples/Makefile and runtime/Makefile) or use the cpc wrapper (both to
-be found in the bin/ directory).
+samples/Makefile and runtime/Makefile) or use the cpc wrapper (in cilly/cpc).
 
 If you choose to install cpc, you should add:
     -I cpc
 to your compile flags and:
     -pthread -lcpc
 
+Note that cpc.asm.exe is installed in /usr/local/libexec/cpc/ by default, which
+is probably not in your path.
+
 Options:
 --------
-bin/cpc.asm.exe has the following useful options:
+obj/cpc.asm.exe has the following useful options:
 
 --stage n           perform transformations up to stage n
 --pause             step by step cps marking [*]
@@ -78,7 +79,7 @@ bin/cpc.asm.exe has the following useful options:
                     in packed mode (include the runtime, see cpc_runtime.h).
 
 and a gazillion useless ones, inherited from CIL, that you might
-discover through bin/cpc.asm.exe --help. Using some of them might break
+discover through obj/cpc.asm.exe --help. Using some of them might break
 cpc completely, so use at your own risk!
 
 [*] In step by step mode, here is what you can do at each step:
