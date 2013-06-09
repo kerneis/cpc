@@ -8,7 +8,7 @@ WriteMakefile(
     VERSION_FROM        => 'App/Cilly.pm',
     PM                  => {
         'App/Cilly.pm'      => '$(INST_LIBDIR)/App/Cilly.pm',
-        'App/Cilly/CilConfig.pm' => '$(INST_LIBDIR)/App/Cilly/CpcConfig.pm',
+        'App/Cilly/CilConfig.pm' => '$(INST_LIBDIR)/App/Cilly/CilConfig.pm',
         'App/Cilly/KeptFile.pm' => '$(INST_LIBDIR)/App/Cilly/KeptFile.pm',
         'App/Cilly/OutputFile.pm' => '$(INST_LIBDIR)/App/Cilly/OutputFile.pm',
         'App/Cilly/TempFile.pm' => '$(INST_LIBDIR)/App/Cilly/TempFile.pm',
@@ -36,7 +36,7 @@ package MY;
 sub MY::top_targets {
     my $str = shift->SUPER::top_targets(@_);
 
-    $str =~ s/^pure_all.+/$& fix-cilbindir cpc/m;
+    $str =~ s/^pure_all.+/$& fix-cilbindir/m;
 
     return $str;
 }
@@ -48,16 +48,8 @@ sub MY::postamble {
 
 fix-cilbindir:
 ifdef CILBINDIR
-	perl -p -i -e "s,^.*cilbindir.*$$,\\$$::cilbindir = \"$(CILBINDIR)\";," $(INST_LIBDIR)/App/Cilly/CpcConfig.pm
+	perl -p -i -e "s,^.*cilbindir.*$$,\\$$::cilbindir = \"$(CILBINDIR)\";," $(INST_LIBDIR)/App/Cilly/CillyConfig.pm
 endif
-
-App/Cilly/CpcConfig.pm: App/Cilly/CilConfig.pm
-	cp -f $< $@
-
-cpc: cilly App/Cilly/CpcConfig.pm
-	cp -f $< $@
-	perl -p -i -e "s|cilbindir/cilly|cilbindir/cpc|;s|CilConfig|CpcConfig|" $@
-	chmod 0555 $@
 
 MAKE_FRAG
 

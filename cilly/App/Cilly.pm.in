@@ -543,7 +543,7 @@ sub preprocess_compile {
     Carp::confess "bad dest: $dest" unless $dest->isa('App::Cilly::OutputFile');
 
     my ($base, $dir, $ext) = fileparse($src, "\\.[^.]+");
-    if($ext eq ".c" || $ext eq ".cpp" || $ext eq ".cc") {
+    if($ext eq ".c" || $ext eq ".cpp" || $ext eq ".cc" || $ext eq ".cpc") {
         if($self->leaveAlone($src)) {
             print "Leaving alone $src\n";
             # We leave this alone. So just compile as usual
@@ -590,6 +590,15 @@ sub preprocess_before_cil {
     my ($self, $src, $dest, $ppargs) = @_;
     Carp::confess "bad dest: $dest" unless $dest->isa('App::Cilly::OutputFile');
     my @args = @{$ppargs};
+
+    my $srcname = ref $src ? $src->filename : $src;
+    my ($sbase, $sdir, $sext) = 
+        fileparse($srcname, 
+                  "(\\.c)|(\\.cc)|(\\.cpp)|(\\.i)|(\\.cpc)");
+    if($sext eq ".cpc") {
+        push @args, "-x";
+        push @args, "c";
+    }
 
     # See if we must force some includes
     if(defined $self->{INCLUDEDIR} && !defined($ENV{"CILLY_NOCURE"})) {
@@ -1442,7 +1451,7 @@ sub new {
 # given subroutine is invoked with the self, the argument and the (possibly
 # empty) additional word and a pointer to the list of remaining arguments
 #
-          ["^[^/\\-@].*\\.($::cilbin|c|cpp|cc)\$" => 
+          ["^[^/\\-@].*\\.($::cilbin|c|cpp|cc|cpc)\$" => 
            { TYPE => 'CSOURCE',
              RUN => sub { &MSVC::setFirstSource(@_); } },
            "[^/].*\\.(asm)\$" => { TYPE => 'ASMSOURCE' },
@@ -1495,12 +1504,12 @@ sub msvc_preprocess {
     my $srcname = ref $src ? $src->filename : $src;
     my ($sbase, $sdir, $sext) = 
         fileparse($srcname, 
-                  "(\\.c)|(\\.cc)|(\\.cpp)|(\\.i)");
+                  "(\\.c)|(\\.cc)|(\\.cpp)|(\\.i)|(\\.cpc)");
     # If this is a .cpp file we still hope it is C. Pass the /Tc argument to 
     # cl to force this file to be interpreted as a C one
     my @cmd = @{$ppargs};
 
-    if($sext eq ".cpp") {
+    if($sext eq ".cpp" || $sext eq ".cpc") {
         push @cmd, "/Tc";
     }
     # MSVC cannot be told where to put the output. But we know that it
@@ -1570,7 +1579,7 @@ sub compileOutputFile {
     my($self, $src) = @_;
 
     die "compileOutputFile: not a C source file: $src\n"
-	unless $src =~ /\.($::cilbin|c|cc|cpp|i|asm)$/;
+	unless $src =~ /\.($::cilbin|c|cc|cpp|cpc|i|asm)$/;
 
     Carp::carp ("compileOutputFile: $self->{OPERATION}, $src", 
                    Dumper($self->{OUTARG})) if 0;
@@ -1930,7 +1939,7 @@ sub new {
       
       OPTIONS => 
           [ # Files
-            "[^-].*\\.($::cilbin|c|cpp|cc)\$" => { TYPE => 'CSOURCE' },
+            "[^-].*\\.($::cilbin|c|cpp|cc|cpc)\$" => { TYPE => 'CSOURCE' },
             "[^-].*\\.(s|S)\$" => { TYPE => 'ASMSOURCE' },
             "[^-].*\\.i\$" => { TYPE => 'ISOURCE' },
             # .o files can be linker scripts
@@ -2184,7 +2193,7 @@ sub compileOutputFile {
     my($self, $src) = @_;
 
     die "objectOutputFile: not a C source file: $src\n"
-	unless $src =~ /\.($::cilbin|c|cc|cpp|i|s|S)$/;
+	unless $src =~ /\.($::cilbin|c|cc|cpp|cpc|i|s|S)$/;
     
     if ($self->{OPERATION} eq 'TOOBJ'
         || ($self->{OPERATION} eq 'TOASM')) {
