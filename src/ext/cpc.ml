@@ -77,11 +77,6 @@ end
 (*************** Utility functions *******************************************)
 
 (* From src/cil.ml, modified to transform loops as well *)
-let switch_count = ref (-1)
-let get_switch_count () =
-  incr switch_count;
-  !switch_count
-
 let switch_label = ref (-1)
 
 let break_dest = ref dummyStmt
@@ -248,27 +243,28 @@ class initAmpSet = object(self)
         SkipChildren
 end
 
+let labelCount = ref 0 ;;
+let freshLabel s = incr labelCount; Printf.sprintf "%s_%d" s !labelCount ;;
+
 let rec xform_switch_stmt s = begin
   if not(!break_dest == dummyStmt) then
+  let suffix e = match getInteger e with
+  | Some value ->
+      if compare_cilint value zero_cilint < 0 then
+        "neg_" ^ string_of_cilint (neg_cilint value)
+        else
+          string_of_cilint value
+  | None -> "exp"
+  in
   s.labels <- Util.list_map (fun lab -> match lab with
     Label _ -> lab
   | Case(e,l) ->
-      let suffix =
-	match getInteger e with
-	| Some value ->
-	    if compare_cilint value zero_cilint < 0 then
-	      "neg_" ^ string_of_cilint (neg_cilint value)
-	    else
-	      string_of_cilint value
-	| None ->
-	    incr switch_label;
-	    "exp_" ^ string_of_int !switch_label
-      in
-      let str = Pretty.sprint !lineLength
-	  (Pretty.dprintf "switch_%d_%s" !switch_count suffix) in
-      (Label(str,l,false))
-  | Default(l) -> (Label(Printf.sprintf
-                  "switch_%d_default" !switch_count,l,false))
+      let str = Printf.sprintf "case_%s" (suffix e) in
+      Label(freshLabel str,l,false)
+  | CaseRange(e1,e2,l) ->
+      let str = Printf.sprintf "caserange_%s_%s" (suffix e1) (suffix e2) in
+      Label(freshLabel str,l,false)
+  | Default(l) -> Label(freshLabel "switch_default",l,false)
   ) s.labels ;
   match s.skind with
   | Instr _ | Return _ | Goto _ -> ()
@@ -308,60 +304,83 @@ end and xform_switch_block b =
 
 let eliminate_switch_loop s = match s.skind with
   | Switch(e,b,sl,l) -> begin
-      let i = get_switch_count () in
       let break_stmt = mkStmt (Instr []) in
-      break_stmt.labels <-
-				[Label((Printf.sprintf "switch_%d_break" i),l,false)] ;
-      let break_block = mkBlock [ break_stmt ] in
-      let body_block = b in
-      let body_if_stmtkind = (If(zero,body_block,break_block,l)) in
+      break_stmt.labels <- [Label(freshLabel "switch_break",l,false)] ;
 
-      (* The default case, if present, must be used only if *all*
-      non-default cases fail [ISO/IEC 9899:1999, §6.8.4.2, ¶5]. As a
-      result, we sort the order in which we handle the labels (but not the
-      order in which we print out the statements, so fall-through still
-      works as expected). *)
-      let compare_choices s1 s2 = match s1.labels, s2.labels with
-      | (Default(_) :: _), _ -> 1
-      | _, (Default(_) :: _) -> -1
-      | _, _ -> 0
+      (* To be changed into goto default if there if a [Default] *)
+      let goto_break = mkStmt (Goto (ref break_stmt, l)) in
+
+      (* Return a list of [If] statements, equivalent to the cases of [stmt].
+       * Use a single [If] and || operators if useLogicalOperators is true.
+       * If [stmt] is a [Default], update goto label_break into goto
+       * label_default.
+       *)
+      let xform_choice stmt =
+        let cases = List.filter (function Label _ -> false | _ -> true ) stmt.labels in
+        try (* is this the default case? *)
+          match List.find (function Default _ -> true | _ -> false) cases with
+          | Default dl ->
+              (* We found a [Default], update the fallthrough goto *)
+              goto_break.skind <- Goto(ref stmt, dl);
+              []
+          | _ -> E.s (bug "Unexpected pattern-matching failure")
+        with
+        Not_found -> (* this is a list of specific cases *)
+          match cases with
+          | ((Case (_, cl) | CaseRange (_, _, cl)) as lab) :: lab_tl ->
+            (* assume that integer promotion and type conversion of cases is
+             * performed by cabs2cil. *)
+            let comp_case_range e1 e2 =
+                  BinOp(Ge, e, e1, intType), BinOp(Le, e, e2, intType) in
+            let make_comp lab = begin match lab with
+              | Case (exp, _) -> BinOp(Eq, e, exp, intType)
+              | CaseRange (e1, e2, _) when !useLogicalOperators ->
+                  let c1, c2 = comp_case_range e1 e2 in
+                  BinOp(LAnd, c1, c2, intType)
+              | _ -> E.s (bug "Unexpected pattern-matching failure")
+            end in
+            let make_or_from_cases () =
+              List.fold_left
+                  (fun pred label -> BinOp(LOr, pred, make_comp label, intType))
+                  (make_comp lab) lab_tl
+            in
+            let make_if_stmt pred cl =
+              let then_block = mkBlock [ mkStmt (Goto(ref stmt,cl)) ] in
+              let else_block = mkBlock [] in
+              mkStmt(If(pred,then_block,else_block,cl)) in
+            let make_double_if_stmt (pred1, pred2) cl =
+              let then_block = mkBlock [ make_if_stmt pred2 cl ] in
+              let else_block = mkBlock [] in
+              mkStmt(If(pred1,then_block,else_block,cl)) in
+            if !useLogicalOperators then
+              [make_if_stmt (make_or_from_cases ()) cl]
+            else
+              List.map (function
+                | Case _ as lab -> make_if_stmt (make_comp lab) cl
+                | CaseRange (e1, e2, _) -> make_double_if_stmt (comp_case_range e1 e2) cl
+                | _ -> E.s (bug "Unexpected pattern-matching failure"))
+                cases
+          | Default _ :: _ | Label _ :: _ ->
+              E.s (bug "Unexpected pattern-matching failure")
+          | [] -> E.s (bug "Block missing 'case' and 'default' in switch statement")
       in
-
-      let rec handle_choices sl = match sl with
-        [] -> body_if_stmtkind
-      | stmt_hd :: stmt_tl -> begin
-        let rec handle_labels lab_list = begin
-          match lab_list with
-            [] -> handle_choices stmt_tl
-          | Case(ce,cl) :: lab_tl ->
-              let pred = BinOp(Eq,e,ce,intType) in
-              let then_block = mkBlock [ recordGoto(mkStmt (Goto(ref stmt_hd,cl))) ] in
-              let else_block = mkBlock [ mkStmt (handle_labels lab_tl) ] in
-              If(pred,then_block,else_block,cl)
-          | Default(dl) :: lab_tl ->
-              (* ww: before this was 'if (1) goto label', but as Ben points
-              out this might confuse someone down the line who doesn't have
-              special handling for if(1) into thinking that there are two
-              paths here. The simpler 'goto label' is what we want. *)
-              Block(mkBlock [ recordGoto(mkStmt (Goto(ref stmt_hd,dl))) ;
-                              mkStmt (handle_labels lab_tl) ])
-          | Label(_,_,_) :: lab_tl -> handle_labels lab_tl
-        end in
-        handle_labels stmt_hd.labels
-      end in
-      s.skind <- handle_choices (List.sort compare_choices sl) ;
+      b.bstmts <-
+        (List.flatten (List.map xform_choice sl)) @
+        [goto_break] @
+        b.bstmts @
+        [break_stmt];
+      s.skind <- Block b;
       break_dest := break_stmt;
       xform_switch_block b;
       break_dest := dummyStmt;
-    end
+  end
   | Loop(b,l,_,_) ->
-          let i = get_switch_count () in
           let break_stmt = mkStmt (Instr []) in
-          break_stmt.labels <-
-						[Label((Printf.sprintf "while_%d_break" i),l,false)] ;
+          break_stmt.labels <- [Label(freshLabel "while_break",l,false)] ;
           let cont_stmt = mkStmt (Instr []) in
-          cont_stmt.labels <-
-						[Label((Printf.sprintf "while_%d_continue" i),l,false)] ;
+          cont_stmt.labels <- [Label(freshLabel "while_continue",l,false)] ;
+          (* insert a Continue statement which will be converted into a Goto by
+           * xform_switch_block below *)
           b.bstmts <- cont_stmt :: b.bstmts @ [mkStmt(Continue l); break_stmt] ;
           break_dest := break_stmt;
           cont_dest := cont_stmt;
