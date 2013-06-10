@@ -1,6 +1,6 @@
 /*(*
  * Copyright (c) 2008-2010,
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2003,
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -236,8 +236,7 @@ let transformOffsetOf (speclist, dtype) member =
   in
   let memberExpr = replaceBase member in
   let addrExpr = UNARY (ADDROF, memberExpr) in
-  (* slight cheat: hard-coded assumption that size_t == unsigned int *)
-  let sizeofType = [SpecType Tunsigned], JUSTBASE in
+  let sizeofType = [SpecType Tsizet], JUSTBASE in
   let resultExpr = CAST (sizeofType, SINGLE_INIT addrExpr) in
   resultExpr
 
@@ -294,8 +293,7 @@ let transformOffsetOf (speclist, dtype) member =
 %token ELSE 
 
 /* CPC */
-%token<Cabs.cabsloc> CPC_CPS
-%token<Cabs.cabsloc> CPC_FUN CPC_SPAWN CPC_ATTACHED
+%token<Cabs.cabsloc> CPC_FUN CPC_SPAWN CPC_LINKED
 
 %token<Cabs.cabsloc> ATTRIBUTE INLINE ASM TYPEOF FUNCTION__ PRETTY_FUNCTION__
 %token LABEL__
@@ -893,8 +891,8 @@ statement:
 	                         {CASE (fst $2, $4, (*handleLoc*) $1)}
 |   CASE expression ELLIPSIS expression COLON statement
 	                         {CASERANGE (fst $2, fst $4, $6, (*handleLoc*) $1)}
-|   DEFAULT COLON
-	                         {DEFAULT (NOP $1, (*handleLoc*) $1)}
+|   DEFAULT COLON statement
+	                         {DEFAULT ($3, (*handleLoc*) $1)}
 |   RETURN SEMICOLON		 {RETURN (NOTHING, (*handleLoc*) $1)}
 |   RETURN comma_expression SEMICOLON
 	                         {RETURN (smooth_expression (fst $2), (*handleLoc*) $1)}
@@ -922,8 +920,8 @@ statement:
 
                           /* CPC */
 |   CPC_SPAWN statement   { CPC_SPAWN ($2, (*handleLoc*) $1) }
-|   CPC_ATTACHED LPAREN expression RPAREN statement
-                        { CPC_ATTACHED (fst $3, $5, (*handleLoc*) $1) }
+|   CPC_LINKED LPAREN expression RPAREN statement
+                        { CPC_LINKED (fst $3, $5, (*handleLoc*) $1) }
 |   function_def        { CPC_FUN $1 }
 |   error location   SEMICOLON   { (NOP $2)}
 ;
@@ -952,8 +950,6 @@ init_declarator:                             /* ISO 6.7 */
 ;
 
 decl_spec_list:                         /* ISO 6.7 */
-                                        /* CPC */
-|   CPC_CPS decl_spec_list_opt          { SpecCPS :: $2, $1 }
                                         /* ISO 6.7.1 */
 |   TYPEDEF decl_spec_list_opt          { SpecTypedef :: $2, $1  }    
 |   EXTERN decl_spec_list_opt           { SpecStorage EXTERN :: $2, $1 }

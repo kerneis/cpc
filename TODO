@@ -1,6 +1,4 @@
 [src/ext/cpc.ml]
-* Invalid_argument(List.map2)
-  => make a good error message! (pb: number of parameters)
 * during CPS conversion, if there is a typo in a cpc_spawn, building
   fails with a Not_found error message
   => print a more informative error message (or check it before)

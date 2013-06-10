@@ -1,3 +1,4 @@
+#include <cpc/cpc_runtime.h>
 #include <stdio.h>
 
 cps int test (double tmp);

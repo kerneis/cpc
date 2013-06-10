@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2002,
  *  John Kodumal        <jkodumal@eecs.berkeley.edu>
@@ -246,11 +246,13 @@ and analyze_expr (e : exp ) : A.tau =
       | AlignOf _ -> A.bottom ()
       | UnOp (op, e, t) -> analyze_expr e
       | BinOp (op, e, e', t) -> A.join (analyze_expr e) (analyze_expr e')
+      | Question (_, e, e', _) -> A.join (analyze_expr e) (analyze_expr e')
       | CastE (t, e) -> analyze_expr e
       | AddrOf l ->
           if !fun_ptrs_as_funs && isFunctionType (typeOfLval l) then
             A.rvalue (analyze_lval l)
           else A.address (analyze_lval l)
+      | AddrOfLabel _ -> failwith "not implemented yet" (* XXX *)
       | StartOf l -> A.address (analyze_lval l)
       | AlignOfE _ -> A.bottom ()
       | SizeOfE _ -> A.bottom ()
@@ -315,6 +317,7 @@ let rec analyze_stmt (s : stmt ) : unit =
             | None -> ()
         end
     | Goto (s', l) -> () (* analyze_stmt(!s') *)
+    | ComputedGoto (e, l) -> ()
     | If (e, b, b', l) ->
         (* ignore the expression e; expressions can't be side-effecting *)
         analyze_block b;

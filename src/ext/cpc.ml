@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010,
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -51,9 +51,8 @@ let is_label = function Label _ -> true | _ -> false
 exception FoundFun of fundec
 exception FoundVar of varinfo
 
-let external_patch = ref true
-
 let aligned_continuations = ref true
+let use_environments = ref false
 
 (* Avoid stack-overflow on recursive structures *)
 let (=) x y = (compare x y) = 0
@@ -78,11 +77,6 @@ end
 (*************** Utility functions *******************************************)
 
 (* From src/cil.ml, modified to transform loops as well *)
-let switch_count = ref (-1)
-let get_switch_count () =
-  incr switch_count;
-  !switch_count
-
 let switch_label = ref (-1)
 
 let break_dest = ref dummyStmt
@@ -109,25 +103,69 @@ module VS = Set.Make (struct
   let compare v v' = compare v.vid v'.vid
 end)
 
+module StringSet = Set.Make (struct
+  type t = string
+  let compare = compare
+end)
+
 let ampSet = ref VS.empty
 let add_amp v = ampSet := VS.add v !ampSet
-let safe_functions = [
-  "writev";
-  "curl_easy_getinfo";
-  "snprintf";
-  "memcmp";
-  "getpeername";
-  "setsockopt";
-  "memset";
-  "bind";
-  "accept";
-]
+let safe_functions = ref StringSet.empty
+let add_safe f = safe_functions := StringSet.add f !safe_functions
 
-let is_safe f = match f.vtype with
-  | TFun (_, _, _, attr) ->
-      hasAttribute "cpc_no_retain" attr ||
-      List.mem f.vname safe_functions
-  | _ -> assert false
+
+class initSafeFunctions = object(self)
+    inherit nopCilVisitor
+    method vglob = function
+    | GPragma(Attr("cpc_no_retain", l), _) ->
+        let sf = String.concat ", " (List.map (function
+          | AStr f -> add_safe f; f
+          | p -> E.s (E.error "wrong parameter in cpc_no_retain: %a" d_attrparam p))
+          l) in
+        ChangeTo [GText (Printf.sprintf "/* safe functions: %s*/" sf)]
+    | _ -> SkipChildren
+end
+
+
+let is_safe f =
+      hasAttribute "cpc_no_retain" f.vattr ||
+      StringSet.mem f.vname !safe_functions
+
+let visitReturnType visitor t = match unrollType t with
+  | TFun(rt, args, isva, a) -> TFun(visitCilType visitor rt, args, isva, visitCilAttributes visitor a)
+  | _ -> E.s (E.bug "visitReturnType called on a non-function type")
+
+let is_cps_type ft =
+  let cps_attr = ref false in
+  ignore(visitReturnType
+    (object(self)
+      inherit nopCilVisitor
+      method vtype t = match t with
+      | TFun _ -> SkipChildren
+      | _ -> DoChildren
+      method vattr (Attr (a, _)) = if a = "cps" then cps_attr := true; SkipChildren
+    end)
+    ft);
+  !cps_attr
+
+let is_cps_exp e = is_cps_type (typeOf e)
+
+let clear_cps = visitReturnType (object(self)
+  inherit nopCilVisitor
+  (* XXX Remove every cps type attribute, except inside function parameter types:
+   * cps int f(cps int()(int)) -> int f(cps int()(int)) *)
+  method vtype t = match t with
+  | TFun _ -> SkipChildren
+  | _ -> DoChildren
+  method vattr (Attr (a, _)) = if a = "cps" then ChangeTo [] else SkipChildren
+end)
+
+let set_cps f iscps =
+  (* normalize cps type attribute: remove everywhere, and
+   * at top-level if iscps is true. *)
+  f.vtype <- typeAddAttributes
+    (if iscps then [Attr ("cps", [])] else [])
+    (clear_cps f.vtype)
 
 class initAmpSet = object(self)
     inherit mynopCilVisitor
@@ -136,13 +174,13 @@ class initAmpSet = object(self)
     val mutable call_name = ""
 
     method vinst :  instr -> instr list visitAction = function
-    | Call(_, Lval(Var f, NoOffset), args, _) when not f.vcps && is_safe f ->
+    | Call(_, Lval(Var f, NoOffset), args, _) when not (is_cps_type f.vtype) && is_safe f ->
         assert(not record && call_name = "");
         call_name <- f.vname;
         ignore(List.map (visitCilExpr (self:>cilVisitor)) args);
         call_name <- "";
         SkipChildren
-    | Call(_, Lval(Var f, NoOffset), args, _) when not f.vcps ->
+    | Call(_, Lval(Var f, NoOffset), args, _) when not (is_cps_type f.vtype) ->
         assert(not record && call_name = "");
         record <- true;
         call_name <- f.vname;
@@ -191,7 +229,7 @@ class initAmpSet = object(self)
     
     method vfunc fd =
       (* No CpcFun thanks to initial lambda-lifting *)
-      if fd.svar.vcps then begin
+      if is_cps_type fd.svar.vtype then begin
         trace(dprintf "[boxing] %s %d\n" fd.svar.vname (List.length fd.sformals + List.length
         fd.slocals));
         List.iter (fun v -> if isArrayType v.vtype then begin 
@@ -205,31 +243,32 @@ class initAmpSet = object(self)
         SkipChildren
 end
 
+let labelCount = ref 0 ;;
+let freshLabel s = incr labelCount; Printf.sprintf "%s_%d" s !labelCount ;;
 
 let rec xform_switch_stmt s = begin
   if not(!break_dest == dummyStmt) then
+  let suffix e = match getInteger e with
+  | Some value ->
+      if compare_cilint value zero_cilint < 0 then
+        "neg_" ^ string_of_cilint (neg_cilint value)
+        else
+          string_of_cilint value
+  | None -> "exp"
+  in
   s.labels <- Util.list_map (fun lab -> match lab with
     Label _ -> lab
   | Case(e,l) ->
-      let suffix =
-	match getInteger e with
-	| Some value ->
-	    if compare_cilint value zero_cilint < 0 then
-	      "neg_" ^ string_of_cilint (neg_cilint value)
-	    else
-	      string_of_cilint value
-	| None ->
-	    incr switch_label;
-	    "exp_" ^ string_of_int !switch_label
-      in
-      let str = Pretty.sprint !lineLength
-	  (Pretty.dprintf "switch_%d_%s" !switch_count suffix) in
-      (Label(str,l,false))
-  | Default(l) -> (Label(Printf.sprintf
-                  "switch_%d_default" !switch_count,l,false))
+      let str = Printf.sprintf "case_%s" (suffix e) in
+      Label(freshLabel str,l,false)
+  | CaseRange(e1,e2,l) ->
+      let str = Printf.sprintf "caserange_%s_%s" (suffix e1) (suffix e2) in
+      Label(freshLabel str,l,false)
+  | Default(l) -> Label(freshLabel "switch_default",l,false)
   ) s.labels ;
   match s.skind with
   | Instr _ | Return _ | Goto _ -> ()
+  | ComputedGoto _ -> E.s (E.bug "CPC should run with computed gotos disabled.")
   | Break(l) -> if (not(!break_dest == dummyStmt)) then
                 s.skind <- Goto(ref !break_dest,l);
                 ignore(recordGoto s)
@@ -265,60 +304,83 @@ end and xform_switch_block b =
 
 let eliminate_switch_loop s = match s.skind with
   | Switch(e,b,sl,l) -> begin
-      let i = get_switch_count () in
       let break_stmt = mkStmt (Instr []) in
-      break_stmt.labels <-
-				[Label((Printf.sprintf "switch_%d_break" i),l,false)] ;
-      let break_block = mkBlock [ break_stmt ] in
-      let body_block = b in
-      let body_if_stmtkind = (If(zero,body_block,break_block,l)) in
+      break_stmt.labels <- [Label(freshLabel "switch_break",l,false)] ;
 
-      (* The default case, if present, must be used only if *all*
-      non-default cases fail [ISO/IEC 9899:1999, §6.8.4.2, ¶5]. As a
-      result, we sort the order in which we handle the labels (but not the
-      order in which we print out the statements, so fall-through still
-      works as expected). *)
-      let compare_choices s1 s2 = match s1.labels, s2.labels with
-      | (Default(_) :: _), _ -> 1
-      | _, (Default(_) :: _) -> -1
-      | _, _ -> 0
+      (* To be changed into goto default if there if a [Default] *)
+      let goto_break = mkStmt (Goto (ref break_stmt, l)) in
+
+      (* Return a list of [If] statements, equivalent to the cases of [stmt].
+       * Use a single [If] and || operators if useLogicalOperators is true.
+       * If [stmt] is a [Default], update goto label_break into goto
+       * label_default.
+       *)
+      let xform_choice stmt =
+        let cases = List.filter (function Label _ -> false | _ -> true ) stmt.labels in
+        try (* is this the default case? *)
+          match List.find (function Default _ -> true | _ -> false) cases with
+          | Default dl ->
+              (* We found a [Default], update the fallthrough goto *)
+              goto_break.skind <- Goto(ref stmt, dl);
+              []
+          | _ -> E.s (bug "Unexpected pattern-matching failure")
+        with
+        Not_found -> (* this is a list of specific cases *)
+          match cases with
+          | ((Case (_, cl) | CaseRange (_, _, cl)) as lab) :: lab_tl ->
+            (* assume that integer promotion and type conversion of cases is
+             * performed by cabs2cil. *)
+            let comp_case_range e1 e2 =
+                  BinOp(Ge, e, e1, intType), BinOp(Le, e, e2, intType) in
+            let make_comp lab = begin match lab with
+              | Case (exp, _) -> BinOp(Eq, e, exp, intType)
+              | CaseRange (e1, e2, _) when !useLogicalOperators ->
+                  let c1, c2 = comp_case_range e1 e2 in
+                  BinOp(LAnd, c1, c2, intType)
+              | _ -> E.s (bug "Unexpected pattern-matching failure")
+            end in
+            let make_or_from_cases () =
+              List.fold_left
+                  (fun pred label -> BinOp(LOr, pred, make_comp label, intType))
+                  (make_comp lab) lab_tl
+            in
+            let make_if_stmt pred cl =
+              let then_block = mkBlock [ mkStmt (Goto(ref stmt,cl)) ] in
+              let else_block = mkBlock [] in
+              mkStmt(If(pred,then_block,else_block,cl)) in
+            let make_double_if_stmt (pred1, pred2) cl =
+              let then_block = mkBlock [ make_if_stmt pred2 cl ] in
+              let else_block = mkBlock [] in
+              mkStmt(If(pred1,then_block,else_block,cl)) in
+            if !useLogicalOperators then
+              [make_if_stmt (make_or_from_cases ()) cl]
+            else
+              List.map (function
+                | Case _ as lab -> make_if_stmt (make_comp lab) cl
+                | CaseRange (e1, e2, _) -> make_double_if_stmt (comp_case_range e1 e2) cl
+                | _ -> E.s (bug "Unexpected pattern-matching failure"))
+                cases
+          | Default _ :: _ | Label _ :: _ ->
+              E.s (bug "Unexpected pattern-matching failure")
+          | [] -> E.s (bug "Block missing 'case' and 'default' in switch statement")
       in
-
-      let rec handle_choices sl = match sl with
-        [] -> body_if_stmtkind
-      | stmt_hd :: stmt_tl -> begin
-        let rec handle_labels lab_list = begin
-          match lab_list with
-            [] -> handle_choices stmt_tl
-          | Case(ce,cl) :: lab_tl ->
-              let pred = BinOp(Eq,e,ce,intType) in
-              let then_block = mkBlock [ recordGoto(mkStmt (Goto(ref stmt_hd,cl))) ] in
-              let else_block = mkBlock [ mkStmt (handle_labels lab_tl) ] in
-              If(pred,then_block,else_block,cl)
-          | Default(dl) :: lab_tl ->
-              (* ww: before this was 'if (1) goto label', but as Ben points
-              out this might confuse someone down the line who doesn't have
-              special handling for if(1) into thinking that there are two
-              paths here. The simpler 'goto label' is what we want. *)
-              Block(mkBlock [ recordGoto(mkStmt (Goto(ref stmt_hd,dl))) ;
-                              mkStmt (handle_labels lab_tl) ])
-          | Label(_,_,_) :: lab_tl -> handle_labels lab_tl
-        end in
-        handle_labels stmt_hd.labels
-      end in
-      s.skind <- handle_choices (List.sort compare_choices sl) ;
+      b.bstmts <-
+        (List.flatten (List.map xform_choice sl)) @
+        [goto_break] @
+        b.bstmts @
+        [break_stmt];
+      s.skind <- Block b;
       break_dest := break_stmt;
       xform_switch_block b;
       break_dest := dummyStmt;
-    end
+  end
   | Loop(b,l,_,_) ->
-          let i = get_switch_count () in
           let break_stmt = mkStmt (Instr []) in
-          break_stmt.labels <-
-						[Label((Printf.sprintf "while_%d_break" i),l,false)] ;
+          break_stmt.labels <- [Label(freshLabel "while_break",l,false)] ;
           let cont_stmt = mkStmt (Instr []) in
-          cont_stmt.labels <-
-						[Label((Printf.sprintf "while_%d_continue" i),l,false)] ;
+          cont_stmt.labels <- [Label(freshLabel "while_continue",l,false)] ;
+          (* insert a Continue statement which will be converted into a Goto by
+           * xform_switch_block below *)
           b.bstmts <- cont_stmt :: b.bstmts @ [mkStmt(Continue l); break_stmt] ;
           break_dest := break_stmt;
           cont_dest := cont_stmt;
@@ -382,7 +444,7 @@ let timestamp () =
 
 let make_label =
   let i = ref 0 in
-  fun () -> incr i; Printf.sprintf "add_goto%d" !i
+  fun () -> incr i; Printf.sprintf "pc%d"  !i
 
 let add_goto src dst =
   assert (src != dummyStmt && dst != dummyStmt);
@@ -413,8 +475,8 @@ let make_ret_var fd typ =
 
 (* return the cps var just before a statement *)
 let rec find_var = function
-  | [Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), _, _)]
-      when f.vcps ->
+  | [Call (Some (Var v, NoOffset), f, _, _)]
+      when is_cps_exp f ->
         FoundVar v
   | [] | [_] -> Not_found
   | hd::tl -> find_var tl
@@ -490,11 +552,14 @@ let stmt_in_fun stmt fd =
 exception FoundCompinfo of compinfo
 
 let find_struct name file =
+  let s = lazy begin
   let visitor = object(self)
     inherit mynopCilVisitor
 
     method vglob = function
       | GCompTag ({cname = n} as c,_) when n = name ->
+          raise (FoundCompinfo c)
+      | GCompTagDecl ({cname = n} as c,_) when n = name ->
           raise (FoundCompinfo c)
       | _ -> DoChildren
   end in
@@ -502,10 +567,13 @@ let find_struct name file =
     visitCilFileSameGlobals visitor file;
     E.s (E.bug "compinfo not found for: %s\n" name)
   with FoundCompinfo c -> c
+  end in
+  fun () -> Lazy.force s
 
 exception FoundField of fieldinfo
 
 let find_field struct_name field_name file =
+  let f = lazy begin
   let visitor = object(self)
     inherit mynopCilVisitor
 
@@ -521,10 +589,13 @@ let find_field struct_name field_name file =
   | FoundField f -> f
   | Not_found ->
       E.s (E.bug "fieldinfo not found for: %s in %s\n" field_name struct_name)
+  end in
+  fun () -> Lazy.force f
 
 exception FoundType of typ
 
 let find_type name file =
+  let t = lazy begin
   let visitor = object(self)
     inherit mynopCilVisitor
 
@@ -537,8 +608,11 @@ let find_type name file =
     visitCilFileSameGlobals visitor file;
     E.s (E.bug "typeinfo not found for: %s\n" name)
   with FoundType t -> t
+  end in
+  fun () -> Lazy.force t
 
 let find_function name file =
+  let f = lazy begin
   let visitor = object(self)
     inherit mynopCilVisitor
 
@@ -552,6 +626,8 @@ let find_function name file =
     visitCilFileSameGlobals visitor file;
     E.s (E.bug "function not found: %s\n" name)
   with FoundVar v -> v
+  end in
+  fun () -> Lazy.force f
 
 (******************** CPS Marking ********************************************)
 
@@ -622,24 +698,17 @@ class markCps = fun file -> object(self)
     in match i with
     | Set _ | Asm _ -> c.last_var <- None; false
     (* Non cps call *)
-    | Call (_, Lval (Var f, NoOffset), _, _) when not f.vcps ->
+    | Call (_, f, _, _) when not (is_cps_exp f) ->
         c.last_var <- None; false
     (* Cps call without assignment *)
-    | Call (None, Lval (Var f, NoOffset), args, _) ->
+    | Call (None, _, args, _) ->
         let res = check_var args in
         c.last_var <- None; res
     (* Cps call with assignment *)
-    | Call (Some (Var v, NoOffset), Lval (Var f, NoOffset), args, _) ->
+    | Call (Some (Var v, NoOffset), _, args, _) ->
         check_var args && (c.last_var <- Some v; true)
-    | Call (Some l, Lval (Var f, NoOffset), _, _) ->
-        E.s (E.bug "%a should be a variable (and this is REALLY annoying)" dn_lval l)
-    (* Weird call *)
-    | Call _ ->
-        if c.cps_fun then E.warn
-          "I hope this has nothing to do with a cps call: %a"
-          dn_instr i;
-        c.last_var <- None;
-        false
+    | Call (Some l, _, _, _) ->
+        E.s (E.bug "%a should be a variable" dn_lval l)
 
   method vinst (i: instr) : instr list visitAction =
     match self#is_cps i, c.cps_fun with
@@ -743,6 +812,7 @@ class markCps = fun file -> object(self)
     (* Control flow in cps context *)
     | Goto (g, _) when c.cps_con ->
         raise (FunctionalizeGoto (!g,c))
+    | ComputedGoto _ -> E.s (E.bug "CPC should run with computed gotos disabled.")
     | Break _ | Continue _ when c.cps_con ->
         raise (TrivializeStmt c.enclosing_stmt);
     | If _ | Switch _ | Loop _ when c.cps_con ->
@@ -802,7 +872,7 @@ class markCps = fun file -> object(self)
     Cfg.clearCFGinfo f;
     ignore(Cfg.cfgFun f);
     let context = copy_context c in
-    c <- {(fresh_context f) with cps_fun = f.svar.vcps};
+    c <- {(fresh_context f) with cps_fun = is_cps_type f.svar.vtype};
     ChangeDoChildrenPost (f, fun f -> c <- context; f)
 
 end
@@ -816,59 +886,6 @@ let extract var name = match !var with
 let biggest_alignment = !Machdep.theMachine.Machdep.alignof_aligned
 
 class cpsConverter = fun file ->
-  (* Extraction of types, struct, and functions from runtime *)
-  let cpc_cont_ptr =
-    TPtr(TComp(find_struct "cpc_continuation" file,[]),[]) in
-  let cpc_fun_ptr = TPtr(find_type "cpc_function" file,[]) in
-  let cpc_alloc = find_function "cpc_alloc" file in
-  let cpc_dealloc =  find_function "cpc_dealloc" file in
-  let cpc_push = find_function "cpc_continuation_push" file in
-  let patch cont value f =
-    let typ = typeOf value in
-    let temp = makeTempVar f ~name:"patch" typ in
-    (* typ temp = value *)
-    (Set((Var temp, NoOffset), value, locUnknown)) ::
-    if !external_patch then
-      let cpc_patch = find_function "cpc_continuation_patch" file in
-       (* cpc_patch(cont, sizeof(typ), &temp); *)
-      [ Call(None,Lval(Var cpc_patch, NoOffset), [
-        Lval(Var cont, NoOffset);
-        mkCast (sizeOf typ) !typeOfSizeOf;
-        mkCast (addr_of temp) voidPtrType],
-        locUnknown)]
-    else
-      let memcpy = find_function "__builtin_memcpy" file in
-      let cpc_arg = makeTempVar f ~name:"cpc_arg" voidPtrType in [
-      (* cpc_arg = cont->c + cont->length - __BIGGEST_ALIGNMENT__ -
-                     ((sizeof(typ) - 1) / __BIGGEST_ALIGNMENT__ + 1) * __BIGGEST_ALIGNMENT__ *)
-        Set((Var cpc_arg, NoOffset),
-        (if !aligned_continuations then
-        Formatcil.cExp
-        "cont->c + cont->length - %d:biggestalign - ((%e:sizetyp - 1) / %d:biggestalign + 1) * %d:biggestalign"
-          [("cont", Fv cont); ("sizefp", Fe (sizeOf cpc_fun_ptr));
-          ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)]
-        else
-        (* compact continuations *)
-        Formatcil.cExp
-        "cont->c + cont->length - %e:sizefp - %e:sizetyp"
-          [("cont", Fv cont); ("sizefp", Fe (sizeOf cpc_fun_ptr));
-          ("sizetyp", Fe (sizeOf typ)); ("biggestalign", Fd biggest_alignment)]
-        ),
-        locUnknown);
-      (* memcpy(cpc_arg, &temp, sizeof(typ)) *)
-        Call(None, Lval(Var memcpy, NoOffset), [
-        Lval(Var cpc_arg, NoOffset);
-        mkCast (addr_of temp) voidPtrType;
-        mkCast (sizeOf typ) !typeOfSizeOf],
-        locUnknown)]
-    in
-  let cpc_spawn = find_function "cpc_prim_spawn" file in
-  let spawn cc context =
-    (* cpc_prim_spawn(cc, context); *)
-    [Call(None,Lval(Var cpc_spawn, NoOffset), [
-      Lval(Var cc, NoOffset);
-      context
-      ],locUnknown)] in
   (* XXX DEBUGING *)
   let debug =
     if !E.debugFlag then
@@ -878,10 +895,116 @@ class cpsConverter = fun file ->
       fun s -> [Call(None,Lval(Var print,
       NoOffset),[mkString (Printf.sprintf "** %s\n" s)],locUnknown)]
     else fun _ -> [] in
+  (* Extraction of types, struct, and functions from runtime *)
+  let cpc_cont = find_struct "cpc_continuation" file in
+  let cpc_cont_ptr () = TPtr(TComp(cpc_cont (), []),[]) in
+  let cpc_fun = find_type "cpc_function" file in
+  let cpc_alloc = find_function "cpc_alloc" file in
+  let cpc_dealloc =  find_function "cpc_dealloc" file in
+  let cpc_push = find_function "cpc_continuation_push" file in
+  let anon_name = let r = ref 0 in fun () -> incr r; Printf.sprintf "anon%d" !r in
+  let patch cont value f =
+    let typ = typeOf value in
+    let temp = makeTempVar f ~name:"patch" typ in
+    (* typ temp = value *)
+    (Set((Var temp, NoOffset), value, locUnknown)) ::
+    let cpc_patch = find_function "cpc_continuation_patch" file in
+     (* cpc_patch(cont, sizeof(typ), &temp); *)
+    [ Call(None,Lval(Var (cpc_patch ()), NoOffset), [
+      Lval(Var cont, NoOffset);
+      mkCast (sizeOf typ) !typeOfSizeOf;
+      mkCast (addr_of temp) voidPtrType],
+      locUnknown)]
+    in
+  let cpc_spawn = find_function "cpc_prim_spawn" file in
+  let spawn cc context =
+    (* cpc_prim_spawn(cc, context); *)
+    [Call(None,Lval(Var (cpc_spawn ()), NoOffset), [
+      Lval(Var cc, NoOffset);
+      context
+      ],locUnknown)] in
+  (* Build a function name_arglist which pushes fun_ptr and args on the
+   * continuation.  Return the definitions of this function and of the structure
+   * used to push the args on the continuation.  *)
+  let make_arglist name fun_name args =
+    let fix_name name = if name = "" then anon_name() else name in
+    let args = List.map (fun (n, t, a) -> (fix_name n, t, a)) args in
+    (* XXX copy the attributes too? Should be empty anyway *)
+    let rec build_struct = function
+      | [] -> []
+      | [name, typ, attr] when !aligned_continuations ->
+          (* alignment trick *)
+          [name, typ, None, [Attr("aligned",[AInt biggest_alignment])], locUnknown]
+      | (name, typ, attr) :: q ->
+          (name, typ, None, [], locUnknown) :: build_struct q in
+    let fields =  build_struct args in
+    let arglist_struct =
+      mkCompInfo true (name^"_arglist")
+        (fun _ -> fields)
+        (if !aligned_continuations then []
+         else [Attr("packed",[])]) in
+    let new_arglist_fun = emptyFunction (name^"_push") in
+    let cont_name = Printf.sprintf "cpc_cont_%d" (newVID()) in
+    let fun_ptr_name = Printf.sprintf "fun_ptr_%d" (newVID()) in
+    let fun_ptr_arg = if fun_name = None then [fun_ptr_name,TPtr((cpc_fun()), []), []] else [] in
+    let new_args = Some (args @ fun_ptr_arg @[cont_name,(cpc_cont_ptr ()),[]]) in
+    let new_arglist_type = TFun ((cpc_cont_ptr ()), new_args, false, []) in
+    let temp_arglist =
+      makeTempVar new_arglist_fun ~name:"cpc_arglist"
+      (TPtr(TComp(arglist_struct, []),[])) in
+    (* Beware, order matters! One must set function type before getting the
+     * sformals (when setting new_arglist_fun.sbody) *)
+    setFunctionTypeMakeFormals new_arglist_fun new_arglist_type;
+    new_arglist_fun.svar.vinline <- true;
+    new_arglist_fun.svar.vstorage <- Static;
+    new_arglist_fun.sbody <- (
+      let rest, continuation = cut_last new_arglist_fun.sformals in
+      let field_args, fun_exp = match fun_name with
+        | None ->
+            (* anonymous cps call, function ptr is the penultimate parameter *)
+            let f_a, ptr = cut_last rest in
+            f_a, Lval(var ptr)
+        | Some f -> rest, mkCast (addr_of f) (TPtr((cpc_fun ()), [])) in
+      mkBlock ([mkStmt(Instr (
+        (* XXX DEBUGING *)
+        (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
+        (* temp_arglist = cpc_alloc(&continuation,(int)sizeof(arglist_struct)) *)
+        Call(
+          (if field_args = [] then None (* avoid unused variable warning *)
+          else Some (Var temp_arglist, NoOffset)),
+          Lval (Var (cpc_alloc ()), NoOffset),
+          [addr_of continuation;
+          mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
+          locUnknown
+          ) ::
+        (* temp_arglist -> field = field *)
+        List.map2 (fun v f ->
+          Set(
+            (mkMem (Lval (Var temp_arglist,NoOffset)) (Field (f, NoOffset))),
+            Lval(Var v, NoOffset),
+            locUnknown
+          )
+        ) field_args arglist_struct.cfields)
+        @
+        (* cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
+        [Call (
+        Some(Var continuation , NoOffset),
+        Lval(Var (cpc_push ()), NoOffset),
+        [Lval(Var continuation, NoOffset);
+        fun_exp],
+        locUnknown)]
+        ));
+      (* return continuation *)
+      mkStmt(Return (
+        Some (Lval(Var continuation,NoOffset)),
+        locUnknown))
+    ]));
+    new_arglist_fun, arglist_struct in
   object(self)
   inherit (enclosingFunction dummyFunDec)
 
   val mutable stack = []
+  val mutable anon_arglist = []
   val mutable struct_map = []
   val mutable newarglist_map = []
   val mutable current_continuation = makeVarinfo false "dummyVar" voidType
@@ -892,37 +1015,53 @@ class cpsConverter = fun file ->
     let cc,pre,post =
       if apply_later
       then
-        let var = (makeTempVar ef ~name:"cpc_apply_later" cpc_cont_ptr) in
+        let var = (makeTempVar ef ~name:"cpc_apply_later" (cpc_cont_ptr ())) in
         var,
         [(* apply_later = (void* ) 0; *)
         Set((Var var, NoOffset),
-          mkCast (integer 0) cpc_cont_ptr,locUnknown)],
+          mkCast (integer 0) (cpc_cont_ptr ()),locUnknown)],
         spawn
           var
           (if cps_function
           then Lval(Var current_continuation, NoOffset)
-          else mkCast (mkCast (integer 0) voidPtrType) cpc_cont_ptr)
+          else mkCast (mkCast (integer 0) voidPtrType) (cpc_cont_ptr ()))
       else (current_continuation,[],[]) in
     match i with
     (* Cps call with or without assignment (we don't care at this level) *)
     | Call (_, Lval (Var f, NoOffset), args, _) -> pre @ [
-      (* cc = new_arglist_fun(... args ..., cc);
-         cc = cpc_continuation_push(cpc_cc,((cpc_function* )f)); *)
+      (* cc = new_arglist_fun(... args ..., cc); *)
         Call (
           Some(Var cc , NoOffset),
-          (try List.assoc f newarglist_map
+          (try List.assq f newarglist_map
           with Not_found -> E.s (E.bug "newarglist for \
           function %s not found" f.vname)),
           args@[Lval(Var cc, NoOffset)],
           locUnknown
         );
+        ] @ debug "continuation_push" @ post
+    | Call (_, fptr, args, _) ->
+        let targs = match unrollType (typeOf fptr) with
+        | TFun(TVoid _, args, _, _) -> argsToList args
+        | TFun(t, args, _, _) ->
+            (* Fix the type by adding a pointer to the return type as the first
+             * parameter if we are using environments *)
+            (if !use_environments then ["",TPtr(t, []),[]] else []) @
+            argsToList args
+        | t -> E.s (E.bug "unexpected type for indirect function call: %a" d_type t) in
+        let new_arglist_fun, arglist_struct = make_arglist (anon_name()) None targs in
+        (* keep a copy to insert at toplevel later *)
+        anon_arglist <-
+          [GCompTag(arglist_struct, locUnknown); GFun(new_arglist_fun, locUnknown)] @
+          anon_arglist;
+        pre @ [
+      (* cc = new_arglist_fun(... args ..., cc); *)
         Call (
           Some(Var cc , NoOffset),
-          Lval(Var cpc_push, NoOffset),
-          [Lval(Var cc, NoOffset);
-          mkCast (addr_of f) cpc_fun_ptr],
+          Lval (var new_arglist_fun.svar),
+          args@[fptr; Lval(var cc)],
           locUnknown
-        )] @ debug "continuation_push" @ post
+        );
+        ] @ debug "continuation_push" @ post
     | _ -> E.s (E.bug "Unexpected instruction in cps conversion: %a\n"
         d_instr i)
 
@@ -962,11 +1101,9 @@ class cpsConverter = fun file ->
 
   method vinst = function
   (* Special case: some functions need to be given the current continuation *)
-  | Call(r, e, args, loc) -> begin match typeOf e with
-      | TFun (_, _, _, attr) when hasAttribute "cpc_need_cont" attr ->
+  | Call(r, (Lval (Var f, NoOffset) as e), args, loc)
+      when hasAttribute "cpc_need_cont" f.vattr ->
          ChangeTo [Call(r, e, Lval (Var current_continuation, NoOffset) :: args, loc)] 
-      | _ -> SkipChildren
-        end
   | _ -> SkipChildren
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
@@ -995,93 +1132,43 @@ class cpsConverter = fun file ->
   | _ -> DoChildren
 
   method vglob = function
+  (* Special case: some functions need to be given the current continuation *)
   | (GVarDecl ({vtype=TFun(ret, Some args,va,attr)} as v, l)) when
-      hasAttribute "cpc_need_cont" attr ->
-        v.vtype <- TFun(ret, Some (("c", cpc_cont_ptr, [])::args), va, attr);
+      hasAttribute "cpc_need_cont" v.vattr ->
+        v.vtype <- TFun(ret, Some (("c", (cpc_cont_ptr ()), [])::args), va, attr);
         DoChildren
-  | (GVarDecl ({vtype=TFun(_,args,va,attr) ; vcps = true} as v, _) as g) ->
+  | (GVarDecl ({vtype=TFun(_,args,va,attr)} as v, _) as g) when is_cps_type v.vtype ->
       (* do not deal with a declaration twice *)
       if List.mem_assq v struct_map then ChangeTo [] else begin
-      let args = argsToList args in
-      (* XXX copy the attributes too? Should be empty anyway *)
-      let rec build_struct = function
-        | [] -> []
-        | [name, typ, attr] when !aligned_continuations ->
-            (* alignment trick *)
-            [name, typ, None, [Attr("aligned",[AInt biggest_alignment])], locUnknown]
-        | (name, typ, attr) :: q ->
-            (name, typ, None, [], locUnknown) :: build_struct q in
-      let fields =  build_struct args in
-      let arglist_struct =
-        mkCompInfo true (v.vname^"_arglist")
-          (fun _ -> fields)
-          (if !aligned_continuations then []
-           else [Attr("packed",[])]) in
-      let comptag = GCompTag (arglist_struct, locUnknown) in
-      let new_arglist_fun = emptyFunction (v.vname^"_new_arglist") in
-      let cont_name = Printf.sprintf "cpc__continuation_%d" (newVID()) in
-      let new_args = Some (args@[cont_name,cpc_cont_ptr,[]]) in
-      let new_arglist_type = TFun (cpc_cont_ptr, new_args, false, []) in
-      let temp_arglist =
-        makeTempVar new_arglist_fun ~name:"cpc_arglist"
-        (TPtr(TComp(arglist_struct, []),[])) in
-      (* Beware, order matters! One must set function type before getting the
-       * sformals (when setting new_arglist_fun.sbody) *)
-      setFunctionTypeMakeFormals new_arglist_fun new_arglist_type;
-      new_arglist_fun.svar.vinline <- true;
-      new_arglist_fun.svar.vstorage <- Static;
-      new_arglist_fun.sbody <- (
-        let field_args, last_arg = cut_last new_arglist_fun.sformals in
-        mkBlock ([mkStmt(Instr (
-          (* XXX DEBUGING *)
-          (debug ("Entering "^new_arglist_fun.svar.vname)) @ (
-          (* temp_arglist = cpc_alloc(&last_arg,(int)sizeof(arglist_struct)) *)
-          Call(
-            Some (Var temp_arglist, NoOffset),
-            Lval (Var cpc_alloc, NoOffset),
-            [addr_of last_arg;
-            mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
-            locUnknown
-            ) ::
-          (* temp_arglist -> field = field *)
-          List.map2 (fun v f ->
-            Set(
-              (mkMem (Lval (Var temp_arglist,NoOffset)) (Field (f, NoOffset))),
-              Lval(Var v, NoOffset),
-              locUnknown
-            )
-          ) field_args arglist_struct.cfields)));
-        (* return last_arg *)
-        mkStmt(Return (
-          Some (Lval(Var last_arg,NoOffset)),
-          locUnknown))
-      ]));
+      let new_arglist_fun, arglist_struct = make_arglist v.vname (Some v) (argsToList args) in
       struct_map <- (v, arglist_struct) :: struct_map;
+      let comptag = GCompTag (arglist_struct, locUnknown) in
       newarglist_map <-
         (v, Lval (Var new_arglist_fun.svar, NoOffset)) :: newarglist_map;
       if v.vstorage = Extern then begin
         (* mark it as completed (will be done later for non-extern function *)
-        v.vcps <- false;
-        v.vtype <- TFun(cpc_cont_ptr,
-          Some ["cpc_current_continuation", cpc_cont_ptr, []], va, attr)
+        set_cps v false;
+        v.vtype <- TFun((cpc_cont_ptr ()),
+          Some ["cpc_cont", (cpc_cont_ptr ()), []], va, attr)
         end;
-      ChangeTo [comptag;GFun (new_arglist_fun, locUnknown);g]
+      ChangeTo [g;comptag;GFun (new_arglist_fun, locUnknown)]
       end
-  | GFun ({svar={vtype=TFun(ret_typ, _, va, attr) ; vcps =
-  true};sformals = args} as fd, _) as g ->
-      let new_arg = ["cpc_current_continuation", cpc_cont_ptr, []] in
-      let arglist_struct = List.assoc fd.svar struct_map in
+  | GFun ({svar={vtype=TFun(ret_typ, _, va, attr)}; sformals = args} as fd, _) as g
+      when is_cps_type fd.svar.vtype ->
+      let new_arg = ["cpc_cont", (cpc_cont_ptr ()), []] in
+      let arglist_struct = List.assq fd.svar struct_map in
       let cpc_arguments =
-        makeLocalVar fd "cpc_arguments"
+        makeLocalVar fd "cpc_args"
         (TPtr(TComp(arglist_struct, []),[])) in
       (* add former arguments to slocals *)
       fd.slocals <- args @ fd.slocals;
       fd.sformals <- [];
-      setFunctionTypeMakeFormals fd (TFun(cpc_cont_ptr, Some new_arg, va, attr));
+      setFunctionTypeMakeFormals fd (TFun((cpc_cont_ptr ()), Some new_arg, va, attr));
       current_continuation <- begin match fd.sformals with
         | [x] -> x
         | _ -> assert false end;
       cps_function <- true;
+
       fd.sbody.bstmts <-
         mkStmt(Instr (
           (* XXX DEBUGING *)
@@ -1089,8 +1176,9 @@ class cpsConverter = fun file ->
           (* cpc_arguments = cpc_dealloc(cpc_current_continuation,
                 (int)sizeof(arglist_struct)) *)
           Call(
-            Some (Var cpc_arguments, NoOffset),
-            Lval (Var cpc_dealloc, NoOffset),
+            (if args = [] then None (* avoid unused variable warning *)
+            else Some (Var cpc_arguments, NoOffset)),
+            Lval (Var (cpc_dealloc ()), NoOffset),
             [Lval (Var current_continuation, NoOffset);
             mkCast (SizeOf (TComp(arglist_struct,[]))) intType],
             locUnknown
@@ -1104,12 +1192,32 @@ class cpsConverter = fun file ->
             )
           )  args arglist_struct.cfields)))
         :: fd.sbody.bstmts;
-      fd.svar.vcps <- false; (* this is not a cps function anymore *)
-      ChangeDoChildrenPost([g], fun g -> stack <- []; g)
+      set_cps fd.svar false; (* this is not a cps function anymore *)
+      ChangeDoChildrenPost([g], fun g ->
+        (* insert arglist functions used for cps function pointers *)
+        let l = anon_arglist in
+        anon_arglist <- [];
+        stack <- [];
+        l@g)
   | GFun _ ->
       cps_function <- false;
       DoChildren
   | _ -> DoChildren
+end
+
+(* Fix cps pointer types, and drop left-over cps attributes in return types
+ * copied all over the place by previous transformations. *)
+class cleanCpsTypes = fun file ->
+  let cpc_fun = find_type "cpc_function" file in
+  object(self)
+    inherit nopCilVisitor
+    method vtype = function
+      | TFun _ as tf when is_cps_type tf ->
+          ChangeTo (cpc_fun())
+      | t -> DoChildren
+
+    method vattr (Attr (a, _)) =
+      if a = "cps" then ChangeTo [] else DoChildren
 end
 
 (********************* Avoid ampersand on local variables ********************)
@@ -1201,7 +1309,7 @@ class avoidAmpersand f =
   inherit mynopCilVisitor
 
   method vfunc fd =
-    if fd.svar.vcps then begin
+    if is_cps_type fd.svar.vtype then begin
       let retTyp =
         match fd.svar.vtype with
         | TFun(rt, _, _, _) -> rt
@@ -1238,29 +1346,452 @@ class avoidAmpersand f =
     SkipChildren (* No CpcFun thanks to initial lambda-lifting *)
 end
 
+
+
+(******************************************************************************)
+(*                                                                            *)
+(*                            Creating environment                            *)
+(*                                                                            *)
+(******************************************************************************)
+
+(*** First step ***)
+(* Some global variables to be used between passes *)
+
+(* [f, f_env] *)
+let envList (* : (fundec, varinfo) list ref *) = ref []
+
+class addEnvStruct f =
+  (* free function declaration *)
+  let free : Cil.exp =
+    let fun_type =
+      let fun_args_type = Some ["ptr", voidPtrType, []]
+      and fun_ret_type = voidType in
+      TFun (fun_ret_type, fun_args_type, false, [])
+    in
+    Lval( Var(findOrCreateFunc f "free" fun_type), NoOffset)
+  in
+  let modified_functions = ref [] in
+  let setAsModified vid = modified_functions := vid::!modified_functions in
+  let hasBeenModified vid = List.mem vid !modified_functions in
+  let null_ptr = mkCast (integer 0) voidPtrType in
+  let notVoid ret_typ = match ret_typ with
+    | TVoid _ -> false
+    | _ -> true
+  in
+
+
+(* We will just create a void pointer. His type will be change in the future. *)
+object (self)
+  inherit mynopCilVisitor
+
+  method vglob = function
+    (* special case for extern functions *)
+    | (GVarDecl ({vtype=TFun(ret_typ, param_type, va, attr);
+                  vstorage = Extern;} as v,
+                 _)) when notVoid ret_typ && is_cps_type v.vtype ->
+      let new_ret_type = TPtr (typeRemoveAttributes ["cps"] ret_typ, []) in
+      let new_param_type : (string * Cil.typ * Cil.attributes) list option =
+        let params = match param_type with
+          | None -> []
+          | Some lst -> lst
+        in
+        Some (("cpc_ret_addr", new_ret_type, []) :: params)
+      in
+      let new_fun_type = TFun (voidType, new_param_type, va, attr) in
+      v.vtype <- new_fun_type;
+      set_cps v true;
+      setAsModified v.vid;
+      SkipChildren
+
+
+    (* change function body *)
+    | GFun ({svar     = {vtype = TFun(ret_typ, param_type, va, attr)};
+             sformals = args} as fd,
+            _) when is_cps_type fd.svar.vtype ->
+      (* create the structure local variable *)
+      let cpc_env = makeLocalVar fd "cpc_env" (TPtr(voidPtrType,[])) in
+      (* XXX would voidPtrType be enough? *)
+      envList := (fd, cpc_env) :: !envList;
+
+      (* add return arg *)
+      let (lazy_FRV, lazy_SFRV) = if notVoid ret_typ then begin
+        (* remove return value type *)
+        let new_ret_type = TPtr (typeRemoveAttributes ["cps"] ret_typ, []) in
+        let new_param_type : (string * Cil.typ * Cil.attributes) list option =
+          let params = match param_type with
+            | None -> []
+            | Some lst -> lst
+          in
+          Some (("cpc_ret_addr", new_ret_type, []) :: params)
+        in
+        let new_fun_type = TFun (voidType, new_param_type, va, attr) in
+        fd.svar.vtype <- new_fun_type;
+        set_cps fd.svar true;
+        setAsModified fd.svar.vid;
+
+        (* add new return value as first argument *)
+        let fd_ret_val =
+          makeFormalVar fd ~where:"^" "cpc_ret_addr" new_ret_type
+        in
+        let star_fd_ret_val=mkMem (Lval (Var fd_ret_val, NoOffset)) NoOffset in
+        (lazy fd_ret_val, lazy star_fd_ret_val)
+      end else let lazy_false = lazy (assert false) in (lazy_false, lazy_false)
+      in
+
+
+      (* add free statements and convert Returns *)
+      let free_instr = (* free((void* ) env); *)
+        let arg = [mkCast (Lval (Var cpc_env, NoOffset)) voidPtrType] in
+        Call (None, free, arg, locUnknown)
+      in
+      let add_free stmt =
+        let free_visitor = (
+          object (self)
+            inherit mynopCilVisitor
+
+            method vstmt s = match s.skind with
+              | Return (retval, loc) ->
+                  let return_stmt = mkStmt (Return(None, loc))
+                  and free_stmt = mkStmt (Instr [free_instr]) in
+                  let stmts = match retval with
+                    | None -> [free_stmt; return_stmt]
+                        (* return; yields:
+                           free(cpc_env);
+                           return;
+                        *)
+                    | Some rval ->
+                        (* return x; yields:
+                           if(cpc_ret != NULL) {
+                               *cpc_ret = rval;
+                           }
+                           free(cpc_env);
+                           return;
+                        *)
+                        let retval_assign_instr =
+                          Set(Lazy.force lazy_SFRV, rval, loc)
+                        in
+                        let if_stmt =
+                          let if_cond =
+                            BinOp (Ne,
+                                   Lval (Var (Lazy.force lazy_FRV), NoOffset),
+                                   null_ptr,
+                                   intType)
+                          and if_then =
+                            mkBlock [mkStmt (Instr [retval_assign_instr])]
+                          and if_else = mkBlock [] in
+                          mkStmt (If (if_cond, if_then, if_else, locUnknown))
+                        in
+                        [if_stmt; free_stmt; return_stmt]
+                  in
+                  s.skind <- Block (mkBlock stmts);
+                  SkipChildren
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt free_visitor stmt
+      in
+      let bstmt_with_frees = List.map add_free fd.sbody.bstmts in
+
+      (* complete function *)
+      fd.sbody.bstmts <- bstmt_with_frees;
+
+      (* ok, next job... *)
+      DoChildren
+
+    | _ -> DoChildren
+
+
+  method vinst = function
+    | Call (lval_opt, Lval(Var f, NoOffset), arg_lst, loc) when is_cps_type f.vtype ->
+        (* y = f(x); with f a cps function, yields:
+           f(&y, x);
+        *)
+        let change retVal = ChangeTo [Call(None, Lval(var f), retVal::arg_lst, loc)] in
+        begin match lval_opt, f.vtype with
+          | None, TFun(TVoid _, _, _, _) ->
+              if hasBeenModified f.vid
+              then change null_ptr
+              else DoChildren
+          | None, _       ->
+              change null_ptr
+          | Some v, _     ->
+              change (mkAddrOf v)
+        end
+    | Call (lval_opt, f, arg_lst, loc) when is_cps_exp f ->
+        (* cps function pointer *)
+        let change retVal = ChangeTo [Call(None,f, retVal::arg_lst, loc)] in
+        begin match lval_opt, unrollType(typeOf f) with
+          | None, TFun(TVoid _, _, _, _) -> DoChildren
+          | None, _       -> change null_ptr
+          | Some v, _     -> change (mkAddrOf v)
+        end
+    | _ -> DoChildren
+
+end
+
+(*** Second step ***)
+class createEnv2 f =
+  (* malloc function declaration *)
+  let malloc : Cil.exp =
+    let fun_type =
+      let fun_args_type = Some ["size", !typeOfSizeOf, []]
+      and fun_ret_type = voidPtrType in
+      TFun (fun_ret_type, fun_args_type, false, [])
+    in
+    Lval( Var(findOrCreateFunc f "malloc" fun_type), NoOffset)
+  in
+  (* provide a solution to remplace a variable by another in a statement.
+     (used for cpc_env) *)
+  let variable_remplacer old_var new_var stmt =
+    let vr_visitor = (
+      object (self)
+        inherit mynopCilVisitor
+
+        method vstmt s = match s.skind with
+          | CpcFun _ -> SkipChildren
+          | _ -> DoChildren
+
+        method vvrbl v =
+          if v.vid = old_var.vid
+          then ChangeTo new_var
+          else SkipChildren
+      end)
+    in
+    visitCilStmt vr_visitor stmt
+  in
+  (* avoid "Not Found" without any other information ! *)
+  let safeGetCompField comp_info vname =
+    try
+      getCompField comp_info vname
+    with
+      | e -> E.s (E.bug "getCompField %s %s failed (%s)\n" comp_info.cname vname
+        (if e = Not_found then "not found" else "unknown error"))
+  in
+
+object (self)
+  inherit mynopCilVisitor
+
+  method vglob = function
+    | GFun ({svar     = {vtype = TFun(ret_typ, _, va, attr)};
+             sformals = args} as fd,
+            _) as g when is_cps_type fd.svar.vtype ->
+      (* retreive environment from Env1's step *)
+      let cpc_env =
+        try List.assoc fd !envList
+        with Not_found ->
+          E.s (E.bug "Env2: missmatching env for function %s" fd.svar.vname)
+      in
+
+      (* get all variables (locals and formals), reset locals *)
+      (* TODO: il faut mieux sélectionner les variables... et comme je ne
+         descends pas dans les sous-fonctions, j'en oublie sans aucun doute
+         ici. *)
+      let filter_cpc_env lst v = if v.vid = cpc_env.vid then lst else v::lst in
+      let vars : Cil.varinfo list =
+        List.fold_left filter_cpc_env args fd.slocals
+      in
+      let vars_id = List.map (fun v -> v.vid) vars in
+      let is_var vid = List.mem vid vars_id in
+      fd.slocals <- [cpc_env];
+
+      (* create the structure*)
+      let rec build_struct = function
+        | [] -> []
+        | var :: q ->
+            (var.vname, var.vtype, None, [], locUnknown) :: build_struct q
+      in
+      let fields = build_struct vars in
+      let env_struct : Cil.compinfo =
+        mkCompInfo
+          true
+          (fd.svar.vname ^ "_env")
+          (fun _ -> fields)
+          []
+      in
+      (* create the structure declaration and local variable *)
+      let comptag = GCompTag (env_struct, locUnknown) in
+      cpc_env.vtype <- TPtr(TComp(env_struct, []),[]);
+
+      (* malloc and inits the environment structure *)
+      (* create the malloc instruction *)
+      let malloc_instr =
+        let starEnv = mkMem (Lval (Var cpc_env, NoOffset)) NoOffset in
+        let ret_val = Some(Var cpc_env, NoOffset) in
+        (* env = malloc(sizeof(typeof( *env ))) *)
+        Call(ret_val, malloc, [sizeOf (typeOfLval starEnv)], locUnknown)
+      in
+
+      (* create the initialisation instructions *)
+      let fieldnames = List.map (fun x -> x.vname) args in
+      let fieldinfos = List.map (fun x -> safeGetCompField env_struct x) fieldnames
+      in
+      let make_init v f =
+        (* f_env -> field = field *)
+        Set(
+          mkMem (Lval (Var cpc_env, NoOffset)) (Field (f, NoOffset)),
+          Lval (Var v, NoOffset),
+          locUnknown
+        )
+      in
+      let init_instrs = List.map2 make_init args fieldinfos in
+      let instructions = Instr (malloc_instr::init_instrs) in
+
+      (* put some indirections *)
+      let add_struct_access stmt =
+        let asa_visitor = (
+          object (self)
+            inherit nopCilVisitor
+
+            method vlval = function
+              | (Var v, _) as varToChange when is_var (v.vid) ->
+                  let change_node = function
+                    | (Var v', voffset') ->
+                      let v_field = safeGetCompField env_struct v.vname in
+                      let env_lval = Lval (Var cpc_env, NoOffset) in
+                      mkMem env_lval (Field (v_field, voffset'))
+                    | _ -> assert false
+                  in
+                  ChangeDoChildrenPost(varToChange, change_node)
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt asa_visitor stmt
+      in
+      let bstmt_with_struct_access =
+        List.map add_struct_access fd.sbody.bstmts in
+
+      (* replace sub-functions cpc_env, and add it as argument. *)
+      (* find sub-functions ID *)
+      let funId_list = ref [] in
+      let funId_finder stmt =
+        let funId_visitor = (
+          object (self)
+            inherit mynopCilVisitor
+
+            method vstmt s = match s.skind with
+              | CpcFun (local_fd, _) ->
+                  funId_list := local_fd.svar.vid :: !funId_list;
+                  DoChildren
+              | _ -> DoChildren
+          end)
+        in
+        visitCilStmt funId_visitor stmt
+      in
+      (* now, just update the mutable variable *)
+      let _ = List.map funId_finder bstmt_with_struct_access in
+
+
+      (* add env arguments to sub-functions-call *)
+      let add_args stmt =
+        let isOurFunction nfos = (* is a sub-function *)
+          match nfos with
+          | Lval (Var v, NoOffset) -> List.mem v.vid !funId_list
+          | _ -> false
+        in
+        let fun_visitor = (
+          object (self)
+            inherit mynopCilVisitor
+
+            method vinst i = match i with
+              | Call (ret, nfos, args, loc) ->
+                  if isOurFunction nfos
+                  then begin
+                    if (args <> []) then
+                      E.s (E.bug "arg list should be empty: %a" d_instr i);
+                    let new_args = [Lval (Var cpc_env, NoOffset)] in
+                    ChangeTo [Call (ret, nfos, new_args, loc)]
+                  end else SkipChildren
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt fun_visitor stmt
+      in
+      let bstmt_with_env_in_args = List.map add_args bstmt_with_struct_access in
+
+
+      (* replace... *)
+      let add_params stmt =
+        let fun_visitor = (
+          object (self)
+            inherit mynopCilVisitor
+
+            method vstmt s = match s.skind with
+              | CpcFun (local_fd, _) ->
+                  (* I think that it's true: *)
+                  if (local_fd.sformals <> []) then
+                    E.s (E.bug "formals should be empty: %a" dn_stmt s);
+                  (* create the new env param *)
+                  let local_cpc_env =
+                    makeFormalVar
+                      local_fd
+                      cpc_env.vname
+                      (TPtr(TComp(env_struct, []),[]));
+                  in
+                  (* replace the old env var by the new *)
+                  let replace = variable_remplacer cpc_env local_cpc_env in
+                  let new_stmts = List.map replace local_fd.sbody.bstmts in
+                  local_fd.sbody.bstmts <- new_stmts;
+                  DoChildren
+              | _ -> DoChildren
+
+          end)
+        in
+        visitCilStmt fun_visitor stmt
+      in
+      let bstmt_with_params = List.map add_params bstmt_with_env_in_args in
+
+
+      (* complete function *)
+      fd.sbody.bstmts <- (mkStmt instructions :: bstmt_with_params);
+
+      (* Complete global déclarations *)
+      ChangeTo [comptag; g]
+
+    | _ -> SkipChildren
+
+end
+
+
+
 (********************* Assignment of cps return values ***********************)
 
 class cpsReturnValues = object(self)
   inherit (enclosingFunction dummyFunDec)
 
   method vinst = function
-  | Call (r, Lval (Var f, NoOffset), args, loc) as i when f.vcps ->
-      let typ = fst4 (splitFunctionTypeVI f) in
+  | Call (r, f, args, loc) as i when is_cps_exp f ->
+      let typ = fst4 (splitFunctionType (typeOf f)) in
       begin match r with
-      | Some _ when (typeSig typ = typeSig voidType) -> (* Wrong assignment *)
+      | Some _ when (typeSigWithAttrs (fun _ -> [])  typ = typeSig voidType) -> (* Wrong assignment *)
           E.s (E.bug "Assignment of a function returning void: %a" d_instr i);
-      | Some (Var _, NoOffset) -> SkipChildren (* Simple good assignment *)
-      | Some l -> (* Some other valid but complex assignment *)
+      | Some (Var v, NoOffset) when (not v.vglob && v.vstorage != Static) ->
+          (* Simple assignment to a local, non-static variable: do nothing *)
+          SkipChildren
+      | Some l ->
+          (* Some other valid but complex assignment, including
+             assignment to global and static variables, which cannot
+             be patched directly.
+          *)
           let v = makeTempVar ef typ in
           ChangeTo [
-            Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc);
+            Call(Some(Var v, NoOffset), f, args, loc);
             Set(l, Lval(Var v, NoOffset), loc)
           ]
-      | None when  (typeSig typ <> typeSig voidType) -> (* Missing assignment *)
+      | None when  (typeSigWithAttrs (fun _ -> []) typ <> typeSig voidType) -> (* Missing assignment *)
+          if !use_environments then
+            (* the return type has not been fixed yet, but this case is handled
+             * with a NULL pointer; do nothing *)
+            SkipChildren
+          else begin
           let v = makeTempVar ef typ in
+          v.vattr <- [Attr("unused", [])];
           trace (dprintf "Ignoring a cps return value: %a\n" d_instr i);
           ChangeTo [
-          Call(Some(Var v, NoOffset), Lval (Var f, NoOffset), args, loc)]
+          Call(Some(Var v, NoOffset), f, args, loc)]
+          end
       | None -> SkipChildren (* No assignement (void function) *)
       end
   | _ -> SkipChildren
@@ -1286,7 +1817,9 @@ let contains_nasty args =
       (* if a local variable has its address retained,
          avoidAmpersand has boxed it, and vlval has raised an exception
          before we get here, detecting the box. *)
-      assert(not (must_be_boxed v));
+      assert(not (must_be_boxed v) ||
+      (* Except if we use environments of course... *)
+      !use_environments);
       DoChildren
 
     method vlval = function
@@ -1309,21 +1842,25 @@ class removeNastyExpressions = object(self)
   inherit (enclosingFunction dummyFunDec)
 
   method vinst = function
-  | Call(ret, Lval(Var f, NoOffset), args, loc) when f.vcps ->
+  | Call(ret, f, args, loc) when is_cps_exp f ->
       (try contains_nasty args; SkipChildren
       with ContainsNasty ->
-        trace (dprintf "nasty variables in call to %s\n" f.vname);
-        let (bind_list, args') = rebind ef f.vtype args in
-        ChangeTo(bind_list @[Call(ret, Lval(Var f, NoOffset),args',loc)]))
+        trace (dprintf "nasty variables in function call: %a\n" d_exp f);
+        let (bind_list, args') = try rebind ef (typeOf f) args
+        with _ -> E.s (E.error "%a: wrong number of arguments in function call: %a"
+                    d_loc !currentLoc d_exp f)
+        in
+        ChangeTo(bind_list @[Call(ret, f,args',loc)]))
   | _ -> SkipChildren
 end
 
 (********** Add defaults arguments to cpc primitives *************************)
 
 class addDefaultArgs file =
-  let condvar_null_ptr =
+  let condvar_type = find_type "cpc_condvar" file in
+  let condvar_null_ptr () =
     mkCast (mkCast (integer 0) voidPtrType)
-    (TPtr(find_type "cpc_condvar" file,[])) in
+    (TPtr(condvar_type (),[])) in
   let cpc_sleep = find_function "cpc_sleep" file in
   object(self)
   inherit mynopCilVisitor
@@ -1331,28 +1868,28 @@ class addDefaultArgs file =
   method vinst = function
   | Call(ret, Lval(Var ({vname = "cpc_io_wait"} as v), NoOffset), [fd; dir], loc) ->
       ChangeTo [Call(ret, Lval(Var v, NoOffset),
-      [fd; dir; condvar_null_ptr], loc)]
+      [fd; dir; condvar_null_ptr ()], loc)]
   | Call(ret, Lval(Var ({vname = "cpc_sleep"} as v), NoOffset), [s], loc) ->
       ChangeTo [Call(ret, Lval(Var v, NoOffset),
-      [s; zero; condvar_null_ptr], loc)]
+      [s; zero; condvar_null_ptr ()], loc)]
   | Call(ret, Lval(Var ({vname = "cpc_sleep"} as v), NoOffset), [s; ms], loc) ->
       ChangeTo [Call(ret, Lval(Var v, NoOffset),
-      [s; ms; condvar_null_ptr], loc)]
+      [s; ms; condvar_null_ptr ()], loc)]
   (* cpc_wait is handled via cpc_sleep when it has several arguments *)
   | Call(ret, Lval(Var {vname = "cpc_wait"}, NoOffset), [c; s], loc) ->
-      ChangeTo [Call(ret, Lval(Var cpc_sleep, NoOffset),
+      ChangeTo [Call(ret, Lval(Var (cpc_sleep ()), NoOffset),
       [s; zero; c], loc)]
   | Call(ret, Lval(Var {vname = "cpc_wait"}, NoOffset), [c; s; ms], loc) ->
-      ChangeTo [Call(ret, Lval(Var cpc_sleep, NoOffset),
+      ChangeTo [Call(ret, Lval(Var (cpc_sleep ()), NoOffset),
       [s; ms; c], loc)]
   | _ -> SkipChildren
 end
 
-(******** Insert goto after cps assignment and returns before cpc_done *******)
+(******** Insert goto after cps assignment *******)
 
 let rec insert_gotos il =
   let rec split acc l = match l with
-  | Call(Some(Var _, NoOffset), Lval(Var f, NoOffset), _, _)::_ when f.vcps ->
+  | Call(_, f, _, _)::_ when is_cps_exp f ->
       (mkStmt (Instr (List.rev (List.hd l :: acc))), List.tl l, true)
   | hd :: tl -> split (hd :: acc) tl
   | [] -> (mkStmt (Instr (List.rev acc)), [], false) in
@@ -1407,16 +1944,16 @@ let removeIdentity = fun file ->
   inherit mynopCilVisitor
 
   method vfunc fd =
-    if not fd.svar.vcps then SkipChildren
+    if not (is_cps_type fd.svar.vtype) then SkipChildren
     else match fd.sbody.bstmts with
     | {skind=Instr [Call(None,Lval(Var fd',NoOffset),args,_)]} ::
-      {skind=Return(None,_)} :: _ when fd'.vcps &&
+      {skind=Return(None,_)} :: _ when (is_cps_type fd'.vtype) &&
       args = Util.list_map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaced :=  (fd.svar,fd')::!replaced;
         (* Do not remove fd.sbody since it might be used outside. *)
         SkipChildren
     | {skind=Instr [Call(Some(l),Lval(Var fd',NoOffset),args,_)]} ::
-      {skind=Return(Some(Lval l'),_)} :: _ when fd'.vcps && l=l' &&
+      {skind=Return(Some(Lval l'),_)} :: _ when (is_cps_type fd'.vtype) && l=l' &&
       args = Util.list_map (fun v -> Lval(Var v,NoOffset)) fd.sformals ->
         replaced :=  (fd.svar,fd')::!replaced;
         (* Do not remove fd.sbody since it might be used outside. *)
@@ -1506,8 +2043,14 @@ let percolateLocals file =
       let fdecl = try List.assq var !decl with Not_found ->
        E.s (E.bug "percolate: cannot find variable %s, declared in function %s"
         var.vname fd.svar.vname) in
-      fdecl.slocals <- List.filter (fun v -> not(v == var)) fdecl.slocals;
-      fd.slocals <- var :: fd.slocals) !l
+      if fdecl == fd then
+        (* Do not update to avoid altering the order of locals: there might be
+         * data dependencies because of sizeof() for instance. *)
+        ()
+      else begin
+        fdecl.slocals <- List.filter (fun v -> not(v == var)) fdecl.slocals;
+        fd.slocals <- var :: fd.slocals
+      end) !l
 
 (********************* Lambda-lifting ****************************************)
 
@@ -1538,7 +2081,7 @@ class uniqueVarinfo = object(self)
     | _ -> DoChildren
 
   method vglob = function
-  | GFun (fd, loc) as g when fd.svar.vcps ->
+  | GFun (fd, loc) as g when is_cps_type fd.svar.vtype ->
       let map = make_fresh_varinfo fd in
       current_map <- map;
       ChangeDoChildrenPost([g], fun g ->
@@ -1640,8 +2183,12 @@ end
 
 exception GotoContent of stmt list
 
-let make_function_name base =
-  Printf.sprintf "__cpc_%s_%s" base (timestamp ())
+let make_function_name toplevel label =
+  (* Remove leading underscores *)
+  let r = Str.regexp "^_*" in
+  let t = Str.replace_first r "" toplevel in
+  let l = Str.replace_first r "" label in
+  Printf.sprintf "__%s_%s" t l
 
 exception FoundType of typ
 
@@ -1662,6 +2209,7 @@ let rec stmtFallsThrough (s: stmt) : bool =
     Instr _ -> true (* conservative, ignoring exit() etc. *)
   | Return _ | Break _ | Continue _ -> false
   | Goto _ -> false
+  | ComputedGoto _ -> E.s (E.bug "CPC should run with computed gotos disabled.")
   | If (_, b1, b2, _) -> 
       blockFallsThrough b1 || blockFallsThrough b2
   | Switch (e, b, targets, _) -> 
@@ -1708,6 +2256,7 @@ and blockFallsThrough b =
 and stmtCanBreak (s: stmt) : bool = 
   match s.skind with
     Instr _ | Return _ | Continue _ | Goto _ -> false
+  | ComputedGoto _ -> E.s (E.bug "CPC should run with computed gotos disabled.")
   | Break _ -> true
   | If (_, b1, b2, _) -> 
       blockCanBreak b1 || blockCanBreak b2
@@ -1729,14 +2278,13 @@ and blockCanBreak b =
        first we can't be fallen through. *)
 let goto_method = ref 1
 
-class functionalizeGoto start enclosing_fun file =
+class functionalizeGoto start enclosing_fun toplevel file =
       let last_var = find_last_var start file in
       let label = match List.find is_label start.labels with
         | Label(l,_,_) -> l | _ -> assert false in
-      let fd = emptyFunction (make_function_name label) in
+      let fd = emptyFunction (make_function_name toplevel.svar.vname label) in
       (* the return type of the functionalized chunk *)
       let ret_type = fst4 (splitFunctionTypeVI enclosing_fun.svar) in
-      let () = fd.svar.vcps <- true in
       object(self)
         inherit mynopCilVisitor
 
@@ -1747,7 +2295,7 @@ class functionalizeGoto start enclosing_fun file =
 
         method private unstack_block b =
           let compute_returns s =
-            if typeSig ret_type = typeSig voidType
+            if typeSigWithAttrs (fun _ -> [])  ret_type = typeSig voidType
             then None, None
             else
               let f = enclosing_function s file in
@@ -1757,6 +2305,7 @@ class functionalizeGoto start enclosing_fun file =
             in
           let args =
           setFunctionType fd (TFun (ret_type,Some [],false,[]));
+          set_cps fd.svar true;
           match last_var with
           | None -> []
           | Some v -> setFormals fd [v]; [Lval(Var v, NoOffset)] in
@@ -1854,18 +2403,24 @@ and return the nearest enclosing loop/switch statement *)
 let rec functionalize start f =
   begin try
     let enclosing = ref dummyFunDec in
+    let toplevel = ref dummyFunDec in
     let findEnclosing = 
       object(self)
         inherit (enclosingFunction dummyFunDec)
 
         val mutable nearest_loop = dummyStmt
+        val mutable current_top = dummyFunDec
         val mutable seen_start = false
         val mutable check_loops = false
+
+        method vglob = function
+        | GFun (fd,_) -> current_top <- fd; DoChildren
+        | _ -> SkipChildren
 
         method vstmt s =
           assert(check_loops =>  seen_start);
           if s == start then (seen_start <- true; check_loops <- true;
-          enclosing := ef);
+          enclosing := ef; toplevel := current_top);
           match s.skind with
           | Break _ | Continue _ when check_loops ->
               raise (BreakContinue nearest_loop)
@@ -1888,7 +2443,7 @@ let rec functionalize start f =
 
       end
     in  visitCilFileSameGlobals findEnclosing f;
-    visitCilFileSameGlobals (new functionalizeGoto start !enclosing f) f;
+    visitCilFileSameGlobals (new functionalizeGoto start !enclosing !toplevel f) f;
   with
   | BreakContinue s ->
       assert( s != dummyStmt);
@@ -1904,7 +2459,7 @@ class printCfg = object(self)
   inherit mynopCilVisitor
 
   method vfunc fd =
-  if fd.svar.vcps then begin
+  if is_cps_type fd.svar.vtype then begin
     Cfg.clearCFGinfo fd;
     ignore(Cfg.cfgFun fd);
     Cfg.printCfgFilename ("cfg/"^fd.svar.vname^".dot") fd
@@ -1968,9 +2523,13 @@ let rec cps_marking f =
       | _ -> functionalize start f; cps_marking f
       end
 
-let stages = [
+let stages () = [
+  (*
   ("Folding if-then-else\n", fun file ->
   visitCilFileSameGlobals (new folder) file);
+  *)
+  ("Initialize safe functions\n", fun file ->
+  visitCilFile (new initSafeFunctions) file);
   ("Add defaults arguments\n", fun file ->
   visitCilFileSameGlobals (new addDefaultArgs file) file);
   ("Lambda-lifting\n", fun file ->
@@ -1978,21 +2537,38 @@ let stages = [
   visitCilFileSameGlobals (new uniqueVarinfo) file);
   ("Initialize label table\n", fun file ->
   visitCilFileSameGlobals (new initLabelTbl) file);
-  ("Initialize ampersand table\n", fun file ->
-  visitCilFileSameGlobals (new initAmpSet) file);
-  (* WARNING: do not call uniqueVarinfo between building and using
-   * the ampersand table, since it will deprecate any recorded varinfo!
-   *)
-  ("Avoid ampersand\n", fun file ->
-  visitCilFileSameGlobals (new avoidAmpersand file) file);
-  ("Remove nasty expressions\n", fun file ->
-  visitCilFileSameGlobals (new removeNastyExpressions) file);
+  ] @
+  (if !use_environments
+  then
+    [
+    ("Adding an empty environment with frees and mallocs\n", fun file ->
+    visitCilFileSameGlobals (new addEnvStruct file) file);
+    ]
+  else
+    [
+    ("Initialize ampersand table\n", fun file ->
+    visitCilFileSameGlobals (new initAmpSet) file);
+    (* WARNING: do not call uniqueVarinfo between building and using
+     * the ampersand table, since it will deprecate any recorded varinfo!
+     *)
+    ("Avoid ampersand\n", fun file ->
+    visitCilFileSameGlobals (new avoidAmpersand file) file);
+    ("Remove nasty expressions\n", fun file ->
+    visitCilFileSameGlobals (new removeNastyExpressions) file);
+    ]
+  ) @ [
+  (* This needs to be done after addEnvStruct in the case of --ecpc *)
   ("Handle assignment cps return values\n", fun file ->
   visitCilFileSameGlobals (new cpsReturnValues) file);
-  ("Insert gotos after cps assignments and returns after cpc_done\n",
+  ("Insert gotos after cps assignments\n",
   fun file -> visitCilFileSameGlobals (new insertGotos) file);
   ("Cps marking\n", fun file ->
   cps_marking file);
+  ] @ (if !use_environments then [
+    ("Filling environments\n", fun file ->
+     visitCilFile (new createEnv2 file) file);
+    ] else []
+  ) @ [
   ("Percolating local variables\n", fun file ->
   percolateLocals file);
   ("Lambda-lifting\n", fun file ->
@@ -2005,21 +2581,27 @@ let stages = [
   visitCilFileSameGlobals (new printCfg) file end);
   ("Cps conversion\n", fun file ->
   visitCilFile (new cpsConverter file) file);
+  ("Clean CPS types\n", fun file ->
+  visitCilFile (new cleanCpsTypes file) file);
   ("Alpha-conversion\n", fun file ->
   uniqueVarNames file);
   ("Removing unused variables\n", fun file ->
-  Rmtmps.keepUnused := false; Rmtmps.removeUnusedTemps file);
+  Rmtmps.removeUnusedTemps file);
 ]
 
 let rec doit (f: file) =
+  let do_stage n (descr,step) =
+    if !stage < n then raise Exit
+    else begin
+      trace (dprintf "Stage %d: %s" n descr);
+      Stats.time descr step f;
+      Stats.time "Cleaning things a bit\n"
+        (visitCilFileSameGlobals (new cleaner)) f;
+      n+1
+    end
+  in
   try
-    ignore(List.fold_left (fun n (descr,step) ->
-        if !stage < n then raise Exit;
-        trace (dprintf "Stage %d: %s" n descr);
-        Stats.time descr step f;
-        Stats.time "Cleaning things a bit\n"
-          (visitCilFileSameGlobals (new cleaner)) f;
-        n+1) 0 stages);
+    ignore(List.fold_left do_stage 0 (stages ()));
     trace (dprintf "Finished\n")
   with Exit -> E.log "Exit\n"
 
@@ -2036,12 +2618,11 @@ let feature : featureDescr =
        ("--pause",Arg.Set pause," step by step execution");
        ("--dumpcfg",Arg.Set dumpcfg," dump the cfg of cps functions in cfg/");
        ("--goto", Arg.Int set_goto, "<n> how to convert gotos (0-2)");
-       ("--external-patch",Arg.Set external_patch," call \
-       cpc_continuation_patch from the runtime library" ^ is_default(!external_patch));
-       ("--noexternal-patch",Arg.Clear external_patch," generate inline \
-       patching" ^ is_default(not !external_patch));
-       ("--packed", Arg.Clear aligned_continuations, " compact continuations \
-       (BROKEN)");
+       ("--ecpc", Arg.Set use_environments, " use environments" ^
+         is_default !use_environments);
+       ("--no-ecpc", Arg.Clear use_environments, " do not use environments" ^
+         is_default (not!use_environments));
+       ("--packed", Arg.Clear aligned_continuations, " compact continuations");
       ];
     fd_doit = doit;
     fd_post_check = true;

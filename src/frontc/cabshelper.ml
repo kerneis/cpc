@@ -41,11 +41,6 @@ let rec isInline = function
   | SpecInline :: _ -> true
   | _ :: rest -> isInline rest
 
-let rec isCps = function
-    [] -> false
-  | SpecCPS :: _ -> true
-  | _ :: rest -> isCps rest
-
 let rec isTypedef = function
     [] -> false
   | SpecTypedef :: _ -> true
@@ -91,7 +86,7 @@ begin
   | TRY_FINALLY(_, _, loc) -> loc
   (*** CPC ***)
   | CPC_SPAWN (_,loc) -> loc
-  | CPC_ATTACHED (_,_,loc) -> loc
+  | CPC_LINKED (_,_,loc) -> loc
   | CPC_FUN d -> get_definitionloc d
 end
 

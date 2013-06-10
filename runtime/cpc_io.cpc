@@ -20,6 +20,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include "cpc_runtime.h"
+#include "cpc_barrier.h"
+#include "cpc_io.h"
+
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -27,12 +31,14 @@ THE SOFTWARE.
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <assert.h>
 
-#include "cpc_runtime.h"
-#include "cpc_barrier.h"
-#include "cpc_io.h"
+#ifndef SOL_TCP
+# define SOL_TCP IPPROTO_TCP
+#endif
+
+#include <assert.h>
 
 #define _TIMEOUT_EXPIRED 1
 #define _TIMEOUT_CANCELLED 2
@@ -76,7 +82,9 @@ cpc_timeout_get(int secs, int usecs)
 cps void
 cpc_timeout_restart(cpc_timeout *timeout)
 {
-    if(!timeout->flags) {
+    /* Do not restart an expired timeout
+     * to avoid race-conditions. */
+    if(!(timeout->flags & _TIMEOUT_EXPIRED)) {
         cpc_signal(timeout->cancel);
         cpc_spawn {
             if(cpc_sleep(timeout->secs, timeout->usecs, timeout->cancel) == CPC_TIMEOUT) {
@@ -85,6 +93,7 @@ cpc_timeout_restart(cpc_timeout *timeout)
                 cpc_signal_all(timeout->expire);
             }
         }
+        timeout->flags = 0;
         cpc_yield();                  /* Enter the sleep. */
     }
 }

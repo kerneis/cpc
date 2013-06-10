@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -48,7 +48,7 @@ module E = Errormsg
 module U = Util
 
 (* Set on the command-line: *)
-let keepUnused = ref true (* Defaults to true for CPC *)
+let keepUnused = ref false
 let rmUnusedInlines = ref false
 
 
@@ -579,14 +579,16 @@ let markReachable file isRoot =
 
 (* We keep only one label, preferably one that was not introduced by CIL. 
  * Scan a list of labels and return the data for the label that should be 
- * kept, and the remaining filtered list of labels *)
+ * kept, and the remaining filtered list of labels. After this cleanup,
+ * every statement's labels will be either a single 'Default' or any
+ * number of 'Case's, in either case possibly preceded by a single 'Label'. *)
 let labelsToKeep (ll: label list) : (string * location * bool) * label list = 
   let rec loop (sofar: string * location * bool) = function
       [] -> sofar, []
     | l :: rest -> 
         let newlabel, keepl = 
           match l with
-          | Case _ | Default _ -> sofar, true 
+          | CaseRange _ | Case _ | Default _ -> sofar, true
           | Label (ln, lloc, isorig) -> begin
               match isorig, sofar with 
               | false, ("", _, _) -> 
@@ -603,8 +605,55 @@ let labelsToKeep (ll: label list) : (string * location * bool) * label list =
         let newlabel', rest' = loop newlabel rest in
         newlabel', (if keepl then l :: rest' else rest')
   in
-  loop ("", locUnknown, false) ll
+  let sofar, labels = loop ("", locUnknown, false) ll in
+  try
+      (* If there is a 'default' label, remove all 'case' labels, as they are unnecessary *)
+      let default = List.find (function Default _ -> true | _ -> false) labels
+      in sofar, [ default ]
+  with Not_found ->
+      sofar, labels
 
+(* Remove some trivial gotos, typically inserted at the end of for loops,
+ * because they are not printed by CIL which might yield an unused label
+ * warning. See test/small1/warnings-unused-label.c for a regression test. *)
+
+class removeUnusedGoto = object(self)
+  inherit nopCilVisitor
+
+  method private pStmtNext (next: stmt) (s: stmt) = match s.skind with
+        (* Else-if: don't call visitCilStmt, recurse manually instead *)
+      | If(_,t,{ bstmts=[{skind=If _} as elsif]; battrs=[] },_) ->
+              ignore(visitCilBlock (self:>cilVisitor) t);
+              self#pStmtNext next elsif
+      | If(_,_,({bstmts=[{skind=Goto(gref,_);labels=[]}];
+                  battrs=[]} as b),_)
+      | If(_,({bstmts=[{skind=Goto(gref,_);labels=[]}];
+                  battrs=[]} as b),_,_)
+                when !gref == next ->
+              b.bstmts <- [];
+              ignore(visitCilStmt (self:>cilVisitor) s)
+      | _ -> ignore(visitCilStmt (self:>cilVisitor) s)
+
+  method vblock blk =
+    let rec dofirst = function
+        [] -> ()
+      | [x] -> self#pStmtNext invalidStmt x
+      | x :: rest -> dorest x rest
+    and dorest prev = function
+        [] -> self#pStmtNext invalidStmt prev
+      | x :: rest ->
+          self#pStmtNext x prev;
+          dorest x rest
+    in
+      dofirst blk.bstmts;
+      SkipChildren
+
+   (* No need to go into expressions or instructions *)
+  method vexpr _ = SkipChildren
+  method vinst _ = SkipChildren
+  method vtype _ = SkipChildren
+end
+          
 class markUsedLabels (labelMap: (string, unit) H.t) = object
   inherit nopCilVisitor
 
@@ -620,10 +669,15 @@ class markUsedLabels (labelMap: (string, unit) H.t) = object
 
     | _ -> DoChildren
 
-   (* No need to go into expressions or instructions *)
-  method vexpr _ = SkipChildren
-  method vinst _ = SkipChildren
-  method vtype _ = SkipChildren
+  method vexpr e = match e with
+  | AddrOfLabel dest ->
+      let (ln, _, _), _ = labelsToKeep !dest.labels in
+      if ln = "" then
+        E.s (E.bug "rmtmps: destination of address of label does not have labels");
+      (* Mark it as used *)
+      H.replace labelMap ln ();
+      SkipChildren
+  | _ -> DoChildren
 end
 
 class removeUnusedLabels (labelMap: (string, unit) H.t) = object
@@ -631,6 +685,13 @@ class removeUnusedLabels (labelMap: (string, unit) H.t) = object
 
   method vstmt (s: stmt) = 
     let (ln, lloc, lorig), lrest = labelsToKeep s.labels in
+    (* Check our desired invariants for labels: 'lrest' must be either a
+       single 'Default' or only 'Case's. It is okay for 'lrest' to be
+       empty, because a 'Label' can exist on its own, independent of
+       switch statement labels, and the 'for_all' accepts this case. *)
+    assert (match lrest with
+                  [ Default _ ] -> true
+                | _ -> List.for_all (function Case _ | CaseRange _ -> true | _ -> false) lrest);
     s.labels <-
        (if ln <> "" && H.mem labelMap ln then (* We had labels *)
          (Label(ln, lloc, lorig) :: lrest)
@@ -714,7 +775,10 @@ let removeUnmarked file =
         (* We also want to remove unused labels. We do it all here, including 
          * marking the used labels *)
         let usedLabels:(string, unit) H.t = H.create 13 in
-        ignore (visitCilBlock (new markUsedLabels usedLabels) func.sbody);
+        ignore (visitCilFunction (new removeUnusedGoto) func);
+        (* scan the function, not only the body, since there might be
+         * AddrOfLabel in initializers *)
+        ignore (visitCilFunction (new markUsedLabels usedLabels) func);
         (* And now we scan again and we remove them *)
         ignore (visitCilBlock (new removeUnusedLabels usedLabels) func.sbody);
 	true

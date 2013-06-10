@@ -11,6 +11,10 @@
 #include <netinet/tcp.h>
 #include <signal.h>
 
+#ifndef SOL_TCP
+# define SOL_TCP IPPROTO_TCP
+#endif
+
 void accept_connection(int fd);
 void handle_connection(int fd);
 

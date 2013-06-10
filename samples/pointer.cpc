@@ -1,4 +1,9 @@
-// should print: 42
+#include <cpc/cpc_runtime.h>
+#include <stdio.h>
+#include <stdlib.h>
+/* EXPECTED OUTPUT
+42
+* END OF OUTPUT */
 cps void set_point(int *p) { *p = 42; }
 cps void print(int i) { printf("%d\n", i); }
 cps void foo(int *p){
@@ -6,9 +11,10 @@ cps void foo(int *p){
     print(*p);
 }
 int main(){
-    int *p;
+    int *p = malloc(sizeof(int));
     *p = 0;
     cpc_spawn foo(p);
     cpc_main_loop();
+    free(p);
     return 0;
 }

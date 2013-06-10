@@ -53,6 +53,9 @@ let fastMode       = ref false
   * output) *)
 let printIndent = ref true
 
+(** Whether to rebalance doc before printing it to avoid stack-overflows *)
+let flattenBeforePrint = ref true
+
 (******************************************************************************)	
 (* The doc type and constructors *)
 
@@ -71,9 +74,10 @@ type doc =
 
 (* Break a string at \n *)
 let rec breakString (acc: doc) (str: string) : doc = 
-  try
-    (* Printf.printf "breaking string %s\n" str; *)
-    let r = String.index str '\n' in
+  (* Printf.printf "breaking string %s\n" str; *)
+  match (try Some (String.index str '\n') with Not_found -> None) with
+  | None -> if acc = Nil then Text str else CText (acc, str)
+  | Some r ->
     (* Printf.printf "r=%d\n" r; *)
     let len = String.length str in
     if r > 0 then begin
@@ -89,8 +93,7 @@ let rec breakString (acc: doc) (str: string) : doc =
     end else (* The first is a newline *)
       breakString (Concat(acc, Line))
         (String.sub str (r + 1) (len - r - 1))
-  with Not_found -> 
-    if acc = Nil then Text str else CText (acc, str)
+    
 
 let nil           = Nil
 let text s        = breakString nil s
@@ -583,6 +586,7 @@ let emitDoc
 
 (* Print a document on a channel *)
 let fprint (chn: out_channel) ~(width: int) doc =
+  let doc = if !flattenBeforePrint then flatten Nil doc else doc in
   (* Save some parameters, to allow for nested calls of these routines. *)
   maxCol := width;
   let old_breaks = !breaks in 
@@ -606,6 +610,7 @@ let fprint (chn: out_channel) ~(width: int) doc =
 
 (* Print the document to a string *)
 let sprint ~(width : int)  doc : string = 
+  let doc = if !flattenBeforePrint then flatten Nil doc else doc in
   maxCol := width;
   let old_breaks = !breaks in 
   breaks := [];

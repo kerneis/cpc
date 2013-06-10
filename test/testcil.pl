@@ -11,8 +11,6 @@ use File::Basename;         # File name parsing
 use Cwd;                    # Directory navigation
 use strict;
 # use Data::Dumper;
-use FindBin;
-use lib "$FindBin::Bin/../ocamlutil";
 
 use RegTest;
 
@@ -187,10 +185,10 @@ addTest("testrun/const-struct-init WARNINGS_ARE_ERRORS=1");
 addTest("test/const-struct-init WARNINGS_ARE_ERRORS=1");
 addTest("test/warnings-noreturn WARNINGS_ARE_ERRORS=1");
 addTest("testrun/warnings-unused-label WARNINGS_ARE_ERRORS=1");
-addBadComment("testrun/warnings-unused-label", 
-	      "Minor. We don't do a good enough job at eliminating unused labels");
 addTest("test/warnings-cast WARNINGS_ARE_ERRORS=1");
 addTest("testrun/castincr WARNINGS_ARE_ERRORS=1");
+addTest("test/castunion");
+addTest("test/castcall");
 
 addTest("test/apachebits");
 addTest("testrun/apachebuf");
@@ -200,21 +198,25 @@ addTest("testrun/asm1 _GNUCC=1");
 addTest("test/asm2 _GNUCC=1");
 addTest("test/asm3 _GNUCC=1");
 addTest("test/asm4 _GNUCC=1");
-addBadComment("test/asm4", "Limitation. See testrun/const1.");
 addTest("testobj/asm5 _GNUCC=1");
 
 addTest("testrun/offsetof");
 addTest("testrun/offsetof1");
 addTest("testrun/offsetof2");
 addTest("testrun/offsetof3");
+addTest("testrun/question-fold-float USE_LOGICAL_OPERATORS=1");
 addTest("testrun/question");
 addTest("testrun/question2");
+addTest("testrun/question3 USE_LOGICAL_OPERATORS=1");
 addTest("test/argcast");
 addBadComment("test/argcast", 
 	      "Notbug. CIL bases type for implicit functions based on first call's argument.");
 addTest("test/array1");
 addTest("test/array2");
 addTest("testrun/array_varsize");
+addTest("testrun/array_multi_varsize");
+addBadComment("testrun/array_multi_varsize",
+           "Limitation. CIL does not handle variable-length multidimensional arrays.");
 addTest("testrun/array_formal");
 addTest("testrun/formalscope");
 addTest("test/matrix");
@@ -250,7 +252,6 @@ addTest("test/cast4 _GNUCC=1");
 addTest("testrun/cast8 ");
 addTest("test/constprop");
 addTest("testrun/const1 _GNUCC=1");
-addBadComment("testrun/const1", "Limitation. CIL can't handle large 64-bit unsigned constants.");
 addTest("testrun/const2 ");
 addTest("testrun/const3 ");
 addTest("testrun/const4 _GNUCC=1");
@@ -265,7 +266,8 @@ addTest("testrun/const12 ");
 addTest("test/const13 WARNINGS_ARE_ERRORS=1");
 addBadComment("test/const13", "Minor. Const warnings from generated code - need more casts.");
 addTest("test/const14");
-addBadComment("test/const14", "Bug. Missing cast to result type when short-cutting expressions to 0.");
+addTest("testrun/const15 ");
+addTest("testrun/const16 ");
 addTest("test/deref _GNUCC=1");
 addTest("test_i/empty");
 addTest("test/enum");
@@ -306,7 +308,6 @@ addTest("testrun/init15 _GNUCC=1");
 addTest("testrun/init16 ");
 addTest("testrun/init17 ");
 addTest("testrun/init18 ");
-addBadComment("testrun/init18", "Bug. Outstanding since 1.3.6 at least");
 addTest("testrun/init19 WARNINGS_ARE_ERRORS=1");
 addTest("testrun/init20 _GNUCC=1");
 addTest("testrun/init21 _GNUCC=1");
@@ -358,7 +359,7 @@ addTest("test/vararg7 _GNUCC=1");
 addTest("testrun/va-arg-1 _GNUCC=1");
 addTest("testrun/va-arg-2 _GNUCC=1");
 addTest("testrun/va-arg-7 _GNUCC=1");
-addTest("test-bad/arrsize ");
+addTest("test/arrsize ");
 addTest("testrun/comma1 _GNUCC=1");
 addTest("test/retval");
 addTest("testrun/static ");
@@ -384,21 +385,32 @@ addTest("testrun/scope8");
 addTest("testrun/scope9 ");
 addTest("testrun/scope10 ");
 addTest("testrun/scope11 ");
+addTest("test/scope12 ");
 addTest("test/voidstar");
 addTest("testrun/memcpy1");
 
 addTest("test/noreturn ");
                 
+addTest("test/constrexpr ");
+
+addTest("testrun/flexible-array-member ");
+addTest("test-bad1/flexible-array-member-bad ");
 
 addTest("testrun/label1");
 addTest("testrun/label2");
 addTest("testrun/label3");
 addTest("testrun/label4 _GNUCC=1");
+addTest("testrun/label2b COMPUTEDGOTO=1");
+addTest("testrun/label3b COMPUTEDGOTO=1 LOCALINIT=1");
+addTest("testrun/label4b COMPUTEDGOTO=1 _GNUCC=1");
 addTest("test/label5");
 addTest("testrun/label6");
 addTest("test/label7");
 addTest("test/label8");
 addTest("test/label9 EXTRAARGS=--domakeCFG");
+addTest("testrun/case_then_default_in_switch EXTRAARGS=--domakeCFG");
+addTestFail("test/switch_default_parse_bug ", "Empty default in switch ");
+addTestFail("test/break1 ", "No enclosing loop for break");
 addTest("testrun/wchar1");
 addTest("testrun/wchar2");
 addTest("testrun/wchar3");
@@ -414,6 +426,7 @@ addTest("testrun/lval1 _GNUCC=1");
 #addToGroup("test/bind2", "slow");
 addTest("testrun/decl1 _GNUCC=1");
 addTest("testrun/addr-array");
+addTest("testrun/addr-string");
 addTest("combine1 ");
 addTest("combine2 ");
 addTest("combine3 ");
@@ -543,6 +556,9 @@ addTest("testrun/simplify_structs2 USECILLY=1 EXTRAARGS=--dosimplify");
 
 addTest("test/tempname EXTRAARGS=--dosimplify");
 
+addTest("test/simplify_volatile EXTRAARGS=--dosimplify");
+addBadComment("test/simplify_volatile", "Bug. Simplification of volatile structures with array members fails.");
+
 addTest("testrun/typeof1 ");
 addTest("testrun/semicolon _GNUCC=1");
 
@@ -552,12 +568,13 @@ addTest("merge-ar ");
 
 addTest("testrun/sizeof1");
 addTest("testrun/sizeof2");
-addTest("runall/sizeof3");
+addTest("test/sizeof3");
 addTest("test/outofmem ");
 addTest("testrun/builtin ");
 addTest("test/builtin2 ");
 addTest("testrun/builtin3 ");
 addTest("testrun/builtin_choose_expr");
+addTest("testrungcc/builtin_object_size _GNUCC=1");
 addTest("testrun/builtin4 ");
 addTest("test/builtin5 ");
 addTest("test/sync-1 _GNUCC=1");
@@ -602,8 +619,7 @@ addTest("scott/open $gcc");
 addTest("scott/constfold");
 addTest("scott/mode_sizes $gcc");       # mode(__QI__) stuff
 addTest("scott-nolink/brlock $gcc");
-addTest("scott/regparm0 $gcc");         # this works, unfortunately..
-addBadComment("scott/regparm0", "Bug. Also gcc bug. regparm attribute not handled well, compounded by gcc treating multiple regparm attributes inconsistently between function declarations and definitions.");
+addTest("scott/regparm0 $gcc");         # this works, unfortunately... but the bug has been fixed nonetheless
 addTest("scott/unscomp");               # kernel/fs/buffer.c
 addTest("scott/thing");
 
@@ -626,6 +642,9 @@ addTest("combine_syserr MERGEINLINES=1");
 addTest("combine_copyptrs WARNINGS_ARE_ERRORS=1");
 addTest("combine_copyptrs WARNINGS_ARE_ERRORS=1 MERGEINLINES=1");
 
+addTest("testrun/constfold EXTRAARGS=\"--domakeCFG --dopartial\"");
+addBadComment("testrun/constfold", "Bug. Wrong constant folding.  #2276515 on sourceforge.");
+
 # tests of things implemented for EDG compatibility
 addTest("mergestruct");
 
@@ -645,7 +664,7 @@ addTest("baddef");
 #runTest $make apache/rewrite
 
 addTest("test/init");
-addTest("test/initial");
+addTest("test/initial WARNINGS_ARE_ERRORS=1");
 addTest("test/jmp_buf");
 addTest("test/static");
 
@@ -680,7 +699,7 @@ addTest("scott/enumerator_sizeof");
 addTest("testrun/decl_mix_stmt");
 addTest("scott/enumattr");
 addTest("runall/alpha");
-addTest("testrun/blockattr2");
+addTest("testrun/blockattr2 USECFG=1");
 addTest("testrun/extinline2");
 addTest("test/extinline3");
 addTest("testrun/bool");

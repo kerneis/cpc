@@ -1,15 +1,18 @@
-CPC='../bin/cpc.asm.exe'
+CPC='../obj/cpc.asm.exe'
 
 CDEBUGFLAGS=-Wall -g
 CLIBS=-I ../include
 
-LDLIBS=-L../runtime -lm -pthread -lcpcfull
+CFLAGS+=$(CDEBUGFLAGS) $(EXTRA_DEFINES)
+
+LDLIBS=-L../runtime -lcpcfull -lm -pthread
 
 .PHONY: all clean servers test
 
 BASICS=barrier boxing bug conditions done loops patch padding sleep\
-    sleep_cond detached-torture sleep-torture conditions-torture
-EXTENDED=ampersand nontailcall pointer tcat tcat_fd trivial-httpd
+    sleep_cond detached-torture sleep-torture conditions-torture pointer\
+	detached-spawn spawn cps_funptr
+EXTENDED=ampersand nontailcall tcat tcat_fd trivial-httpd
 SERVERS=trivial-httpd trivial-httpd-fork trivial-httpd-nptl trivial-httpd-st\
 	 static-httpd static-httpd-fork static-httpd-nptl static-httpd-st\
 	 trivial-httpd-pth static-httpd-pth
@@ -28,8 +31,7 @@ test/%: % %.output
 	@ echo $@: SUCCESS
 
 static-httpd.cpi: trivial-httpd.cpc
-	$(CPP) -x c $(CFLAGS) $(CLIBS) -include cpc/cpc_runtime.h \
-	-DSTATIC -o $@ $<
+	$(CPP) -x c $(CFLAGS) $(CLIBS) -DSTATIC -o $@ $<
 
 static-httpd-fork.o: trivial-httpd-fork.c
 	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
@@ -55,11 +57,10 @@ clean:
 	rm -f $(BASICS) $(EXTENDED) $(SERVERS)
 
 %.cpi: %.cpc
-	$(CPP) -x c $(CFLAGS) $(CLIBS) -include cpc/cpc_runtime.h \
-	  -o $@ $<
+	$(CPP) -x c $(CFLAGS) $(CLIBS) -o $@ $<
 %.c: %.cpi
 	$(CPC) $(CPCOPTS) $< --out $@
 
 %.output: %.cpc
 	@grep -q "EXPECTED OUTPUT" $< || (echo $<: missing expected output; false)
-	@sed "0,/EXPECTED OUTPUT/ d ; /END OF OUTPUT/,$$ d" $< > $@
+	@sed "1,/EXPECTED OUTPUT/ d ; /END OF OUTPUT/,$$ d" $< > $@

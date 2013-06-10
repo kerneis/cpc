@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -1148,6 +1148,7 @@ begin
     | Instr(l) -> 13 + 67*(List.length l)
     | Return(_) -> 17
     | Goto(_) -> 19
+    | ComputedGoto(_) -> 131
     | Break(_) -> 23
     | Continue(_) -> 29
     | If(_,b1,b2,_) -> 31 + 37*(stmtListSum b1.bstmts) 
@@ -1159,9 +1160,9 @@ begin
     | TryExcept (b, (il, e), h, _) -> 
         67 + 83*(stmtListSum b.bstmts) + 97*(stmtListSum h.bstmts)
     | TryFinally (b, h, _) -> 
-        103 + 113*(stmtListSum b.bstmts) + 119*(stmtListSum h.bstmts)
-    | CpcSpawn (_, _, _) -> 127
-    | CpcFun (f, _) -> 131*(functionChecksum f)
+        103 + 113*(stmtListSum b.bstmts) + 127*(stmtListSum h.bstmts)
+    | CpcSpawn (_, _, _) -> 131
+    | CpcFun (f, _) -> 137*(functionChecksum f)
   in
   
   (* disabled 2nd and 3rd measure because they appear to get different

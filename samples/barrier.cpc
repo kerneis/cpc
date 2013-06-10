@@ -1,3 +1,4 @@
+#include <cpc/cpc_runtime.h>
 /* EXPECTED OUTPUT
 M1
 A1

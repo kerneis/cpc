@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010 (minor changes for CPC compatibility),
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2003, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -70,6 +70,8 @@ module E=Errormsg
    cont  = succ of any Continue in this block
    None means the succ is the function return. It does not mean the break/cont
    is invalid. We assume the validity has already been checked.
+   rlabels = list of potential successors of computed gotos (ie. every labelled
+   statement whose address is retained)
 *)
 
 let start_id = ref 0 (* for unique ids across many functions *)
@@ -80,7 +82,7 @@ class caseLabeledStmtFinder slr = object(self)
     
     method vstmt s =
         if List.exists (fun l ->
-            match l with | Case(_, _) | Default _ -> true | _ -> false)
+            match l with | Case _ | CaseRange _ | Default _ -> true | _ -> false)
             s.labels
         then begin
             slr := s :: (!slr);
@@ -98,6 +100,23 @@ let findCaseLabeledStmts (b : block) : stmt list =
     ignore(visitCilBlock vis b);
     !slr
 
+class addrOfLabelFinder slr = object(self)
+    inherit nopCilVisitor
+
+    method vexpr e = match e with
+    | AddrOfLabel sref ->
+        slr := !sref :: (!slr);
+        SkipChildren
+    | _ -> DoChildren
+
+end
+
+let findAddrOfLabelStmts (b : block) : stmt list =
+    let slr = ref [] in
+    let vis = new addrOfLabelFinder slr in
+    ignore(visitCilBlock vis b);
+    !slr
+
 (* entry point *)
 
 (** Compute a control flow graph for fd.  Stmts in fd have preds and succs
@@ -107,8 +126,9 @@ let rec cfgFun (fd : fundec): int =
     let internals = !numInternalNodes in
     let initial_id = !start_id in
     let nodeList = ref [] in
+    let rlabels = findAddrOfLabelStmts fd.sbody in
 
-    cfgBlock fd.sbody None None None nodeList;
+    cfgBlock fd.sbody None None None nodeList rlabels;
 
     fd.smaxstmtid <- Some(!start_id);
     fd.sallstmts <- List.rev !nodeList;
@@ -121,25 +141,25 @@ let rec cfgFun (fd : fundec): int =
 
 and cfgStmts (ss: stmt list) 
              (next:stmt option) (break:stmt option) (cont:stmt option)
-             (nodeList:stmt list ref) =
+             (nodeList:stmt list ref) (rlabels: stmt list) =
   match ss with
     [] -> ();
-  | [s] -> cfgStmt s next break cont nodeList
+  | [s] -> cfgStmt s next break cont nodeList rlabels
   | hd::tl ->
-      cfgStmt hd (Some (List.hd tl))  break cont nodeList;
-      cfgStmts tl next break cont nodeList
+      cfgStmt hd (Some (List.hd tl))  break cont nodeList rlabels;
+      cfgStmts tl next break cont nodeList rlabels
 
 and cfgBlock  (blk: block) 
               (next:stmt option) (break:stmt option) (cont:stmt option)
-              (nodeList:stmt list ref) =
-   cfgStmts blk.bstmts next break cont nodeList
+              (nodeList:stmt list ref) (rlabels: stmt list) =
+   cfgStmts blk.bstmts next break cont nodeList rlabels
 
 
 (* Fill in the CFG info for a stmt
    Meaning of next, break, cont should be clear from earlier comment
 *)
 and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option)
-            (nodeList:stmt list ref) =
+            (nodeList:stmt list ref) (rlabels: stmt list) =
   incr start_id;
   s.sid <- !start_id;
   nodeList := s :: !nodeList; (* Future traversals can be made in linear time. e.g.  *)
@@ -181,17 +201,18 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option)
         ()
   | Return _  -> ()
   | Goto (p,_) -> addSucc !p
+  | ComputedGoto (e,_) -> List.iter addSucc rlabels
   | Break _ -> addOptionSucc break
   | Continue _ -> addOptionSucc cont
   | If (_, blk1, blk2, _) ->
       (* The succs of If is [true branch;false branch] *)
       addBlockSucc blk2 next;
       addBlockSucc blk1 next;
-      cfgBlock blk1 next break cont nodeList;
-      cfgBlock blk2 next break cont nodeList
+      cfgBlock blk1 next break cont nodeList rlabels;
+      cfgBlock blk2 next break cont nodeList rlabels
   | Block b -> 
       addBlockSucc b next;
-      cfgBlock b next break cont nodeList
+      cfgBlock b next break cont nodeList rlabels
   | Switch(_,blk,l,_) ->
       let bl = findCaseLabeledStmts blk in
       List.iter addSucc (List.rev bl(*l*)); (* Add successors in order *)
@@ -203,11 +224,11 @@ and cfgStmt (s: stmt) (next:stmt option) (break:stmt option) (cont:stmt option)
                 bl) 
       then 
         addOptionSucc next;
-      cfgBlock blk next next cont nodeList
+      cfgBlock blk next next cont nodeList rlabels
   | Loop(blk, loc, s1, s2) ->
       s.skind <- Loop(blk, loc, (Some s), next);
       addBlockSucc blk (Some s);
-      cfgBlock blk (Some s) next (Some s) nodeList
+      cfgBlock blk (Some s) next (Some s) nodeList rlabels
       (* Since all loops have terminating condition true, we don't put
          any direct successor to stmt following the loop *)
   | TryExcept _ | TryFinally _ -> 
@@ -242,7 +263,7 @@ and fasStmt (todo) (s : stmt) =
       | Switch (_, b, _, _) -> fasBlock todo b
       | Loop (b, _, _, _) -> fasBlock todo b
       | CpcSpawn _
-      | (Return _ | Break _ | Continue _ | Goto _ | Instr _) -> ()
+      | (Return _ | Break _ | Continue _ | Goto _ | ComputedGoto _ | Instr _) -> ()
       | TryExcept _ | TryFinally _ -> E.s (E.unimp "try/except/finally")
       | CpcFun (fd, _) -> forallStmts todo fd
   end
@@ -262,7 +283,7 @@ let d_cfgnodelabel () (s : stmt) =
       | Loop _ -> "loop"
       | Break _ -> "break"
       | Continue _ -> "continue"
-      | Goto _ -> "goto"
+      | Goto _ | ComputedGoto _ -> "goto"
       | Instr _ -> "instr"
       | Switch _ -> "switch"
       | Block _ -> "block"

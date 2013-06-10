@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010,
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2003,
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -221,9 +221,8 @@ let init_lexicon _ =
                        else 
                          IDENT ("__thread", loc));
       (**** CPC ***)
-      ("cps", fun loc -> CPC_CPS loc);
       ("cpc_spawn", fun loc -> CPC_SPAWN loc);
-      ("cpc_attached", fun loc -> CPC_ATTACHED loc);
+      ("cpc_linked", fun loc -> CPC_LINKED loc);
     ]
 
 (* Mark an identifier as a type name. The old mapping is preserved and will 
@@ -232,7 +231,7 @@ let add_type name =
    (* ignore (print_string ("adding type name " ^ name ^ "\n"));  *)
    H.add lexicon name (fun loc -> NAMED_TYPE (name, loc))
 
-let context : string list list ref = ref []
+let context : string list list ref = ref [[]]
 
 let push_context _ = context := []::!context
 
@@ -249,7 +248,7 @@ let pop_context _ =
  * will be reinstated when we exit this context  *)
 let add_identifier name =
   match !context with
-    [] -> () (* Just ignore raise (InternalError "Empty context stack") *)
+    [] -> raise (InternalError "Empty context stack")
   | con::sub ->
       (context := (name::con)::sub;
        (*                print_string ("adding IDENT for " ^ name ^ "\n"); *)
@@ -428,7 +427,7 @@ let decfloat = (intnum? fraction)
 	      | (intnum '.') 
               | (intnum '.' exponent) 
 
-let hexfraction = hexdigit* '.' hexdigit+ | hexdigit+
+let hexfraction = hexdigit* '.' hexdigit+ | hexdigit+ '.'
 let binexponent = ['p' 'P'] ['+' '-']? decdigit+
 let hexfloat = hexprefix hexfraction binexponent
              | hexprefix hexdigit+   binexponent

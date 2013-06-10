@@ -2,6 +2,6 @@ A thread pool library with support for callbacks and that is somewhat
 faster than the ones floating around on the net.  See the file threadpool.h
 for documentation.
 
-Juliusz Chroboczek <jch@pps.jussieu.fr>
+Juliusz Chroboczek <jch@pps.univ-paris-diderot.fr>
 
 

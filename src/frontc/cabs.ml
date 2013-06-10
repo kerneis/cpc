@@ -1,6 +1,6 @@
 (* 
  * Copyright (c) 2008-2010,
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -66,6 +66,7 @@ type typeSpecifier = (* Merge all specifiers into one type *)
   | Tfloat
   | Tdouble
   | Tsigned
+  | Tsizet    (* used temporarily to translate offsetof() *)
   | Tunsigned
   | Tnamed of string
   (* each of the following three kinds of specifiers contains a field 
@@ -101,7 +102,6 @@ and spec_elem =
   | SpecInline
   | SpecType of typeSpecifier
   | SpecPattern of string       (* specifier pattern variable *)
-  | SpecCPS                     (*** CPC ***)
 
 (* decided to go ahead and replace 'spec_elem list' with specifier *)
 and specifier = spec_elem list
@@ -232,7 +232,7 @@ and statement =
 
    (** CPC **)
  | CPC_SPAWN of statement * cabsloc
- | CPC_ATTACHED of expression * statement * cabsloc
+ | CPC_LINKED of expression * statement * cabsloc
  | CPC_FUN of definition
  
 and for_clause = 

@@ -17,14 +17,11 @@
 ECHO = @
 
 # It is important to build quickbuild first,to generate the proper dependencies
-# all:  quickbuild setup
+all:  quickbuild setup cpc
 NATIVECAML := 1
-BUILDER := cilly
-all: cpc
 
 # Now add the defines for the CIL features
 include Makefile.features
-
 
 # look out for outdated Makefile; if it's out of date, this will automatically
 # re-run ./config.status, then re-exec make with the same arguments
@@ -37,9 +34,6 @@ config.status: configure
 configure: configure.in aclocal.m4
 	autoconf
 
-ocamlutil/perfcount.c: config.status ocamlutil/perfcount.c.in
-	./$<
-
 @DEFAULT_COMPILER@=1
 
 
@@ -49,8 +43,10 @@ ifdef RELEASE
   UNSAFE     := 1
 endif
 
-ifndef ARCHOS
-   ARCHOS=@ARCHOS@
+ifndef CAMLNATTL
+  ifeq (@HAS_OCAML_NATIVE_TOOLS@, 1)
+    CAMLNATTL := 1
+  endif
 endif
 
 ifndef MINGW
@@ -74,7 +70,7 @@ else
 endif
 
 # Put here all the byproducts of make
-OBJDIR      := obj/$(ARCHOS)
+OBJDIR      := obj
 DEPENDDIR   := obj/.depend
 
 CILLY_FEATURES :=
@@ -96,29 +92,20 @@ CILLY_LIBRARY_MODULES = pretty inthash errormsg alpha trace stats util clist \
               cabs cabshelper cabsvisit whitetrack cprint lexerhack machdep machdepenv cparser clexer  \
               cilversion cilint cil cillower formatparse formatlex formatcil cabs2cil \
               patch frontc check mergecil \
-              dataflow dominators bitmap ssa ciltools \
-              usedef logcalls logwrites rmtmps \
-	      callgraph epicenter heapify \
-              setp uref olf ptranal \
-              canonicalize heap oneret partial simplemem simplify \
-	      dataslicing sfi expcompare\
-              cfg liveness reachingdefs deadcodeelim availexps \
-              availexpslv predabst\
+              cfg rmtmps usedef \
               testcil \
-	      $(CILLY_FEATURES) \
 	      ciloptions feature_config \
 		  cpc
 # ww: we don't want "main" in an external cil library (cil.cma),
 # otherwise every program that links against that library will get
 # main's argument checking and whatnot ...
 CILLY_MODULES = $(CILLY_LIBRARY_MODULES) main
-CILLY_CMODULES = perfcount
 CILLY_LIBS     = unix str nums
 
 SOURCEDIRS  += src src/frontc src/ext src/ext/pta ocamlutil @EXTRASRCDIRS@
 MLLS        += clexer.mll formatlex.mll
 MLYS        += cparser.mly formatparse.mly
-MODULES     += $(CILLY_MODULES) libmaincil
+MODULES     += $(CILLY_MODULES)
 
 BEFOREDEPS += $(OBJDIR)/machdep.ml
 BEFOREDEPS += $(OBJDIR)/cilversion.ml
@@ -137,33 +124,35 @@ ocamlbuild:
 
    # Now the rule to make cpc and cilly
 
-cpc: $(BUILDER)
-	cp $(OBJDIR)/cilly$(EXE) bin/cpc$(EXE)
-	cd runtime; $(MAKE) clean all
+cpc: cilly $(OBJDIR)/cpc$(EXE)
+	cd runtime; $(MAKE) all
+
+$(OBJDIR)/cpc$(EXE): $(OBJDIR)/cilly$(EXE)
+	cp $< $@
 
 samples: cpc
-	cd samples; $(MAKE) clean all
+	$(MAKE) -C samples clean all
 
-testcpc:
-	cd samples; $(MAKE) clean all test
+testcpc: cpc
+	$(MAKE) -C samples clean all test
 
-cilly: $(OBJDIR)/cilly$(EXE)
-$(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO)) \
-                        $(CILLY_CMODULES:%=$(OBJDIR)/%.$(CMC))
+cilly/Makefile: cilly/Makefile.PL cilly/App/Cilly.pm
+	cd cilly; perl Makefile.PL
+
+cilly: $(OBJDIR)/cilly$(EXE) cilly/Makefile
+	$(MAKE) -C cilly
+
+$(OBJDIR)/cilly$(EXE) : $(CILLY_MODULES:%=$(OBJDIR)/%.$(CMO))
 	@$(NARRATIVE) "Linking $(COMPILETOWHAT) $@ $(LINKMSG)"
 	$(AT)$(CAMLLINK) -verbose -o $@ \
                     $(CILLY_LIBS:%=%.$(CMXA)) \
                     $^
 
 
-quickbuild: cilversion machdep cilly lib/Cilly.pm
+quickbuild: cilversion machdep cilly cilly/App/Cilly.pm
 
 # Setup also makes the native code versions
-#
-# sm: cillib is only built with NATIVECAML=1 because it builds libcil.o,
-# which requires native-code .cmx compiled modules... could break it
-# into two targets so we build cil.cma both ways, but no one is using
-# cil.cma now so I'll leave it alone
+
 setup: cilversion machdep
 	$(MAKE) cilly NATIVECAML= 
 	$(MAKE) cilly NATIVECAML=1
@@ -190,7 +179,6 @@ $(OBJDIR)/machdep.ml : src/machdep-ml.c configure.in Makefile.in
 	echo "  sizeof_long: int ;      (* Size of \"long\" *)"        >> $@
 	echo "  sizeof_longlong: int;   (* Size of \"long long\" *)"   >> $@
 	echo "  sizeof_ptr: int;        (* Size of pointers *)"        >> $@
-	echo "  sizeof_enum: int;       (* Size of enum types *)"      >> $@
 	echo "  sizeof_float: int;      (* Size of \"float\" *)"       >> $@
 	echo "  sizeof_double: int;     (* Size of \"double\" *)"      >> $@
 	echo "  sizeof_longdouble: int; (* Size of \"long double\" *)" >> $@
@@ -225,7 +213,7 @@ $(OBJDIR)/machdep.ml : src/machdep-ml.c configure.in Makefile.in
 	echo "let gcc = {" >>$@
 	$(EMUL) $(OBJDIR)/machdep-ml.exe >>$@
 	echo "}"          >>$@
-	if cl /D_MSVC $< /Fe$(OBJDIR)/machdep-ml.exe /Fo$(OBJDIR)/machdep-ml.obj ;then \
+	if cl -D_MSVC $< -Fe$(OBJDIR)/machdep-ml.exe -Fo$(OBJDIR)/machdep-ml.obj ;then \
            echo "let hasMSVC = true" >>$@ ;\
 	         echo "let msvc = {" >>$@ ;\
 	           $(OBJDIR)/machdep-ml.exe >>$@ ;\
@@ -237,16 +225,19 @@ $(OBJDIR)/machdep.ml : src/machdep-ml.c configure.in Makefile.in
 	echo "let theMachine : mach ref = ref gcc" >>$@
 
 
-lib/Cilly.pm: lib/Cilly.pm.in src/machdep-ml.c configure.in Makefile.in
-	cp lib/Cilly.pm.in lib/Cilly.pm
+cilly/App/Cilly.pm: cilly/App/Cilly.pm.in src/machdep-ml.c configure.in Makefile.in
+	cp cilly/App/Cilly.pm.in cilly/App/Cilly.pm
+	sed -e "s|CIL_VERSION|@CIL_VERSION@|" cilly/App/Cilly.pm > cilly/App/Cilly.pm.tmp; \
+	mv cilly/App/Cilly.pm.tmp cilly/App/Cilly.pm; \
 	if $(MACHDEPCC) -m32 src/machdep-ml.c -o $(OBJDIR)/machdep-ml32.exe ;then \
-	  sed -i -e "s|nogcc32model|`$(EMUL) $(OBJDIR)/machdep-ml32.exe --env`|" lib/Cilly.pm; \
+	  sed -e "s|nogcc32model|`$(EMUL) $(OBJDIR)/machdep-ml32.exe --env`|" cilly/App/Cilly.pm > cilly/App/Cilly.pm.tmp; \
+	  mv cilly/App/Cilly.pm.tmp cilly/App/Cilly.pm; \
 	fi
 	if $(MACHDEPCC) -m64 src/machdep-ml.c -o $(OBJDIR)/machdep-ml64.exe ;then \
-	  sed -i -e "s|nogcc64model|`$(EMUL) $(OBJDIR)/machdep-ml64.exe --env`|" lib/Cilly.pm; \
+	  sed -e "s|nogcc64model|`$(EMUL) $(OBJDIR)/machdep-ml64.exe --env`|" cilly/App/Cilly.pm > cilly/App/Cilly.pm.tmp; \
+	  mv cilly/App/Cilly.pm.tmp cilly/App/Cilly.pm; \
 	fi
 
-#
 # Create the version information module
 .PHONY: cilversion
 cilversion: $(OBJDIR)/cilversion.ml
@@ -254,14 +245,9 @@ $(OBJDIR)/cilversion.ml: src/cilversion.ml.in config.status
 	rm -f $@
 	./config.status --file=$@:$<
 
-# build two libraries
-.PHONY: cillib libcil
-ifeq ($(NATIVECAML),1)
-cillib: $(OBJDIR)/cil.$(CMXA) $(OBJDIR)/libcil.o lib/Cilly.pm
-else
-cillib: $(OBJDIR)/cil.$(CMXA) lib/Cilly.pm
-endif
-
+# build library
+.PHONY: cillib
+cillib: $(OBJDIR)/cil.$(CMXA) cilly/App/Cilly.pm
 
 $(OBJDIR)/feature_config.ml: config.status
 	rm -f $(OBJDIR)/feature_config.*
@@ -292,40 +278,12 @@ endif
 	| perl -pe 's/\\n/\n/g' >> $@
 	echo "]"   >>$@ 
 
-
-
-
-
-
 OCAML_CIL_LIB_MODULES := $(CILLY_LIBRARY_MODULES) 
-OCAML_CIL_LIB_CMODULES := perfcount
-
-# list of modules to use for building a library; remove 'main'
-# and add 'libmaincil'
-OCAML_CIL_C_LIB_MODULES := $(CILLY_MODULES:main=) libmaincil
 
 # Build an OCAML library (CMA / CMXA) that exports our Cil stuff
-$(OBJDIR)/cil.$(CMXA): $(OCAML_CIL_LIB_CMODULES:%=$(OBJDIR)/lib%.a) \
-                       $(OCAML_CIL_LIB_MODULES:%=$(OBJDIR)/%.$(CMO))
+$(OBJDIR)/cil.$(CMXA): $(OCAML_CIL_LIB_MODULES:%=$(OBJDIR)/%.$(CMO))
 	$(CAMLLINK) -a -o $@ -ccopt -L$(pkglibdir) \
-               $(OCAML_CIL_LIB_CMODULES:%=-cclib -l%) \
                $(OCAML_CIL_LIB_MODULES:%=$(OBJDIR)/%.$(CMO))
-
-$(OBJDIR)/libperfcount.a: %: %($(OBJDIR)/perfcount.$(CMC))
-	ranlib $@
-
-# sm: for Simon: build a library of CIL functions which can
-# be called from C code; this is like the target above, except
-# it is callable from C instead of from Ocaml
-ifeq ($(NATIVECAML),1)
-$(OBJDIR)/libcil.o: $(OCAML_CIL_LIB_CMODULES:%=$(OBJDIR)/lib%.a) \
-                    $(OCAML_CIL_LIB_MODULES:%=$(OBJDIR)/%.$(CMO))
-	ocamlopt -output-obj -o $@ $(CILLY_LIBS:%=%.cmxa) $^
-else
-$(OBJDIR)/libcil.o:
-	@echo "Can only build $@ when NATIVECAML is 1."
-	exit 2
-endif
 
 # Test cil
 ifdef _MSVC
@@ -346,7 +304,6 @@ testcil: $(OBJDIR)/cilly$(EXE)
 ### The following are available
 ###
 ###   make doc  - creates the documentation
-###   make publish_doc - creates the documentation and puts it on the web page
 
 ODOC_FILES =        ocamlutil/pretty.mli ocamlutil/errormsg.mli \
                     ocamlutil/clist.mli \
@@ -367,7 +324,7 @@ odoc: $(OBJDIR)/pretty.cmi $(OBJDIR)/cil.cmi
              -t "CIL API Documentation (version @CIL_VERSION@)" \
 	     -I $(OBJDIR) -hide Pervasives $(ODOC_FILES)
 
-doc/cilpp.tex: doc/cilcode.pl doc/cil.tex lib/Cilly.pm
+doc/cilpp.tex: doc/cilcode.pl doc/cil.tex cilly/App/Cilly.pm
 	-rm -rf doc/html/cil
 	-mkdir -p doc/html/cil
 	-mkdir -p doc/html/cil/examples
@@ -377,8 +334,8 @@ doc/cilpp.tex: doc/cilcode.pl doc/cil.tex lib/Cilly.pm
 # Documentation generated from latex files using "hevea"
 texdoc: doc/cilpp.tex
 # Create the version document
-	cd doc/html/cil; echo "\def\cilversion{@CIL_VERSION@}" >cil.version.tex
-	cd doc/html/cil; echo "\def\ccuredversion{@CCURED_VERSION@}" >>cil.version.tex
+	cd doc/html/cil; printf '\\def\\cilversion{@CIL_VERSION@}\n' >cil.version.tex
+	cd doc/html/cil; printf '\\def\\ccuredversion{@CCURED_VERSION@}\n' >>cil.version.tex
 	cd doc/html/cil; hevea -exec xxdate.exe ../../cilpp
 	cd doc/html/cil; hevea -exec xxdate.exe ../../cilpp
 	cd doc/html/cil; mv cilpp.html cil.html
@@ -387,8 +344,8 @@ texdoc: doc/cilpp.tex
 	cp -f doc/header.html doc/html/cil
 
 pdfdoc: doc/cilpp.tex $(OBJDIR)/pretty.cmi $(OBJDIR)/cil.cmi
-	cd doc; echo "\def\cilversion{@CIL_VERSION@}" >cil.version.tex
-	cd doc; echo "\def\ccuredversion{@CCURED_VERSION@}" >>cil.version.tex
+	cd doc; printf '\\def\\cilversion{@CIL_VERSION@}\n' >cil.version.tex
+	cd doc; printf '\\def\\ccuredversion{@CCURED_VERSION@}\n' >>cil.version.tex
 	cd doc; pdflatex cilpp.tex; pdflatex cilpp.tex
 	cd doc; mv cilpp.pdf html/cil/CIL.pdf
 	ocamldoc -o doc/cil-api.tex.tmp -v -stars \
@@ -406,176 +363,15 @@ pdfdoc: doc/cilpp.tex $(OBJDIR)/pretty.cmi $(OBJDIR)/cil.cmi
 # correctly.
 doc: texdoc pdfdoc odoc
 
-
-#----------------------------------------------------------------------
-# Generate the CIL distribution
-# This will create a file cil.tar.gz. It includes the HTML documentation 
-# so that people can use it even if they don't have ocamldoc, hevea etc. 
-
-.PHONY: distrib distrib-nocheck checkdistrib
-CIL_TAR_GZ:=cil-@CIL_VERSION@.tar.gz
-## Make a distribution and check it
-distrib: distrib-nocheck checkdistrib
-
-# Work in a temporary directory
-TEMP_DIR = TEMP_cil-distrib
-
-# The tar archive members will be relative to this directory
-TOP_DIR = $(TEMP_DIR)/cil-@CIL_VERSION@
-
-DISTRIB_ROOT = README LICENSE INSTALL Makefile.in  \
-               config.h.in config.mk.in Makefile.gcc Makefile.msvc \
-	       configure configure.in install-sh config.guess config.sub \
-	       cil.spec cil.spec.in \
-	       _tags \
-	       aclocal.m4 \
-	       cil.itarget \
-	       doc/cil.odocl \
-	       myocamlbuild.ml
-
-DISTRIB_SRC = cilutil.ml cil.ml cil.mli check.ml check.mli \
-	      rmtmps.ml rmtmps.mli formatlex.mll formatparse.mly \
-	      formatcil.mli formatcil.ml testcil.ml \
-	      mergecil.ml mergecil.mli main.ml machdep-ml.c.in machdepenv.ml \
-	      ciloptions.ml ciloptions.mli libmaincil.ml \
-	      escape.ml escape.mli cillower.mli cillower.ml \
-	      _tags \
-	      cil.mllib \
-	      cilversion.ml.in
-
-DISTRIB_OCAMLUTIL = pretty.ml pretty.mli errormsg.ml errormsg.mli \
-                    trace.ml trace.mli stats.ml stats.mli util.ml util.mli \
-                    inthash.ml inthash.mli alpha.ml alpha.mli \
-		    intmap.ml intmap.mli clist.ml clist.mli \
-                    longarray.ml longarray.mli \
-                    growArray.ml growArray.mli \
-                    bitmap.ml bitmap.mli \
-                    perfcount.c.in Makefile.ocaml \
-                    _tags
-
-
-DISTRIB_SRC_FRONTC = cabs.ml cabshelper.ml cprint.ml clexer.mli clexer.mll \
-		     cparser.mly whitetrack.mli whitetrack.ml lexerhack.ml \
-		     cabs2cil.ml cabs2cil.mli frontc.ml frontc.mli \
-	             cabsvisit.mli cabsvisit.ml patch.mli patch.ml
-
-DISTRIB_SRC_EXT = logcalls.ml logcalls.mli \
-                  astslicer.ml heap.ml partial.ml \
-                  logwrites.ml heapify.ml callgraph.ml callgraph.mli \
-                  epicenter.ml usedef.ml ciltools.ml \
-                  deadcodeelim.ml availexps.ml \
-                  dataflow.ml dataflow.mli \
-		  dominators.ml dominators.mli \
-		  ssa.ml ssa.mli \
-	          stackoverflow.mli stackoverflow.ml \
-	          canonicalize.ml canonicalize.mli \
-	          oneret.ml oneret.mli sfi.ml \
-	          simplemem.ml simplify.ml simplify.mli \
-	          blockinggraph.ml blockinggraph.mli \
-		  dataslicing.ml dataslicing.mli \
-		  _tags \
-		  reachingdefs.ml \
-		  cfg.ml cfg.mli \
-		  liveness.ml \
-		  expcompare.ml \
-		  availexpslv.ml \
-		  predabst.ml \
-		  llvm.ml llvmgen.ml llvmssa.ml llvmutils.ml
-
-DISTRIB_SRC_EXT_PTA = setp.ml setp.mli golf.ml golf.mli \
-                      ptranal.ml ptranal.mli \
-	              steensgaard.mli steensgaard.ml \
-                      uref.ml uref.mli olf.ml olf.mli
-
-DISTRIB_LIB = Cilly.pm.in KeptFile.pm OutputFile.pm TempFile.pm
-
-DISTRIB_BIN = CilConfig.pm.in cilly cilly.bat.in \
-              patcher patcher.bat.in test-bad teetwo
-
-DISTRIB_SMALL1=hello.c func.c init.c init1.c wchar1.c vararg1.c testharness.h 
-
-distrib-nocheck: $(DISTRIB_ROOT) doc
-        # Create the distribution from scratch
-	rm -rf $(TEMP_DIR)
-	mkdir $(TEMP_DIR)
-
-	rm -rf $(CIL_TAR_GZ)
-	mkdir $(TOP_DIR) \
-              $(TOP_DIR)/bin \
-              $(TOP_DIR)/doc \
-              $(TOP_DIR)/doc/api \
-              $(TOP_DIR)/debian \
-              $(TOP_DIR)/lib \
-              $(TOP_DIR)/obj \
-              $(TOP_DIR)/obj/.depend \
-              $(TOP_DIR)/src \
-              $(TOP_DIR)/src/frontc \
-              $(TOP_DIR)/src/ext \
-              $(TOP_DIR)/src/ext/pta \
-              $(TOP_DIR)/test \
-              $(TOP_DIR)/test/small1 \
-              $(TOP_DIR)/ocamlutil
-
-	cp $(patsubst %,%,$(DISTRIB_ROOT)) $(TOP_DIR)
-
-	cp $(patsubst %,src/%,$(DISTRIB_SRC)) $(TOP_DIR)/src
-	cp $(patsubst %,ocamlutil/%,$(DISTRIB_OCAMLUTIL)) $(TOP_DIR)/ocamlutil
-	cp $(patsubst %,src/ext/%,$(DISTRIB_SRC_EXT)) $(TOP_DIR)/src/ext
-	cp $(patsubst %,src/ext/pta/%,$(DISTRIB_SRC_EXT_PTA)) \
-                                      $(TOP_DIR)/src/ext/pta
-	cp $(patsubst %,src/frontc/%,$(DISTRIB_SRC_FRONTC)) \
-		$(TOP_DIR)/src/frontc
-	cp $(patsubst %,lib/%,$(DISTRIB_LIB)) $(TOP_DIR)/lib
-	cp $(patsubst %,bin/%,$(DISTRIB_BIN)) $(TOP_DIR)/bin
-	cp $(patsubst %,test/small1/%,$(DISTRIB_SMALL1)) $(TOP_DIR)/test/small1
-
-	cp -r doc/html/cil/* $(TOP_DIR)/doc
-	cp debian/* $(TOP_DIR)/debian
-
-# Delete all Subversion metadata directories
-	find $(TEMP_DIR) -name .svn -print0 | xargs -0 rm -rf
-
-# Now make the TAR ball
-	cd $(TEMP_DIR); tar cfz $(CIL_TAR_GZ) cil-@CIL_VERSION@
-	mv $(TEMP_DIR)/$(CIL_TAR_GZ) .
-
-#	rm -rf $(TEMP_DIR)
-
-## Check a distribution
-checkdistrib:
-	cd $(TOP_DIR) && ./configure && \
-           $(MAKE) && $(MAKE) quicktest
-
 distclean: clean
 	rm -f src/frontc/cparser.output
 	rm -f src/formatparse.output
-	rm -f ocamlutil/perfcount.c
-	rm -f bin/cilly.bat
-	rm -f bin/patcher.bat
-	rm -f bin/CilConfig.pm
+	rm -f cilly/App/CilConfig.pm
+	rm -f cilly/Makefile.old
 	rm -f config.log
 	rm -f config.h
 	rm -f Makefile
-	rm -rf bin/cpc.*.exe
 
-## Publish the distribution
-CILHTMLDEST=/var/www/cil
-publish_distrib: publish_doc
-	if test -d $(CILHTMLDEST); then \
-           cp -rf doc/html/cil/* $(CILHTMLDEST); \
-           cp -f $(CIL_TAR_GZ) $(CILHTMLDEST)/distrib; \
-           ln -sf $(CILHTMLDEST)/distrib/$(CIL_TAR_GZ) $(CILHTMLDEST)/distrib/cil-latest.tar.gz ; \
-           echo "Publish succeeded"; \
-	else \
-	   error "Cannot publish because $(CILHTMLDEST) does not exist" ; \
-        fi
-
-publish_doc: doc
-	if test -d $(CILHTMLDEST); then \
-           cp -rf doc/html/cil/* $(CILHTMLDEST); echo "Done publishing doc"; \
-	else \
-	   error "Cannot publish because $(CILHTMLDEST) does not exist" ; \
-        fi
 
 cleancheck:
 	rm -f test/small1/*.o
@@ -583,7 +379,10 @@ cleancheck:
 	rm -f test/small1/vararg1
 	rm -f test/small1/wchar1
 
-clean: cleancaml cleancheck
+clean: cleancaml cleancheck cilly/Makefile
+	$(MAKE) -C cilly clean
+	$(MAKE) -C runtime clean
+	$(MAKE) -C samples clean
 
 
 # Now include the compiler specific stuff
@@ -596,13 +395,15 @@ else
 endif
 
 test/%: 
-	bin/cilly $(CONLY) test/small1/$*.c $(OBJOUT)test/small1/$*.o
+	cilly/cilly $(CONLY) test/small1/$*.c $(OBJOUT)test/small1/$*.o
 
 testrun/%: 
-	bin/cilly test/small1/$*.c $(OBJOUT)test/small1/$*
+	cilly/cilly test/small1/$*.c $(OBJOUT)test/small1/$*
 	test/small1/$*
 
-
+.PHONY: regtest
+regtest:
+	cd test; ./testcil -r --regrtest
 
 .PHONY: quicktest
 quicktest: $(patsubst %,test/%,func init init1) \
@@ -611,128 +412,48 @@ quicktest: $(patsubst %,test/%,func init init1) \
 .PHONY: check
 check: quicktest
 
-############# Binary distribution ################
-.PHONY: bindistrb checkbindistrib
-
-BINCIL_TAR_GZ:=cil-win32-@CIL_VERSION@.tar.gz
-
-# Work in a temporary directory
-BINTEMP_DIR = TEMP_cil-bindistrib
-
-# The tar archive members will be relative to this directory
-BINTOP_DIR = $(BINTEMP_DIR)/cil
-
-BINDISTRIB_ROOT = README LICENSE
-
-BINDISTRIB_LIB = Cilly.pm KeptFile.pm OutputFile.pm TempFile.pm
-
-BINDISTRIB_BIN = CilConfig.pm.in cilly cilly.bat.in \
-              patcher patcher.bat.in
-
-BINDISTRIB_OBJ = cilly.byte.exe cilly.asm.exe
-
-BINDISTRIB_SMALL1=hello.c 
-
-bindistrib-nocheck: $(BINDISTRIB_ROOT) obj/x86_WIN32/cilly.asm.exe
-        # Create the distribution from scratch
-	rm -rf $(BINTEMP_DIR)
-	mkdir $(BINTEMP_DIR)
-
-	mkdir $(BINTOP_DIR) \
-              $(BINTOP_DIR)/obj \
-              $(BINTOP_DIR)/doc \
-	      $(BINTOP_DIR)/lib \
-	      $(BINTOP_DIR)/bin \
-	      $(BINTOP_DIR)/doc/api \
-              $(BINTOP_DIR)/obj/.depend \
-              $(BINTOP_DIR)/obj/x86_WIN32 \
-              $(BINTOP_DIR)/test \
-              $(BINTOP_DIR)/test/small1 
-
-	cp $(patsubst %,%,$(BINDISTRIB_ROOT)) $(BINTOP_DIR)
-	cp $(patsubst %,lib/%,$(BINDISTRIB_LIB)) $(BINTOP_DIR)/lib
-	cat bin/CilConfig.pm.in \
-            | sed -e "s|@||g" \
-            | sed -e "s|CC|cl|" \
-            | sed -e "s|DEFAULT_CIL_MODE|MSVC|" \
-            | sed -e "s|ARCHOS|x86_WIN32|" \
-               > $(BINTOP_DIR)/bin/CilConfig.pm
-	cat bin/patcher.bat.in | sed -e "s|@||g" >$(BINTOP_DIR)/bin/patcher.bat
-	cp bin/patcher $(BINTOP_DIR)/bin
-	cp bin/cilly $(BINTOP_DIR)/bin
-	cat bin/cilly.bat.in | sed -e "s|@||g" > $(BINTOP_DIR)/bin/cilly.bat
-	cp $(patsubst %,test/small1/%,$(BINDISTRIB_SMALL1)) \
-                                                 $(BINTOP_DIR)/test/small1
-	cp $(patsubst %,obj/x86_WIN32/%,$(BINDISTRIB_OBJ)) \
-                                       $(BINTOP_DIR)/obj/x86_WIN32
-
-	cp -r doc/html/cil/* $(BINTOP_DIR)/doc
-# Delete all CVS directories
-	if find $(BINTEMP_DIR) -name CVS -print >cvss.txt ; then \
-            rm -rf `cat cvss.txt` ;fi
-# Now make the TAR ball
-	cd $(BINTEMP_DIR); tar cfz $(BINCIL_TAR_GZ) cil
-	mv $(BINTEMP_DIR)/$(BINCIL_TAR_GZ) .
-
-#	rm -rf $(TEMP_DIR)
-
-## Check a distribution
-checkbindistrib:
-
 ########################################################################
-
 
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
-INSTALL_PROGRAM = @INSTALL_PROGRAM@
 
 prefix = @prefix@
 exec_prefix = @exec_prefix@
 datarootdir = @datarootdir@
 libdir = @libdir@
-pkglibdir = $(libdir)/cpc
-datadir = @datadir@
-pkgdatadir = $(datadir)/cpc
+pkglibdir = $(libdir)/cil
+libexecdir = @libexecdir@
+pkglibexecdir = $(libexecdir)/cpc
 includedir = @includedir@
 pkgincludedir = $(includedir)/cpc
 bindir = @bindir@
 
-all_distrib := $(DISTRIB_OCAMLUTIL) $(DISTRIB_SRC) $(DISTRIB_SRC_FRONTC) $(DISTRIB_SRC_EXT) $(DISTRIB_SRC_EXT_PTA)
-all_ml      := $(filter %.ml,  $(all_distrib))
-all_mli     := $(filter %.mli, $(all_distrib))
-install_ml  := $(filter $(OCAML_CIL_LIB_MODULES:=.ml), $(all_ml))
-install_cmx := $(install_ml:%.ml=$(OBJDIR)/%.cmx)
-install_mli := $(filter $(OCAML_CIL_LIB_MODULES:=.mli), $(all_mli))
-install_cmi := $(install_mli:%.mli=$(OBJDIR)/%.cmi)
-install_cmx := $(install_mli:%.mli=$(OBJDIR)/%.cmx)
-install_cma := $(addprefix $(OBJDIR)/cil., cma cmxa a)
-install_lib := $(OCAML_CIL_LIB_CMODULES:%=$(OBJDIR)/lib%.a)
-
 install_cpc_lib := libcpcfull.a libcpc.a
-install_cpc_bin := cpc cpc.asm.exe
 install_cpc_include := include/cpc/*
 
-install: cpc
+install: cilly/Makefile
+	$(MAKE) -C cilly install CILBINDIR="$(pkglibexecdir)"
+	$(INSTALL) -d $(DESTDIR)$(pkglibexecdir)
+	$(INSTALL) -m 0755 $(OBJDIR)/cpc.*.exe $(DESTDIR)$(pkglibexecdir)
 	$(INSTALL) -d $(DESTDIR)$(libdir)
 	$(INSTALL_DATA) $(addprefix runtime/,$(install_cpc_lib)) $(DESTDIR)$(libdir)
-	$(INSTALL) -d $(DESTDIR)$(bindir)
-	$(INSTALL_PROGRAM) $(addprefix bin/,$(install_cpc_bin)) $(DESTDIR)$(bindir)
 	$(INSTALL) -d $(DESTDIR)$(pkgincludedir)
 	$(INSTALL_DATA) $(install_cpc_include) $(DESTDIR)$(pkgincludedir)
 
-uninstall:
+# FIXME
+uninstall: cilly/Makefile
+	-rm -rf $(DESTDIR)$(pkglibexecdir)
+	$(MAKE) -C cilly uninstall
 	rm -f $(addprefix $(DESTDIR)$(libdir)/, $(install_cpc_lib))
-	rm -f $(addprefix $(DESTDIR)$(bindir)/, $(install_cpc_bin))
 	rm -rf $(DESTDIR)$(pkgincludedir)
 
-cil.spec: cil.spec.in
-	./config.status $@
+.PHONY: install-findlib uninstall-findlib
 
-rpms: distrib
-	rpmbuild -ta $(CIL_TAR_GZ)
+EVERYTHING=$(OBJDIR)/*.cmi $(OBJDIR)/*.cmx $(OBJDIR)/*.cma $(OBJDIR)/*.mli \
+		   $(OBJDIR)/*.cmxa $(OBJDIR)/*.a $(SOURCEDIRS:%=%/*.mli)
 
-install-findlib: $(install_cmi) $(install_cma) $(install_cmx)
-	ocamlfind install cil META $(install_cma) $(install_cmi) $(install_cmx)
+install-findlib: all $(EVERYTHING) uninstall-findlib
+	ocamlfind install cil META $(EVERYTHING)
 
 uninstall-findlib:
 	ocamlfind remove cil

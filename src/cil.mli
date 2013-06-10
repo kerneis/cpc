@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010,
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2002, 
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -154,7 +154,8 @@ and global =
       * updateable so that you can change it without requiring to recreate 
       * the list of globals. There can be at most one definition for a 
       * variable in an entire program. Cannot have storage Extern or function 
-      * type. *)
+      * type. Note: the initializer field is kept for backwards compatibility,
+      * but it is now also available directly in the varinfo. *)
 
   | GFun of fundec * location           
      (** A function definition. *)
@@ -500,11 +501,14 @@ and varinfo = {
     mutable vinline: bool;
     (** Whether this varinfo is for an inline function. *)
 
-    mutable vcps: bool;
-    (** Whether this varinfo is for a CPS function. *)
-
     mutable vdecl: location;            
     (** Location of variable declaration. *)
+
+    vinit: initinfo;
+    (** Optional initializer.  Only used for static and global variables.
+     * Initializers for other types of local variables are turned into
+     * assignments. Not mutable because the init field in initinfo is mutable
+     * already. *)
 
     mutable vid: int;  
     (** A unique integer identifier. This field will be 
@@ -603,6 +607,9 @@ and exp =
     (** Binary operation. Includes the type of the result. The arithmetic 
      * conversions are made explicit for the arguments. *)
 
+  | Question   of exp * exp * exp * typ
+    (** (a ? b : c) operation. Includes the type of the result *)
+
   | CastE      of typ * exp            
     (** Use {!Cil.mkCast} to make casts.  *)
 
@@ -611,6 +618,10 @@ and exp =
      * lvalue of type [T] yields an expression of type [TPtr(T)]. Use 
      * {!Cil.mkAddrOrStartOf} to make one of these if you are not sure which 
      * one to use. *)
+
+  | AddrOfLabel of stmt ref
+    (** The address of a label, using GCC's label-as-value extension.  If you
+     * want to use these, you must set {!Cil.useComputedGoto}. *)
 
   | StartOf    of lval   
     (** Conversion from an array to a pointer to the beginning of the array. 
@@ -815,8 +826,8 @@ and init =
      * {!Cil.foldLeftCompound}. *)
 
 
-(** We want to be able to update an initializer in a global variable, so we 
- * define it as a mutable field *)
+(** We want to be able to update an initializer in a variable, so we define it
+ * as a mutable field *)
 and initinfo = {
     mutable init : init option;
   } 
@@ -930,6 +941,13 @@ and label =
                                          * is lowered into a constant if 
                                          * {!Cil.lowerConstants} is set to 
                                          * true. *)
+  | CaseRange of exp * exp * location   (** A case statement corresponding to a
+                                         * range of values (GCC's extension).
+                                         * Both expressions are lowered into
+                                         * constants if {!Cil.lowerConstants} is
+                                         * set to true. If you want to use
+                                         * these, you must set
+                                         * {!Cil.useCaseRange}. *)
   | Default of location                 (** A default statement *)
 
 
@@ -949,6 +967,10 @@ and stmtkind =
     * points to the statement that is the target of the Goto. This means that 
     * you have to update the reference whenever you replace the target 
     * statement. The target statement MUST have at least a label. *)
+
+  | ComputedGoto of exp * location         
+  (** A computed goto using GCC's label-as-value extension.  If you want to use
+   * these, you must set {!Cil.useComputedGoto}. *)
 
   | Break of location                   
    (** A break to the end of the nearest enclosing Loop or Switch *)
@@ -1368,6 +1390,10 @@ val doubleType: typ
  *  and is set when you call {!Cil.initCIL}. *)
 val upointType: typ ref
 
+(** An unsigned integer type that fits pointer difference. Depends on
+ *  {!Cil.msvcMode} and is set when you call {!Cil.initCIL}. *)
+val ptrdiffType: typ ref
+
 (** An unsigned integer type that is the type of sizeof. Depends on 
  * {!Cil.msvcMode} and is set when you call {!Cil.initCIL}.  *)
 val typeOfSizeOf: typ ref
@@ -1486,6 +1512,7 @@ val existsType: (typ -> existsAction) -> typ -> bool
  * a function type *)
 val splitFunctionType: 
     typ -> typ * (string * typ * attributes) list option * bool * attributes
+
 (** Same as {!Cil.splitFunctionType} but takes a varinfo. Prints a nicer 
  * error message if the varinfo is not for a function *)
 val splitFunctionTypeVI: 
@@ -1525,7 +1552,7 @@ val typeSigAttrs: typsig -> attributes
  * {!Cil.makeTempVar}) and globals ({!Cil.makeGlobalVar}). Note that this 
  * function will assign a new identifier. The first argument specifies 
  * whether the varinfo is for a global. *)
-val makeVarinfo: bool -> string -> typ -> varinfo
+val makeVarinfo: bool -> string -> ?init:init -> typ -> varinfo
 
 (** Make a formal variable for a function. Insert it in both the sformals 
     and the type of the function. You can optionally specify where to insert 
@@ -1537,7 +1564,7 @@ val makeFormalVar: fundec -> ?where:string -> string -> typ -> varinfo
 (** Make a local variable and add it to a function's slocals (only if insert = 
     true, which is the default). Make sure you know what you are doing if you 
     set insert=false.  *)
-val makeLocalVar: fundec -> ?insert:bool -> string -> typ -> varinfo
+val makeLocalVar: fundec -> ?insert:bool -> string -> ?init:init -> typ -> varinfo
 
 (** Make a temporary variable and add it to a function's slocals. CIL will
     ensure that the name of the new variable is unique in this function, and
@@ -1913,8 +1940,9 @@ class type cilVisitor = object
   method vglob: global -> global list visitAction (** Global (vars, types,
                                                       etc.)  *)
   method vinit: varinfo -> offset -> init -> init visitAction        
-                                                (** Initializers for globals, 
-                                                 * pass the global where this 
+                                                (** Initializers for static,
+                                                 * const and global variables,
+                                                 * pass the variable where this
                                                  * occurs, and the offset *)
   method vtype: typ -> typ visitAction          (** Use of some type. Note 
                                                  * that for structure/union 
@@ -1990,7 +2018,7 @@ val visitCilType: cilVisitor -> typ -> typ
 (** Visit a variable declaration *)
 val visitCilVarDecl: cilVisitor -> varinfo -> varinfo
 
-(** Visit an initializer, pass also the global to which this belongs and the 
+(** Visit an initializer, pass also the variable to which this belongs and the
  * offset. *)
 val visitCilInit: cilVisitor -> varinfo -> offset -> init -> init
 
@@ -2007,11 +2035,26 @@ val visitCilAttributes: cilVisitor -> attribute list -> attribute list
    Default is GCC. After you set this function you should call {!Cil.initCIL}. *)
 val msvcMode: bool ref               
 
+(** Whether to convert local static variables into global static variables *)
+val makeStaticGlobal: bool ref
 
 (** Whether to use the logical operands LAnd and LOr. By default, do not use 
  * them because they are unlike other expressions and do not evaluate both of 
  * their operands *)
 val useLogicalOperators: bool ref
+
+(** Whether to use GCC's computed gotos.  By default, do not use them and
+ * replace them by a switch. *)
+val useComputedGoto: bool ref
+
+(** Whether to expand ranges of values in case statements.  By default, expand
+ * them and do not use the CaseRange constructor. *)
+val useCaseRange: bool ref
+
+(** Fold every {!CaseRange} in a list of labels into the corresponding list of
+ * {!Case} labels.  Raises {!Errormsg.Error} if one of the ranges cannot be
+ * constant folded. *)
+val caseRangeFold: label list -> label list
 
 (** Set this to true to get old-style handling of gcc's extern inline C extension:
    old-style: the extern inline definition is used until the actual definition is

@@ -109,7 +109,7 @@ let options : (string * Arg.spec * string) list =
     "--version",
     Arg.Unit (fun _ ->
                 print_endline ("CPC version " ^ Cil.cpcVersion ^
-                                 "\nMore information at http://www.pps.jussieu.fr/~kerneis/software/cpc\n");
+                                 "\nMore information at http://www.pps.univ-paris-diderot.fr/~kerneis/software/cpc\n");
                 exit 0),
     " Output version information and exit";
 
@@ -292,16 +292,46 @@ let options : (string * Arg.spec * string) list =
     (" Prevent small chunks of code from being duplicated" ^
        is_default (not !Cabs2cil.allowDuplication));
 
+    "--makeStaticGlobal",
+    Arg.Set Cil.makeStaticGlobal,
+    (" Convert local static variables into global variables" ^
+       is_default !Cil.makeStaticGlobal);
+
+    "--noMakeStaticGlobal",
+    Arg.Clear Cil.makeStaticGlobal,
+     (" Use initializers for local static variables" ^
+       is_default (not !Cil.makeStaticGlobal));
+
     "--useLogicalOperators",
     Arg.Set Cil.useLogicalOperators,
     (" Where possible (that is, if there are no side-effects),\n\t\t\t\t" ^
-       "retain && and || (instead of transforming them to If statements)" ^
+       "retain &&, || and ?: (instead of transforming them to If statements)" ^
        is_default !Cil.useLogicalOperators);
 
     "--noUseLogicalOperators",
     Arg.Clear Cil.useLogicalOperators,
-     ("Transform && and || to If statements" ^
+     ("Transform &&, || and ?: to If statements" ^
        is_default (not !Cil.useLogicalOperators));
+
+    "--useComputedGoto",
+    Arg.Set Cil.useComputedGoto,
+    (" Retain GCC's computed goto" ^
+       is_default !Cil.useComputedGoto);
+
+    "--noUseComputedGoto",
+    Arg.Clear Cil.useComputedGoto,
+     (" Transform computed goto to Switch statements" ^
+       is_default (not !Cil.useComputedGoto));
+
+    "--useCaseRange",
+    Arg.Set Cil.useCaseRange,
+    (" Retain ranges of values in case labels" ^
+       is_default !Cil.useCaseRange);
+
+    "--noUseCaseRange",
+    Arg.Clear Cil.useCaseRange,
+     (" Transform case ranges to sequence of cases" ^
+       is_default (not !Cil.useCaseRange));
 
     "--keepunused",
     Arg.Set Rmtmps.keepUnused,

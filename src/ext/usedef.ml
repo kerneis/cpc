@@ -33,6 +33,10 @@ let considerVariableDef: (varinfo -> bool) ref =
 let considerVariableAddrOfAsUse: (varinfo -> bool) ref = 
   ref (fun _ -> true)
 
+(** Say if you want to consider a variable addrof as a def *)
+let considerVariableAddrOfAsDef: (varinfo -> bool) ref = 
+  ref (fun _ -> false)
+
 (** Return any vars that should be considered "used" by an expression,
     other than the ones it refers to directly.  Deputy uses this for
     variables in Cast annotations. *)
@@ -106,6 +110,8 @@ class useDefVisitorClass : cilVisitor = object (self)
         ignore (visitCilOffset (self :> cilVisitor) off);
         if (!considerVariableAddrOfAsUse) v then 
           varUsed := VS.add v !varUsed;
+        if (!considerVariableAddrOfAsDef) v then
+          varDefs := VS.add v !varDefs;
         SkipChildren
 
     | SizeOfE _
@@ -190,6 +196,7 @@ let computeUseDefStmtKind ?(acc_used=VS.empty)
     | Return (Some e, _) -> ve e
     | If (e, _, _, _) -> ve e
     | Break _ | Goto _ | Continue _ -> ()
+    | ComputedGoto (e, _) -> ve e
     | Loop (_, _, _, _) -> ()
     | Switch (e, _, _, _) -> ve e
     | Instr il -> 
@@ -229,6 +236,9 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
       let u'', d'' = handle_block fb in
       (VS.union (VS.union u u') u'', VS.union (VS.union d d') d'')
   | Break _ | Goto _ | Continue _ -> !varUsed, !varDefs
+  | ComputedGoto (e, _) ->
+      let _ = ve e in
+      !varUsed, !varDefs
   | Loop (b, _, _, _) -> handle_block b
   | Switch (e, b, _, _) -> 
       let _ = ve e in
@@ -247,15 +257,6 @@ let rec computeDeepUseDefStmtKind ?(acc_used=VS.empty)
   | CpcFun (fd, _) ->
       E.warn "usedef: shall we really dive into CpcFun?\n";
       handle_block fd.sbody
-  (*| CpcCut (ret, cut, _) ->
-      (match ret with
-      | None -> ()
-      | Some v -> ignore(useDefVisitor#vvrbl v));
-      match cut with
-      | Yield | Done -> !varUsed, !varDefs
-      | Attach e | Detach e | Wait e -> let _ = ve e in !varUsed, !varDefs
-      | IoWait (e, e', e'') | Sleep (e, e', e'') ->
-          let _ = ve e; ve e'; ve e'' in !varUsed, !varDefs*)
 
 let computeUseLocalTypes ?(acc_used=VS.empty)
                          (fd : fundec)

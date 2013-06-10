@@ -1,6 +1,6 @@
 (*
  * Copyright (c) 2008-2010,
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2003,
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -80,8 +80,13 @@ let c99Mode = ref false (* True to handle ISO C 99 vs 90 changes.
    Note that CIL assumes that optimization is always enabled ;-) *)
 let oldstyleExternInline = ref false
 
+let makeStaticGlobal = ref true
+
 let useLogicalOperators = ref false
 
+let useComputedGoto = ref false
+
+let useCaseRange = ref false
 
 module M = Machdep
 (* Cil.initCil will set this to the current machine description.
@@ -426,10 +431,12 @@ and varinfo = {
     (** Whether this varinfo is for an inline function. *)
     mutable vinline: bool;
 
-    (** Whether this varinfo is for a CPS function. *)
-    mutable vcps: bool;
-
     mutable vdecl: location;            (** Location of variable declaration *)
+
+    vinit: initinfo;
+    (** Optional initializer.  Only used for static and global variables.
+     * Initializers for other types of local variables are turned into
+     * assignments. *)
 
     mutable vid: int;  (** A unique integer identifier.  *)
     mutable vaddrof: bool;              (** True if the address of this
@@ -498,12 +505,16 @@ and exp =
                                             type of the result. The arithemtic
                                             conversions are made  explicit
                                             for the arguments *)
+  | Question   of exp * exp * exp * typ
+                                        (** (a ? b : c) operation. Includes
+                                            the type of the result *)
   | CastE      of typ * exp            (** Use {!Cil.mkCast} to make casts *)
 
   | AddrOf     of lval                 (** Always use {!Cil.mkAddrOf} to 
                                         * construct one of these. Apply to an 
                                         * lvalue of type [T] yields an 
                                         * expression of type [TPtr(T)] *)
+  | AddrOfLabel of stmt ref
 
   | StartOf    of lval   (** There is no C correspondent for this. C has 
                           * implicit coercions from an array to the address 
@@ -723,6 +734,8 @@ and label =
            * input source program. If the bool is "false", the label was 
            * created by CIL or some other transformation *)
   | Case of exp * location              (** A case statement *)
+  | CaseRange of exp * exp * location   (** A case statement corresponding to a
+                                            range of values *)
   | Default of location                 (** A default statement *)
 
 
@@ -737,6 +750,9 @@ and stmtkind =
 
   | Goto of stmt ref * location         (** A goto statement. Appears from 
                                             actual goto's in the code. *)
+
+  | ComputedGoto of exp * location         
+
   | Break of location                   (** A break to the end of the nearest 
                                              enclosing Loop or Switch *)
   | Continue of location                (** A continue to the start of the 
@@ -1116,6 +1132,7 @@ let rec get_stmtLoc (statement : stmtkind) =
     | Instr(hd::tl) -> get_instrLoc(hd)
     | Return(_, loc) -> loc
     | Goto(_, loc) -> loc
+    | ComputedGoto(_, loc) -> loc
     | Break(loc) -> loc
     | Continue(loc) -> loc
     | If(_, _, _, loc) -> loc
@@ -1275,6 +1292,9 @@ let doubleType = TFloat(FDouble, [])
 (* An integer type that fits pointers. Initialized by initCIL *)
 let upointType = ref voidType 
 
+(* An integer type that fits a pointer difference. Initialized by initCIL *)
+let ptrdiffType = ref voidType
+
 (* An integer type that fits wchar_t. Initialized by initCIL *)
 let wcharKind = ref IChar
 let wcharType = ref voidType 
@@ -1415,7 +1435,9 @@ let attributeHash: (string, attributeClass) H.t =
 
   List.iter (fun a -> H.add table a (AttrFunType false))
     [ "format"; "regparm"; "longcall"; 
-      "noinline"; "always_inline"; ];
+      "noinline"; "always_inline"; "leaf";
+      "artificial"; "warn_unused_result"; "nonnull";
+    ];
 
   List.iter (fun a -> H.add table a (AttrFunType true))
     [ "stdcall";"cdecl"; "fastcall" ];
@@ -1679,6 +1701,15 @@ let d_storage () = function
 let mostNeg32BitInt : int64 = (Int64.of_string "-0x80000000")
 let mostNeg64BitInt : int64 = (Int64.of_string "-0x8000000000000000")
 
+let bytesSizeOfInt (ik: ikind): int = 
+  match ik with 
+  | IChar | ISChar | IUChar -> 1
+  | IBool -> !M.theMachine.M.sizeof_bool
+  | IInt | IUInt -> !M.theMachine.M.sizeof_int
+  | IShort | IUShort -> !M.theMachine.M.sizeof_short
+  | ILong | IULong -> !M.theMachine.M.sizeof_long
+  | ILongLong | IULongLong -> !M.theMachine.M.sizeof_longlong
+
 (* constant *)
 let d_const () c = 
   match c with
@@ -1703,13 +1734,10 @@ let d_const () c =
       (* Watch out here for negative integers that we should be printing as 
        * large positive ones *)
       if i < Int64.zero && (not (isSigned ik)) then
-        let high = Int64.shift_right i 32 in
-        if ik <> IULongLong && ik <> ILongLong && high = Int64.of_int (-1) then
-          (* Print only the low order 32 bits *)
-          text (prefix ^ "0x" ^ 
-                (Int64.format "%x" 
-                  (Int64.logand i (Int64.shift_right_logical high 32))
-                ^ suffix))
+        if bytesSizeOfInt ik <> 8 then
+          (* I am convinced that we shall never store smaller than 64-bits
+           * integers in negative form. -- Gabriel *)
+          E.s (E.bug "unexpected negative unsigned integer (please report this bug)")
         else
           text (prefix ^ "0x" ^ Int64.format "%x" i ^ suffix)
       else (
@@ -1768,6 +1796,7 @@ let bitwiseLevel = 75
 let questionLevel = 100
 let getParenthLevel (e: exp) = 
   match e with 
+  | Question _ -> questionLevel
   | BinOp((LAnd | LOr), _,_,_) -> 80
                                         (* Bit operations. *)
   | BinOp((BOr|BXor|BAnd),_,_,_) -> bitwiseLevel (* 75 *)
@@ -1788,6 +1817,7 @@ let getParenthLevel (e: exp) =
                                         (* Unary *)
   | CastE(_,_) -> 30
   | AddrOf(_) -> 30
+  | AddrOfLabel(_) -> 30
   | StartOf(_) -> 30
   | UnOp((Neg|BNot|LNot),_,_) -> 30
 
@@ -1883,10 +1913,12 @@ let rec typeOf (e: exp) : typ =
   | Lval(lv) -> typeOfLval lv
   | SizeOf _ | SizeOfE _ | SizeOfStr _ -> !typeOfSizeOf
   | AlignOf _ | AlignOfE _ -> !typeOfSizeOf
-  | UnOp (_, _, t) -> t
-  | BinOp (_, _, _, t) -> t
+  | UnOp (_, _, t)
+  | BinOp (_, _, _, t)
+  | Question (_, _, _, t)
   | CastE (t, _) -> t
   | AddrOf (lv) -> TPtr(typeOfLval lv, [])
+  | AddrOfLabel (lv) -> voidPtrType
   | StartOf (lv) -> begin
       match unrollType (typeOfLval lv) with
         TArray (t,_, a) -> TPtr(t, a)
@@ -1936,15 +1968,6 @@ and typeOffset basetyp =
  **)
 exception SizeOfError of string * typ
 
-
-let bytesSizeOfInt (ik: ikind): int = 
-  match ik with 
-  | IChar | ISChar | IUChar -> 1
-  | IBool -> !M.theMachine.M.sizeof_bool
-  | IInt | IUInt -> !M.theMachine.M.sizeof_int
-  | IShort | IUShort -> !M.theMachine.M.sizeof_short
-  | ILong | IULong -> !M.theMachine.M.sizeof_long
-  | ILongLong | IULongLong -> !M.theMachine.M.sizeof_longlong
 
 let unsignedVersionOf (ik:ikind): ikind =
   match ik with
@@ -2901,6 +2924,19 @@ let initGccBuiltins () : unit =
   H.add h "__builtin_atan2l" (longDoubleType, [ longDoubleType; 
                                                 longDoubleType ], false);
 
+  let addSwap sizeInBits =
+    try
+      assert (sizeInBits mod 8 = 0);
+      let sizeInBytes = sizeInBits / 8 in
+      let sizedIntType = TInt (intKindForSize sizeInBytes false, []) in
+      let name = Printf.sprintf "__builtin_bswap%d" sizeInBits in
+      H.add h name (sizedIntType, [ sizedIntType ], false)
+    with Not_found ->
+      ()
+  in
+  addSwap 32;
+  addSwap 64;
+
   H.add h "__builtin_ceil" (doubleType, [ doubleType ], false);
   H.add h "__builtin_ceilf" (floatType, [ floatType ], false);
   H.add h "__builtin_ceill" (longDoubleType, [ longDoubleType ], false);
@@ -3240,7 +3276,6 @@ class defaultCilPrinterClass : cilPrinter = object (self)
     let stom, rest = separateStorageModifiers v.vattr in
     (* First the storage modifiers *)
     text (if v.vinline then "__inline " else "")
-      ++ text (if v.vcps then "cps " else "")
       ++ d_storage () v.vstorage
       ++ (self#pAttrs () stom)
       ++ (self#pType (Some (text v.vname)) () v.vtype)
@@ -3292,6 +3327,13 @@ class defaultCilPrinterClass : cilPrinter = object (self)
           ++ (self#pExpPrec level () e2)
           ++ unalign
 
+    | Question(e1,e2,e3,_) ->
+        (self#pExpPrec level () e1)
+          ++ text " ? "
+          ++ (self#pExpPrec level () e2)
+          ++ text " : "
+          ++ (self#pExpPrec level () e3)
+
     | CastE(t,e) -> 
         text "(" 
           ++ self#pType None () t
@@ -3314,6 +3356,19 @@ class defaultCilPrinterClass : cilPrinter = object (self)
         text "__alignof__(" ++ self#pExp () e ++ chr ')'
     | AddrOf(lv) -> 
         text "& " ++ (self#pLvalPrec addrOfLevel () lv)
+    | AddrOfLabel(sref) -> begin
+        (* Grab one of the labels *)
+        let rec pickLabel = function
+            [] -> None
+          | Label (l, _, _) :: _ -> Some l
+          | _ :: rest -> pickLabel rest
+        in
+        match pickLabel !sref.labels with
+          Some lbl -> text ("&& " ^ lbl)
+        | None -> 
+            ignore (error "Cannot find label for target of address of label");
+            text "&& __invalid_label"
+    end
           
     | StartOf(lv) -> self#pLval () lv
 
@@ -3665,6 +3720,8 @@ class defaultCilPrinterClass : cilPrinter = object (self)
       Label (s, _, true) -> text (s ^ ": ")
     | Label (s, _, false) -> text (s ^ ": /* CIL Label */ ")
     | Case (e, _) -> text "case " ++ self#pExp () e ++ text ": "
+    | CaseRange (e1, e2, _) -> text "case " ++ self#pExp () e1 ++ text " ... "
+        ++ self#pExp () e2 ++ text ": "
     | Default _ -> text "default: "
 
   (* The pBlock will put the unalign itself *)
@@ -3725,6 +3782,14 @@ class defaultCilPrinterClass : cilPrinter = object (self)
 	in
 	leftflush ++ directive ++ chr ' ' ++ num l.line ++ filename ++ line
 
+  method private pIfConditionThen loc condition thenBlock =
+      self#pLineDirective loc
+      ++ text "if"
+      ++ (align
+          ++ text " ("
+          ++ self#pExp () condition
+          ++ text ") "
+          ++ self#pBlock () thenBlock)
 
   method private pStmtKind (next: stmt) () = function
       Return(None, l) ->
@@ -3745,11 +3810,17 @@ class defaultCilPrinterClass : cilPrinter = object (self)
           | _ :: rest -> pickLabel rest
         in
         match pickLabel !sref.labels with
-          Some l -> text ("goto " ^ l ^ ";")
+          Some lbl -> self#pLineDirective l ++ text ("goto " ^ lbl ^ ";")
         | None -> 
             ignore (error "Cannot find label for target of goto");
             text "goto __invalid_label;"
     end
+
+    | ComputedGoto(e, l) ->
+        self#pLineDirective l
+          ++ text "goto *("
+          ++ self#pExp () e
+          ++ text ");"
 
     | Break l ->
         self#pLineDirective l
@@ -3765,59 +3836,33 @@ class defaultCilPrinterClass : cilPrinter = object (self)
           ++ unalign
 
     | If(be,t,{bstmts=[];battrs=[]},l) when not !printCilAsIs ->
-        self#pLineDirective l
-          ++ text "if"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () be
-                ++ text ") "
-                ++ self#pBlock () t)
+        self#pIfConditionThen l be t
           
     | If(be,t,{bstmts=[{skind=Goto(gref,_);labels=[]}];
                 battrs=[]},l)
      when !gref == next && not !printCilAsIs ->
-       self#pLineDirective l
-         ++ text "if"
-         ++ (align
-               ++ text " ("
-               ++ self#pExp () be
-               ++ text ") "
-               ++ self#pBlock () t)
+        self#pIfConditionThen l be t
 
     | If(be,{bstmts=[];battrs=[]},e,l) when not !printCilAsIs ->
-        self#pLineDirective l
-          ++ text "if"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () (UnOp(LNot,be,intType))
-                ++ text ") "
-                ++ self#pBlock () e)
+          self#pIfConditionThen l (UnOp(LNot,be,intType)) e
 
     | If(be,{bstmts=[{skind=Goto(gref,_);labels=[]}];
            battrs=[]},e,l)
       when !gref == next && not !printCilAsIs ->
-        self#pLineDirective l
-          ++ text "if"
-          ++ (align
-                ++ text " ("
-                ++ self#pExp () (UnOp(LNot,be,intType))
-                ++ text ") "
-                ++ self#pBlock () e)
+        self#pIfConditionThen l (UnOp(LNot,be,intType)) e
           
     | If(be,t,e,l) ->
-        self#pLineDirective l
-          ++ (align
-                ++ text "if"
-                ++ (align
-                      ++ text " ("
-                      ++ self#pExp () be
-                      ++ text ") "
-                      ++ self#pBlock () t)
-                ++ text " "   (* sm: indent next code 2 spaces (was 4) *)
-                ++ (align
-                      ++ text "else "
-                      ++ self#pBlock () e)
-          ++ unalign)
+        self#pIfConditionThen l be t
+          ++ (match e with
+                { bstmts=[{skind=If _} as elsif]; battrs=[] } ->
+                    text " else"
+                    ++ line (* Don't indent else-ifs *)
+                    ++ self#pStmtNext next () elsif
+              | _ ->
+                    text " "   (* sm: indent next code 2 spaces (was 4) *)
+                    ++ align
+                    ++ text "else "
+                    ++ self#pBlock () e)
           
     | Switch(e,b,_,l) ->
         self#pLineDirective l
@@ -4094,8 +4139,13 @@ class defaultCilPrinterClass : cilPrinter = object (self)
       ++ text "{ "
       ++ (align
             (* locals. *)
-            ++ (docList ~sep:line (fun vi -> self#pVDecl () vi ++ text ";") 
-                  () f.slocals)
+            ++ line
+            ++ (docList ~sep:line
+                (fun vi -> match vi.vinit.init with
+                | None -> self#pVDecl () vi ++ text ";"
+                | Some i -> self#pVDecl () vi ++ text " = " ++
+                    self#pInit () i ++ text ";")
+                () f.slocals)
             ++ line ++ line
             (* the body *)
             ++ ((* remember the declaration *) currentFormals <- f.sformals; 
@@ -4292,7 +4342,7 @@ class defaultCilPrinterClass : cilPrinter = object (self)
         (* text "/*[" ++ self#pAttrParam () a ++ text "]*/" *) nil, false
 
     (* remove cpc attributes *)
-    | s, _ when Str.first_chars s 4 = "cpc_" -> text "", false
+    | s, _ when String.length s >= 4 && Str.first_chars s 4 = "cpc_" -> text "", false
 
     | _ -> (* This is the dafault case *)
         (* Add underscores to the name *)
@@ -4629,6 +4679,10 @@ class plainCilPrinterClass =
       dprintf "%a(@[%a,@?%a@])" d_plainbinop b
         self#pExp e1 self#pExp e2
 
+  | Question(e1,e2,e3,_) ->
+      dprintf "Question(@[%a,@?%a,@?%a@])"
+        self#pExp e1 self#pExp e2 self#pExp e3
+
   | SizeOf (t) -> 
       text "sizeof(" ++ self#pType None () t ++ chr ')'
   | SizeOfE (e) -> 
@@ -4642,6 +4696,7 @@ class plainCilPrinterClass =
 
   | StartOf lv -> dprintf "StartOf(%a)" self#pLval lv
   | AddrOf (lv) -> dprintf "AddrOf(%a)" self#pLval lv
+  | AddrOfLabel (sref) -> dprintf "AddrOfLabel(%a)" self#pStmt !sref
 
 
 
@@ -4802,7 +4857,7 @@ let newVID () =
   t
 
    (* Make a varinfo. Used mostly as a helper function below  *)
-let makeVarinfo global name typ =
+let makeVarinfo global name ?init typ =
   (* Strip const from type for locals *)
   let vi = 
     { vname = name;
@@ -4810,8 +4865,8 @@ let makeVarinfo global name typ =
       vglob = global;
       vtype = if global then typ else typeRemoveAttributes ["const"] typ;
       vdecl = lu;
+      vinit = {init=init};
       vinline = false;
-      vcps = false;
       vattr = [];
       vstorage = NoStorage;
       vaddrof = false;
@@ -4825,14 +4880,14 @@ let copyVarinfo (vi: varinfo) (newname: string) : varinfo =
   let vi' = {vi with vname = newname; vid = newVID () } in
   vi'
 
-let makeLocal fdec name typ = (* a helper function *)
+let makeLocal fdec name typ init = (* a helper function *)
   fdec.smaxid <- 1 + fdec.smaxid;
-  let vi = makeVarinfo false name typ in
+  let vi = makeVarinfo false name ?init:init typ in
   vi
   
    (* Make a local variable and add it to a function *)
-let makeLocalVar fdec ?(insert = true) name typ =
-  let vi = makeLocal fdec name typ in
+let makeLocalVar fdec ?(insert = true) name ?init typ =
+  let vi = makeLocal fdec name typ init in
   if insert then fdec.slocals <- fdec.slocals @ [vi];
   vi
 
@@ -4900,7 +4955,7 @@ let setFunctionTypeMakeFormals (f: fundec) (t: typ) =
       f.svar.vtype <- t; 
       f.sformals <- [];
       
-      f.sformals <- Util.list_map (fun (n,t,a) -> makeLocal f n t) args;
+      f.sformals <- Util.list_map (fun (n,t,a) -> makeLocal f n t None) args;
 
       setFunctionType f t
 
@@ -4921,7 +4976,7 @@ let makeFormalVar fdec ?(where = "$") name typ : varinfo =
   (* Search for the insertion place *)
   let thenewone = ref fdec.svar in (* Just a placeholder *)
   let makeit () : varinfo = 
-    let vi = makeLocal fdec name typ in
+    let vi = makeLocal fdec name typ None in
     thenewone := vi;
     vi
   in
@@ -4991,17 +5046,16 @@ let loadBinaryFile (filename : string) : file =
   let inchan = open_in_bin filename in
   let loaded : savedFile = (Marshal.from_channel inchan : savedFile) in
   close_in inchan ;
-  if !nextGlobalVID = 1 && !nextCompinfoKey = 1 then begin
-    nextGlobalVID := loaded.savedNextVID;
-    nextCompinfoKey := loaded.savedNextCompinfoKey;
-  end
-  else begin
+  (* nextGlobalVID = 11 because CIL initialises many dummy variables *)
+  if !nextGlobalVID != 11 || !nextCompinfoKey != 1 then begin
     (* In this case, we should change all of the varinfo and compinfo
        keys in loaded.savedFile to prevent conflicts.  But since that hasn't
        been implemented yet, just print a warning.  If you do implement this,
        please send it to the CIL maintainers. *)
-    ignore (E.log "CIL error: you loading a binary file after another file has been loaded.  This isn't currently supported, so varinfo and compinfo id numbers may conflict.")
+    ignore (E.warn "You are possibly loading a binary file after another file has been loaded.  This isn't currently supported, so varinfo and compinfo id numbers may conflict.")
   end;
+  nextGlobalVID := max loaded.savedNextVID !nextGlobalVID;
+  nextCompinfoKey := max loaded.savedNextCompinfoKey !nextCompinfoKey;
   loaded.savedFile
 
 
@@ -5128,12 +5182,16 @@ and childrenExp (vis: cilVisitor) (e: exp) : exp =
   | BinOp (bo, e1, e2, t) -> 
       let e1' = vExp e1 in let e2' = vExp e2 in let t' = vTyp t in
       if e1' != e1 || e2' != e2 || t' != t then BinOp(bo, e1',e2',t') else e
+  | Question (e1, e2, e3, t) ->
+      let e1' = vExp e1 in let e2' = vExp e2 in let e3' = vExp e3 in let t' = vTyp t in
+      if e1' != e1 || e2' != e2 || e3' != e3 || t' != t then Question(e1',e2',e3',t') else e
   | CastE (t, e1) ->           
       let t' = vTyp t in let e1' = vExp e1 in
       if t' != t || e1' != e1 then CastE(t', e1') else e
   | AddrOf lv -> 
       let lv' = vLval lv in
       if lv' != lv then AddrOf lv' else e
+  | AddrOfLabel _ -> e
   | StartOf lv -> 
       let lv' = vLval lv in
       if lv' != lv then StartOf lv' else e
@@ -5272,6 +5330,9 @@ and childrenStmt (toPrepend: instr list ref) : cilVisitor -> stmt -> stmt =
   let skind' = 
     match s.skind with
       Break _ | Continue _ | Goto _ | Return (None, _) -> s.skind
+    | ComputedGoto (e, l) ->
+         let e' = fExp e in
+         if e' != e then ComputedGoto (e', l) else s.skind
     | Return (Some e, l) -> 
         let e' = fExp e in
         if e' != e then Return (Some e', l) else s.skind
@@ -5345,6 +5406,10 @@ and childrenStmt (toPrepend: instr list ref) : cilVisitor -> stmt -> stmt =
         Case (e, l) as lb -> 
           let e' = fExp e in
           if e' != e then Case (e', l) else lb
+        | CaseRange (e1, e2, l) as lb ->
+          let e1' = fExp e1 in
+          let e2' = fExp e2 in
+          if e1' != e1 || e2' != e2 then CaseRange (e1', e2', l) else lb
         | lb -> lb
     in
     mapNoCopy fLabel s.labels
@@ -5422,7 +5487,11 @@ and visitCilVarDecl (vis : cilVisitor) (v : varinfo) : varinfo =
   doVisit vis (vis#vvdec v) childrenVarDecl v 
 and childrenVarDecl (vis : cilVisitor) (v : varinfo) : varinfo =
   v.vtype <- visitCilType vis v.vtype;
-  v.vattr <- visitCilAttributes vis v.vattr;  
+  v.vattr <- visitCilAttributes vis v.vattr;
+  (match v.vinit.init with
+    None -> ()
+  | Some i -> let i' = visitCilInit vis v NoOffset i in
+    if i' != i then v.vinit.init <- Some i');
   v
 
 and visitCilAttributes (vis: cilVisitor) (al: attribute list) : attribute list=
@@ -5564,11 +5633,6 @@ and childrenGlobal (vis: cilVisitor) (g: global) : global =
       if v' != v then GVarDecl (v', l) else g
   | GVar (v, inito, l) -> 
       let v' = visitCilVarDecl vis v in
-      (match inito.init with
-        None -> ()
-      | Some i -> let i' = visitCilInit vis v NoOffset i in 
-        if i' != i then inito.init <- Some i');
-
       if v' != v then GVar (v', inito, l) else g
 
   | GPragma (a, l) -> begin
@@ -5635,7 +5699,7 @@ let foldGlobals (fl: file)
 let findOrCreateFunc (f:file) (name:string) (t:typ) : varinfo = 
   let rec search glist = 
     match glist with
-	GVarDecl(vi,_) :: rest when vi.vname = name -> 
+	GVarDecl(vi,_) :: rest | GFun ({svar = vi},_) :: rest when vi.vname = name ->
           if not (isFunctionType vi.vtype) then 
             E.s (error ("findOrCreateFunc: can't create %s because another "
                         ^^"global exists with that name.") name);
@@ -5829,7 +5893,7 @@ let rec peepHole1 (* Process one instruction and possibly replace it *)
           peepHole1 doone b.bstmts; 
           peepHole1 doone h.bstmts;
           s.skind <- TryExcept(b, (doInstrList il, e), h, l);
-      | Return _ | Goto _ | Break _ | Continue _ -> ()
+      | Return _ | Goto _ | ComputedGoto _ | Break _ | Continue _ -> ()
       | CpcSpawn _ -> ()
       | CpcFun _ -> ())
     ss
@@ -5865,7 +5929,7 @@ let rec peepHole2  (* Process two instructions and possibly replace them both *)
           peepHole2 dotwo h.bstmts;
           s.skind <- TryExcept (b, (doInstrList il, e), h, l)
 
-      | Return _ | Goto _ | Break _ | Continue _ -> ()
+      | Return _ | Goto _ | ComputedGoto _ | Break _ | Continue _ -> ()
       | CpcSpawn _ -> ()
       (*| CpcFork (s, _) -> peepHole2 dotwo [s]*)
       | CpcFun _ -> ())
@@ -6033,6 +6097,7 @@ let rec isConstant = function
   | Const _ -> true
   | UnOp (_, e, _) -> isConstant e
   | BinOp (_, e1, e2, _) -> isConstant e1 && isConstant e2
+  | Question (e1, e2, e3, _) -> isConstant e1 && isConstant e2 && isConstant e3
   | Lval (Var vi, NoOffset) -> 
       (vi.vglob && isArrayType vi.vtype || isFunctionType vi.vtype)
   | Lval _ -> false
@@ -6042,6 +6107,7 @@ let rec isConstant = function
         -> vi.vglob && isConstantOffset off
   | AddrOf (Mem e, off) | StartOf(Mem e, off) 
         -> isConstant e && isConstantOffset off
+  | AddrOfLabel _ -> true
 
 and isConstantOffset = function
     NoOffset -> true
@@ -6128,7 +6194,7 @@ let rec makeZeroInit (t: typ) : init =
   match unrollType t with
     TInt (ik, _) -> SingleInit (Const(CInt64(Int64.zero, ik, None)))
   | TFloat(fk, _) -> SingleInit(Const(CReal(0.0, fk, None)))
-  | TEnum _ -> SingleInit zero
+  | TEnum (e, _) -> SingleInit (kinteger e.ekind 0)
   | TComp (comp, _) as t' when comp.cstruct -> 
       let inits = 
         List.fold_right
@@ -6467,21 +6533,22 @@ let trylink source dest_option = match dest_option with
 
 
 (** Cmopute the successors and predecessors of a block, given a fallthrough *)
-let rec succpred_block b fallthrough =
+let rec succpred_block b fallthrough rlabels =
   let rec handle sl = match sl with
     [] -> ()
-  | [a] -> succpred_stmt a fallthrough 
+  | [a] -> succpred_stmt a fallthrough rlabels
   | hd :: ((next :: _) as tl) -> 
-      succpred_stmt hd (Some next) ;
+      succpred_stmt hd (Some next) rlabels;
       handle tl 
   in handle b.bstmts
 
 
-and succpred_stmt s fallthrough = 
+and succpred_stmt s fallthrough rlabels =
   match s.skind with
     Instr _ -> trylink s fallthrough
   | Return _ -> ()
   | Goto(dest,l) -> link s !dest
+  | ComputedGoto(e,l) ->  List.iter (link s) rlabels
   | Break _  
   | Continue _ 
   | Switch _ ->
@@ -6490,28 +6557,48 @@ and succpred_stmt s fallthrough =
   | If(e1,b1,b2,l) -> 
       (match b1.bstmts with
         [] -> trylink s fallthrough
-      | hd :: tl -> (link s hd ; succpred_block b1 fallthrough )) ;
+      | hd :: tl -> (link s hd ; succpred_block b1 fallthrough rlabels )) ;
       (match b2.bstmts with
         [] -> trylink s fallthrough
-      | hd :: tl -> (link s hd ; succpred_block b2 fallthrough ))
+      | hd :: tl -> (link s hd ; succpred_block b2 fallthrough rlabels ))
 
   | Loop(b,l,_,_) -> 
       begin match b.bstmts with
         [] -> failwith "computeCFGInfo: empty loop" 
       | hd :: tl -> 
           link s hd ; 
-          succpred_block b (Some(hd))
+          succpred_block b (Some(hd)) rlabels
       end
 
   | Block(b) -> begin match b.bstmts with
                   [] -> trylink s fallthrough
                 | hd :: tl -> link s hd ;
-                    succpred_block b fallthrough
+                    succpred_block b fallthrough rlabels
                 end
   | TryExcept _ | TryFinally _ -> 
       failwith "computeCFGInfo: structured exception handling not implemented"
   | CpcFun _ | CpcSpawn _ ->
       failwith "computeCFGInfo: CPC constructs handling not implemented"
+
+let caseRangeFold (l: label list) =
+  let rec fold acc = function
+  | ((Case _ | Default _ | Label _) as x) :: xs -> fold (x :: acc) xs
+  | CaseRange(el, eh, loc) :: xs ->
+      let il, ih, ik =
+        match constFold true el, constFold true eh with
+          Const(CInt64(il, ilk, _)), Const(CInt64(ih, ihk, _)) ->
+            mkCilint ilk il, mkCilint ihk ih, commonIntKind ilk ihk
+        | _ -> E.s (error "Cannot understand the constants in case range")
+      in
+      if compare_cilint il ih > 0 then
+        E.s (error "Empty case range");
+      let rec mkAll (i: cilint) acc =
+        if compare_cilint i ih > 0 then acc
+        else mkAll (add_cilint i one_cilint) (Case(kintegerCilint ik i, loc) :: acc)
+      in
+      fold (mkAll il acc) xs
+   | [] -> List.rev acc
+   in fold [] l
 
 (* [weimer] Sun May  5 12:25:24 PDT 2002
  * This code was pulled from ext/switch.ml because it looks like we really
@@ -6534,33 +6621,27 @@ let labelAlphaTable : (string, unit A.alphaTableData ref) H.t =
 let freshLabel (base:string) =
   fst (A.newAlphaName labelAlphaTable None base ())
 
-let switch_count = ref (-1) 
-let get_switch_count () = 
-  switch_count := 1 + !switch_count ;
-  !switch_count
-
-let rec xform_switch_stmt s break_dest cont_dest label_index = begin
+let rec xform_switch_stmt s break_dest cont_dest = begin
+  let suffix e = match getInteger e with
+  | Some value ->
+      if compare_cilint value zero_cilint < 0 then
+        "neg_" ^ string_of_cilint (neg_cilint value)
+        else
+          string_of_cilint value
+  | None -> "exp"
+  in
   s.labels <- Util.list_map (fun lab -> match lab with
     Label _ -> lab
   | Case(e,l) ->
-      let suffix =
-	match getInteger e with
-	| Some value -> 
-	    if compare_cilint value zero_cilint < 0 then
-	      "neg_" ^ string_of_cilint (neg_cilint value)
-	    else
-	      string_of_cilint value
-	| None ->
-	    "exp"
-      in
-      let str = Pretty.sprint !lineLength 
-	  (Pretty.dprintf "switch_%d_%s" label_index suffix) in 
-      (Label(freshLabel str,l,false))
-  | Default(l) -> (Label(freshLabel (Printf.sprintf 
-                  "switch_%d_default" label_index),l,false))
+      let str = Printf.sprintf "case_%s" (suffix e) in
+      Label(freshLabel str,l,false)
+  | CaseRange(e1,e2,l) ->
+      let str = Printf.sprintf "caserange_%s_%s" (suffix e1) (suffix e2) in
+      Label(freshLabel str,l,false)
+  | Default(l) -> Label(freshLabel "switch_default",l,false)
   ) s.labels ; 
   match s.skind with
-  | Instr _ | Return _ | Goto _ -> ()
+  | Instr _ | Return _ | Goto _ | ComputedGoto _ -> ()
   | Break(l) -> begin try 
                   s.skind <- Goto(break_dest (),l)
                 with e ->
@@ -6573,10 +6654,10 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
                   ignore (error "prepareCFG: continue: %a@!" d_stmt s) ;
                   raise e
                 end
-  | If(e,b1,b2,l) -> xform_switch_block b1 break_dest cont_dest label_index ;
-                     xform_switch_block b2 break_dest cont_dest label_index
-  | Switch(e,b,sl,l) -> begin
-      (* change 
+  | If(e,b1,b2,l) -> xform_switch_block b1 break_dest cont_dest ;
+                     xform_switch_block b2 break_dest cont_dest
+  | Switch(e,b,sl,l) ->
+      (* change
        * switch (se) {
        *   case 0: s0 ;
        *   case 1: s1 ; break;
@@ -6586,84 +6667,111 @@ let rec xform_switch_stmt s break_dest cont_dest label_index = begin
        * into:
        *
        * if (se == 0) goto label_0;
-       * else if (se == 1) goto label_1;
+       * if (se == 1) goto label_1;
        * ...
-       * else if (0) { // body_block
-       *  label_0: s0;
-       *  label_1: s1; goto label_break;
-       *  ...
-       * } else if (0) { // break_block
-       *  label_break: ; // break_stmt
-       * } 
+       * goto label_default; // If there is a [Default]
+       * goto label_break; // If there is no [Default]
+       * label_0: s0;
+       * label_1: s1; goto label_break;
+       * ...
+       * label_break: ; // break_stmt
+       *
+       * The default case, if present, must be used only if *all*
+       * non-default cases fail [ISO/IEC 9899:1999, §6.8.4.2, ¶5]. As
+       * a result, we test all cases first, and hit 'default' only if
+       * no case matches. However, we do not reorder the switch's
+       * body, so fall-through still works as expected.
+       *
        *)
-      let i = get_switch_count () in 
+
       let break_stmt = mkStmt (Instr []) in
-      break_stmt.labels <- 
-				[Label(freshLabel (Printf.sprintf "switch_%d_break" i),l,false)] ;
-      let break_block = mkBlock [ break_stmt ] in
-      let body_block = b in 
-      let body_if_stmtkind = (If(zero,body_block,break_block,l)) in
+      break_stmt.labels <- [Label(freshLabel "switch_break",l,false)] ;
 
-      (* The default case, if present, must be used only if *all*
-      non-default cases fail [ISO/IEC 9899:1999, §6.8.4.2, ¶5]. As a
-      result, we sort the order in which we handle the labels (but not the
-      order in which we print out the statements, so fall-through still
-      works as expected). *)
-      let compare_choices s1 s2 = match s1.labels, s2.labels with
-      | (Default(_) :: _), _ -> 1
-      | _, (Default(_) :: _) -> -1
-      | _, _ -> 0
+      (* To be changed into goto default if there if a [Default] *)
+      let goto_break = mkStmt (Goto (ref break_stmt, l)) in
+
+      (* Return a list of [If] statements, equivalent to the cases of [stmt].
+       * Use a single [If] and || operators if useLogicalOperators is true.
+       * If [stmt] is a [Default], update goto label_break into goto
+       * label_default.
+       *)
+      let xform_choice stmt =
+        let cases = List.filter (function Label _ -> false | _ -> true ) stmt.labels in
+        try (* is this the default case? *)
+          match List.find (function Default _ -> true | _ -> false) cases with
+          | Default dl ->
+              (* We found a [Default], update the fallthrough goto *)
+              goto_break.skind <- Goto(ref stmt, dl);
+              []
+          | _ -> E.s (bug "Unexpected pattern-matching failure")
+        with
+        Not_found -> (* this is a list of specific cases *)
+          match cases with
+          | ((Case (_, cl) | CaseRange (_, _, cl)) as lab) :: lab_tl ->
+            (* assume that integer promotion and type conversion of cases is
+             * performed by cabs2cil. *)
+            let comp_case_range e1 e2 =
+                  BinOp(Ge, e, e1, intType), BinOp(Le, e, e2, intType) in
+            let make_comp lab = begin match lab with
+              | Case (exp, _) -> BinOp(Eq, e, exp, intType)
+              | CaseRange (e1, e2, _) when !useLogicalOperators ->
+                  let c1, c2 = comp_case_range e1 e2 in
+                  BinOp(LAnd, c1, c2, intType)
+              | _ -> E.s (bug "Unexpected pattern-matching failure")
+            end in
+            let make_or_from_cases () =
+              List.fold_left
+                  (fun pred label -> BinOp(LOr, pred, make_comp label, intType))
+                  (make_comp lab) lab_tl
+            in
+            let make_if_stmt pred cl =
+              let then_block = mkBlock [ mkStmt (Goto(ref stmt,cl)) ] in
+              let else_block = mkBlock [] in
+              mkStmt(If(pred,then_block,else_block,cl)) in
+            let make_double_if_stmt (pred1, pred2) cl =
+              let then_block = mkBlock [ make_if_stmt pred2 cl ] in
+              let else_block = mkBlock [] in
+              mkStmt(If(pred1,then_block,else_block,cl)) in
+            if !useLogicalOperators then
+              [make_if_stmt (make_or_from_cases ()) cl]
+            else
+              List.map (function
+                | Case _ as lab -> make_if_stmt (make_comp lab) cl
+                | CaseRange (e1, e2, _) -> make_double_if_stmt (comp_case_range e1 e2) cl
+                | _ -> E.s (bug "Unexpected pattern-matching failure"))
+                cases
+          | Default _ :: _ | Label _ :: _ ->
+              E.s (bug "Unexpected pattern-matching failure")
+          | [] -> E.s (bug "Block missing 'case' and 'default' in switch statement")
       in
-
-      let rec handle_choices sl = match sl with
-        [] -> body_if_stmtkind
-      | stmt_hd :: stmt_tl -> begin
-        let rec handle_labels lab_list = begin
-          match lab_list with
-            [] -> handle_choices stmt_tl 
-          | Case(ce,cl) :: lab_tl -> 
-              let pred = BinOp(Eq,e,ce,intType) in
-              let then_block = mkBlock [ mkStmt (Goto(ref stmt_hd,cl)) ] in
-              let else_block = mkBlock [ mkStmt (handle_labels lab_tl) ] in
-              If(pred,then_block,else_block,cl)
-          | Default(dl) :: lab_tl -> 
-              (* ww: before this was 'if (1) goto label', but as Ben points
-              out this might confuse someone down the line who doesn't have
-              special handling for if(1) into thinking that there are two
-              paths here. The simpler 'goto label' is what we want. *) 
-              Block(mkBlock [ mkStmt (Goto(ref stmt_hd,dl)) ;
-                              mkStmt (handle_labels lab_tl) ])
-          | Label(_,_,_) :: lab_tl -> handle_labels lab_tl
-        end in
-        handle_labels stmt_hd.labels
-      end in
-      s.skind <- handle_choices (List.sort compare_choices sl) ;
-      xform_switch_block b (fun () -> ref break_stmt) cont_dest i 
-    end
+      b.bstmts <-
+        (List.flatten (List.map xform_choice sl)) @
+        [goto_break] @
+        b.bstmts @
+        [break_stmt];
+      s.skind <- Block b;
+      xform_switch_block b (fun () -> ref break_stmt) cont_dest
   | Loop(b,l,_,_) -> 
-          let i = get_switch_count () in 
           let break_stmt = mkStmt (Instr []) in
-          break_stmt.labels <- 
-						[Label(freshLabel (Printf.sprintf "while_%d_break" i),l,false)] ;
+          break_stmt.labels <- [Label(freshLabel "while_break",l,false)] ;
           let cont_stmt = mkStmt (Instr []) in
-          cont_stmt.labels <- 
-						[Label(freshLabel (Printf.sprintf "while_%d_continue" i),l,false)] ;
+          cont_stmt.labels <- [Label(freshLabel "while_continue",l,false)] ;
           b.bstmts <- cont_stmt :: b.bstmts ;
           let this_stmt = mkStmt 
             (Loop(b,l,Some(cont_stmt),Some(break_stmt))) in 
           let break_dest () = ref break_stmt in
           let cont_dest () = ref cont_stmt in 
-          xform_switch_block b break_dest cont_dest label_index ;
+          xform_switch_block b break_dest cont_dest ;
           break_stmt.succs <- s.succs ; 
           let new_block = mkBlock [ this_stmt ; break_stmt ] in
           s.skind <- Block new_block
-  | Block(b) -> xform_switch_block b break_dest cont_dest label_index
+  | Block(b) -> xform_switch_block b break_dest cont_dest
 
   | TryExcept _ | TryFinally _ -> 
       failwith "xform_switch_statement: structured exception handling not implemented"
   | CpcFun _ | CpcSpawn _ -> ()
 
-end and xform_switch_block b break_dest cont_dest label_index = 
+end and xform_switch_block b break_dest cont_dest =
   try 
     let rec link_succs sl = match sl with
     | [] -> ()
@@ -6671,7 +6779,7 @@ end and xform_switch_block b break_dest cont_dest label_index =
     in 
     link_succs b.bstmts ;
     List.iter (fun stmt -> 
-      xform_switch_stmt stmt break_dest cont_dest label_index) b.bstmts ;
+      xform_switch_stmt stmt break_dest cont_dest) b.bstmts ;
   with e ->
     List.iter (fun stmt -> ignore
       (warn "prepareCFG: %a@!" d_stmt stmt)) b.bstmts ;
@@ -6695,6 +6803,25 @@ class registerLabelsVisitor : cilVisitor = object
   method vinst _ = SkipChildren
 end
 
+(* Find all labels-as-value in a function to use them as successors of computed
+ * gotos. Duplicated in src/ext/cfg.ml. *)
+class addrOfLabelFinder slr = object(self)
+    inherit nopCilVisitor
+
+    method vexpr e = match e with
+    | AddrOfLabel sref ->
+        slr := !sref :: (!slr);
+        SkipChildren
+    | _ -> DoChildren
+
+end
+
+let findAddrOfLabelStmts (b : block) : stmt list =
+    let slr = ref [] in
+    let vis = new addrOfLabelFinder slr in
+    ignore(visitCilBlock vis b);
+    !slr
+
 (* prepare a function for computeCFGInfo by removing break, continue,
  * default and switch statements/labels and replacing them with Ifs and
  * Gotos. *)
@@ -6705,7 +6832,7 @@ let prepareCFG (fd : fundec) : unit =
   ignore (visitCilFunction (new registerLabelsVisitor) fd);
   xform_switch_block fd.sbody 
       (fun () -> failwith "prepareCFG: break with no enclosing loop") 
-      (fun () -> failwith "prepareCFG: continue with no enclosing loop") (-1)
+      (fun () -> failwith "prepareCFG: continue with no enclosing loop")
 
 (* make the cfg and return a list of statements *)
 let computeCFGInfo (f : fundec) (global_numbering : bool) : unit =
@@ -6715,7 +6842,8 @@ let computeCFGInfo (f : fundec) (global_numbering : bool) : unit =
   let clear_it = new clear in 
   ignore (visitCilBlock clear_it f.sbody) ;
   f.smaxstmtid <- Some (!sid_counter) ;
-  succpred_block f.sbody (None);
+  let rlabels = findAddrOfLabelStmts f.sbody in
+  succpred_block f.sbody None rlabels;
   let res = List.rev !statements in
   statements := [];
   f.sallstmts <- res;
@@ -6755,6 +6883,7 @@ let initCIL () =
       else E.s(E.unimp "initCIL: cannot find the right ikind for type %s\n" name)
     in      
     upointType := TInt(findIkindSz true !M.theMachine.M.sizeof_ptr, []);
+    ptrdiffType := TInt(findIkindSz false !M.theMachine.M.sizeof_ptr, []);
     kindOfSizeOf := findIkindName !M.theMachine.M.size_t;
     typeOfSizeOf := TInt(!kindOfSizeOf, []);
     wcharKind := findIkindName !M.theMachine.M.wchar_t;

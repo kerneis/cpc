@@ -1,8 +1,8 @@
 /*
-Copyright (c) 2008-2010,
-  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+Copyright (c) 2008-2011,
+  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
 Copyright (c) 2004-2005,
-  Juliusz Chroboczek  <jch@pps.jussieu.fr>
+  Juliusz Chroboczek  <jch@pps.univ-paris-diderot.fr>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+/* CPC cannot parse anonymous functions (aka Apple's "blocks") */
+#undef __BLOCKS__
+
 #include <stddef.h> // size_t
 #include <time.h>
 
@@ -30,6 +33,12 @@ THE SOFTWARE.
 #define CPC_COMPACT_CONTINUATIONS 1
 This is broken on some architectures.
 */
+
+/* If you want to build with the --ecpc option, do not forget to set:
+#define CPC_INDIRECT_PATCH 1
+*/
+
+#define cps __attribute__((__cps__))
 
 #ifdef CPC_COMPACT_CONTINUATIONS
 
@@ -53,22 +62,20 @@ extern cpc_sched *cpc_default_threadpool;
 #define cpc_default_sched NULL
 
 typedef struct cpc_continuation {
-    struct cpc_continuation *next;
-    struct cpc_condvar *condvar;
-    struct cpc_continuation *cond_next;
-    cpc_sched *sched;
-    int state;
     unsigned short length;
     unsigned short size;
+#ifdef CPC_INDIRECT_PATCH
+    void *cpc_retval; // where to write the next return value
+#endif
     char c[1];
 } cpc_continuation;
 
-typedef cpc_continuation *cpc_function(void*);
+extern void cpc_print_continuation(struct cpc_continuation *c, char *s);
 
-void cpc_continuation_free(struct cpc_continuation *c);
+typedef cpc_continuation *cpc_function(cpc_continuation *);
+
 struct cpc_continuation *cpc_continuation_expand(struct cpc_continuation *c,
                                                  int n);
-struct cpc_continuation *cpc_continuation_copy(struct cpc_continuation *c);
 
 static inline void* 
 cpc_alloc(struct cpc_continuation **cp, int s)
@@ -110,17 +117,21 @@ cpc_continuation_push(cpc_continuation *c, cpc_function *f)
 }
 
 static inline void
-cpc_continuation_patch(cpc_continuation *cont, size_t size, void *value)
+cpc_continuation_patch(cpc_continuation *cont, size_t size, const void *value)
 {
   void *cpc_arg;
   cpc_arg =
+#ifdef CPC_INDIRECT_PATCH
+    ((cont)->cpc_retval);
+  if(cpc_arg == NULL) return; /* this should not happen if the caller is smart enough */
+#else
     ((cont)->c + (cont)->length - PTR_SIZE - ((size - 1) / MAX_ALIGN + 1) * MAX_ALIGN);
+#endif
   __builtin_memcpy(cpc_arg, value, size);
   return;
 }
 
 extern void cpc_main_loop(void);
-extern void cpc_print_continuation(struct cpc_continuation *c, char *s);
 
 extern cpc_condvar *cpc_condvar_get(void);
 extern cpc_condvar *cpc_condvar_retain(cpc_condvar*);
@@ -141,14 +152,21 @@ extern cps int cpc_sleep(int sec, int usec, cpc_condvar *cond);
 extern cps int cpc_wait(cpc_condvar *cond);
 extern cps void cpc_yield(void);
 extern cps void cpc_done(void);
-extern cps cpc_sched *cpc_attach(cpc_sched *pool);
+extern cps cpc_sched *cpc_link(cpc_sched *pool);
 
-extern cpc_sched *(__attribute__((cpc_need_cont))cpc_get_sched)(void);
-extern int (__attribute__((cpc_need_cont))cpc_gettimeofday)(struct timeval *tv);
-extern time_t (__attribute__((cpc_need_cont,cpc_no_retain))cpc_time)(time_t *t);
+extern cpc_sched *cpc_get_sched(void) __attribute__((cpc_need_cont));
+extern int cpc_gettimeofday(struct timeval *tv) __attribute__((cpc_need_cont));
+extern time_t cpc_time(time_t *t) __attribute__((cpc_need_cont,cpc_no_retain));
 
 #define cpc_is_detached() (cpc_get_sched() != cpc_default_sched)
-#define cpc_detach() cpc_attach(cpc_is_detached() ? cpc_get_sched() : cpc_default_threadpool)
-#define cpc_detached cpc_attached(cpc_is_detached() ? cpc_get_sched() : cpc_default_threadpool)
+#define cpc_attach()  cpc_link  (cpc_is_detached() ? cpc_default_sched : cpc_get_sched())
+#define cpc_attached  cpc_linked(cpc_is_detached() ? cpc_default_sched : cpc_get_sched())
+#define cpc_detach()  cpc_link  (cpc_is_detached() ? cpc_get_sched()   : cpc_default_threadpool)
+#define cpc_detached  cpc_linked(cpc_is_detached() ? cpc_get_sched()   : cpc_default_threadpool)
 
 #endif
+
+/* Safe functions */
+
+#pragma cpc_no_retain("writev", "curl_easy_getinfo", "snprintf", "memcmp",  "memcpy")
+#pragma cpc_no_retain("getpeername", "setsockopt", "memset", "bind", "accept", "recvfrom")

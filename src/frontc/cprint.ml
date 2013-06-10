@@ -1,6 +1,6 @@
 (* 
  * Copyright (c) 2008-2010,
- *  Gabriel Kerneis     <kerneis@pps.jussieu.fr>
+ *  Gabriel Kerneis     <kerneis@pps.univ-paris-diderot.fr>
  *
  * Copyright (c) 2001-2003,
  *  George C. Necula    <necula@cs.berkeley.edu>
@@ -87,7 +87,6 @@ let printComments = ref false
 (*
 ** FrontC Pretty printer
 *)
-let out = ref stdout
 let width = ref 80
 let tab = ref 2
 let max_indent = ref 60
@@ -163,7 +162,6 @@ let rec print_specifiers (specs: spec_elem list) =
     | SpecAttr al -> print_attribute al; space ()
     | SpecType bt -> print_type_spec bt
     | SpecPattern name -> printl ["@specifier";"(";name;")"]
-    | SpecCPS -> printu "cps"
   in
   List.iter print_spec_elem specs
   ;comprint ")"
@@ -181,6 +179,7 @@ and print_type_spec = function
   | Tdouble -> print "double "
   | Tsigned -> printu "signed"
   | Tunsigned -> print "unsigned "
+  | Tsizet  -> print "size_t "
   | Tnamed s -> comprint "tnamed"; print s; space ();
   | Tstruct (n, None, _) -> printl ["struct";n]
   | Tstruct (n, Some flds, extraAttrs) ->
@@ -717,7 +716,7 @@ and print_statement stat =
       print_block h
 
   (*** CPC ***)
-  | CPC_ATTACHED (exp, stat, loc) ->
+  | CPC_LINKED (exp, stat, loc) ->
       setLoc loc;
       printl ["cpc_attached";"("];
       print_expression exp;
@@ -927,7 +926,6 @@ end
 **		Pretty printing the given abstract syntax program.
 *)
 let printFile (result : out_channel) ((fname, defs) : file) =
-  out := result;
   Whitetrack.setOutput result;
   print_defs defs;
   Whitetrack.printEOF ();
