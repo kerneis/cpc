@@ -43,7 +43,7 @@
 
 $::cilbin = 'bin';
 
-package App::Cilly;
+package App::Cpc;
 @ISA = ();
 
 use strict;
@@ -54,14 +54,14 @@ use Data::Dumper;
 use Carp;
 use Text::ParseWords;
 
-use App::Cilly::KeptFile;
-use App::Cilly::OutputFile;
-use App::Cilly::TempFile;
+use App::Cpc::KeptFile;
+use App::Cpc::OutputFile;
+use App::Cpc::TempFile;
 
-$App::Cilly::savedSourceExt = "_saved.c";
+$App::Cpc::savedSourceExt = "_saved.c";
 
-$App::Cilly::m32model = "nogcc32model";
-$App::Cilly::m64model = "nogcc64model";
+$App::Cpc::m32model = "nogcc32model";
+$App::Cpc::m64model = "nogcc64model";
 
 our $VERSION;
 
@@ -85,7 +85,6 @@ sub new {
       CCARGS => [],    # Compiler args
       LINKARGS => [],  # Linker args
       NATIVECAML => 1, # this causes the native code boxer to be used
-      RELEASELIB => 0, # if true, use the release runtime library (if any)
       IDASHDOT => 1,   # if true, pass "-I." to gcc's preprocessor
       VERBOSE => 0,    # when true, print extra detail
       TRACE_COMMANDS => 1, # when true, echo commands being run
@@ -126,19 +125,19 @@ sub new {
 
     my $compiler;
     if($mode eq "MSVC") {
-        unshift @App::Cilly::ISA, qw(MSVC);
+        unshift @App::Cpc::ISA, qw(MSVC);
         $compiler = MSVC->new($self);
     } elsif($mode eq "GNUCC") {
-        unshift @App::Cilly::ISA, qw(GNUCC);
+        unshift @App::Cpc::ISA, qw(GNUCC);
         $compiler = GNUCC->new($self);
     } elsif($mode eq "MSLINK") {
-        unshift @App::Cilly::ISA, qw(MSLINK);
+        unshift @App::Cpc::ISA, qw(MSLINK);
         $compiler = MSLINK->new($self);
     } elsif($mode eq "MSLIB") {
-        unshift @App::Cilly::ISA, qw(MSLIB);
+        unshift @App::Cpc::ISA, qw(MSLIB);
         $compiler = MSLIB->new($self);
     } elsif($mode eq "AR") {
-        unshift @App::Cilly::ISA, qw(AR);
+        unshift @App::Cpc::ISA, qw(AR);
         $compiler = AR->new($self);
     } else {
         die "Don't know about compiler $mode\n";
@@ -359,7 +358,7 @@ sub collectOneArgument {
 
 
 sub printVersion {
-    system ($App::Cilly::CilCompiler::compiler, '--version'); 
+    system ($App::Cpc::CilCompiler::compiler, '--version'); 
 }
 
 sub printHelp {
@@ -540,7 +539,7 @@ sub linktolib {
 sub preprocess_compile {
     my ($self, $src, $dest, $early_ppargs, $ppargs, $ccargs) = @_;
     &mydebug("preprocess_compile(src=$src, dest=$dest)\n");
-    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cilly::OutputFile');
+    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cpc::OutputFile');
 
     my ($base, $dir, $ext) = fileparse($src, "\\.[^.]+");
     if($ext eq ".c" || $ext eq ".cpp" || $ext eq ".cc" || $ext eq ".cpc") {
@@ -566,7 +565,7 @@ sub preprocess_compile {
 # THIS IS THE ENTRY POINT FOR JUST PREPROCESSING A FILE
 sub preprocess {
     my($self, $src, $dest, $ppargs) = @_;
-    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cilly::OutputFile');
+    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cpc::OutputFile');
     return $self->preprocess_before_cil($src, $dest, $ppargs);
 }
 
@@ -588,7 +587,7 @@ sub preprocessAfterOutputFile {
  
 sub preprocess_before_cil {
     my ($self, $src, $dest, $ppargs) = @_;
-    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cilly::OutputFile');
+    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cpc::OutputFile');
     my @args = @{$ppargs};
 
     my $srcname = ref $src ? $src->filename : $src;
@@ -638,7 +637,7 @@ sub preprocess_before_cil {
 # Preprocessing after CIL
 sub preprocess_after_cil {
     my ($self, $src, $dest, $ppargs) = @_;
-    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cilly::OutputFile');
+    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cpc::OutputFile');
     return $self->straight_preprocess($src, $dest, $ppargs);
 }
 
@@ -647,7 +646,7 @@ sub preprocess_after_cil {
 # You should not override this method
 sub straight_preprocess {
     my ($self, $src, $dest, $ppargs) = @_;
-    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cilly::OutputFile');
+    Carp::confess "bad dest: $dest" unless $dest->isa('App::Cpc::OutputFile');
     if($self->{VERBOSE}) {
 	my $srcname = ref $src ? $src->filename : $src;
 	print STDERR "Preprocessing $srcname\n";
@@ -676,9 +675,9 @@ sub straight_preprocess {
 
 sub compile {
     my($self, $src, $dest, $ppargs, $ccargs) = @_;
-    &mydebug("Cilly.compile(src=$src, dest=$dest->{filename})\n");
+    &mydebug("Cpc.compile(src=$src, dest=$dest->{filename})\n");
     Carp::confess "bad dest: $dest->{filename}" 
-        unless $dest->isa('App::Cilly::OutputFile');
+        unless $dest->isa('App::Cpc::OutputFile');
     
     if($self->{SEPARATE}) {
         # Now invoke CIL and compile afterwards
@@ -699,7 +698,7 @@ sub compile {
             die "Cannot stat the result of compilation $dest->{filename}";
         }
         $mtime = $mtime_1;
-        $outfile = $dest->{filename} . $App::Cilly::savedSourceExt;
+        $outfile = $dest->{filename} . $App::Cpc::savedSourceExt;
     }
     my $srcname = ref $src ? $src->filename : $src; 
     if($self->{VERBOSE}) { 
@@ -838,7 +837,7 @@ sub separateTrueObjects {
             $combsrc = $src;
             $mtime = 0;
         } else {
-            $combsrcname = $srcname . $App::Cilly::savedSourceExt;
+            $combsrcname = $srcname . $App::Cpc::savedSourceExt;
             $combsrc = $combsrcname;
             if(-f $combsrcname) { 
                 my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
@@ -915,7 +914,7 @@ sub link {
     }
     my $outname = ($self->{OPERATION} eq "TOASM") ? $destname 
         : "${destname}_comb.$self->{OBJEXT}";
-    my $mergedobj = new App::Cilly::OutputFile($destname, $outname);
+    my $mergedobj = new App::Cpc::OutputFile($destname, $outname);
 
     # We must merge
     if($self->{VERBOSE}) { 
@@ -938,7 +937,7 @@ sub link {
     # file instead of merging all over again
     if(@{$tomerge} > 1 && $self->{KEEPMERGED}) {
         my $canReuse = 1;
-        my $combFile = new App::Cilly::OutputFile($destname,
+        my $combFile = new App::Cpc::OutputFile($destname,
                                       "${destname}_comb.c");
         my @tmp = stat($combFile); 
         my $combFileMtime = $tmp[9] || 0;
@@ -991,9 +990,9 @@ sub applyCil {
     my @srcs = @{$ppsrc};
 
     # Now prepare the command line for invoking cilly
-    my ($aftercil, @cmd) = $self->CillyCommand ($ppsrc, $dest);
+    my ($aftercil, @cmd) = $self->CpcCommand ($ppsrc, $dest);
     Carp::confess "$self produced bad output file: $aftercil" 
-        unless $aftercil->isa('App::Cilly::OutputFile');
+        unless $aftercil->isa('App::Cpc::OutputFile');
 
     if($self->{MODENAME} eq "MSVC" || 
        $self->{MODENAME} eq "MSLINK" ||
@@ -1035,16 +1034,16 @@ sub applyCil {
 sub applyCilAndCompile {
     my ($self, $ppsrc, $dest, $ppargs, $ccargs) = @_;
     Carp::confess "$self produced bad destination file: $dest"
-	unless $dest->isa('App::Cilly::OutputFile');
+	unless $dest->isa('App::Cpc::OutputFile');
 
     # The input files
     my @srcs = @{$ppsrc};
-    &mydebug("Cilly.PM.applyCilAndCompile(srcs=[",join(',',@{$ppsrc}),"])\n");
+    &mydebug("Cpc.PM.applyCilAndCompile(srcs=[",join(',',@{$ppsrc}),"])\n");
 
     # Now run cilly
     my $aftercil = $self->applyCil($ppsrc, $dest);
     Carp::confess "$self produced bad output file: $aftercil" 
-        unless $aftercil->isa('App::Cilly::OutputFile');
+        unless $aftercil->isa('App::Cpc::OutputFile');
 
     # Now preprocess
     my $aftercilpp = $self->preprocessAfterOutputFile($aftercil);
@@ -1266,22 +1265,22 @@ sub compilerArgument {
                   push @{$self->{LINKARGS}}, @fullarg; return 1;
               }
               elsif($action->{TYPE} eq "CSOURCE") {
-                App::Cilly::OutputFile->protect(@fullarg);
+                App::Cpc::OutputFile->protect(@fullarg);
                   $fullarg[0] = &normalizeFileName($fullarg[0]);
                   push @{$self->{CFILES}}, @fullarg; return 1;
               }
               elsif($action->{TYPE} eq "ASMSOURCE") {
-                App::Cilly::OutputFile->protect(@fullarg);
+                App::Cpc::OutputFile->protect(@fullarg);
                   $fullarg[0] = &normalizeFileName($fullarg[0]);
                   push @{$self->{SFILES}}, @fullarg; return 1;
               }
               elsif($action->{TYPE} eq "OSOURCE") {
-                App::Cilly::OutputFile->protect(@fullarg);
+                App::Cpc::OutputFile->protect(@fullarg);
                   $fullarg[0] = &normalizeFileName($fullarg[0]);
                   push @{$self->{OFILES}}, @fullarg; return 1;
               }
               elsif($action->{TYPE} eq "ISOURCE") {
-                App::Cilly::OutputFile->protect(@fullarg);
+                App::Cpc::OutputFile->protect(@fullarg);
                   $fullarg[0] = &normalizeFileName($fullarg[0]);
                   push @{$self->{IFILES}}, @fullarg; return 1;
               }
@@ -1366,7 +1365,7 @@ sub cilOutputFile {
     my ($self, $basis, $suffix) = @_;
 
     if (defined $self->{SAVE_TEMPS}) {
-	return new App::Cilly::KeptFile($basis, $suffix, $self->{SAVE_TEMPS});
+	return new App::Cpc::KeptFile($basis, $suffix, $self->{SAVE_TEMPS});
     } else {
 	return $self->outputFile($basis, $suffix);
     }
@@ -1378,9 +1377,9 @@ sub outputFile {
     my ($self, $basis, $suffix) = @_;
 
     if (defined $self->{SAVE_TEMPS}) {
-	return new App::Cilly::KeptFile($basis, $suffix,  $self->{SAVE_TEMPS});
+	return new App::Cpc::KeptFile($basis, $suffix,  $self->{SAVE_TEMPS});
     } else {
-	return new App::Cilly::TempFile($basis, $suffix);
+	return new App::Cpc::TempFile($basis, $suffix);
     }
 }
 
@@ -1589,12 +1588,12 @@ sub compileOutputFile {
             my $dest  = $1;
             # Perhaps $dest is a directory
             if(-d $dest) {
-                return new App::Cilly::KeptFile($src, $self->{OBJEXT}, $dest);
+                return new App::Cpc::KeptFile($src, $self->{OBJEXT}, $dest);
             } else {
-                return new App::Cilly::OutputFile($src, $1);
+                return new App::Cpc::OutputFile($src, $1);
             }
 	} else {
-	    return new App::Cilly::KeptFile($src, $self->{OBJEXT}, '.');
+	    return new App::Cpc::KeptFile($src, $self->{OBJEXT}, '.');
 	}
     } else {
 #        die "compileOutputfile: operation is not TOOBJ";
@@ -2065,12 +2064,12 @@ sub new {
 	    "-m32\$" => { TYPE => 'ALLARGS',
 			  RUN => sub {
 			      push @{$stub->{CILARGS}}, "--envmachine";
-			      $ENV{CIL_MACHINE} = $App::Cilly::m32model;
+			      $ENV{CIL_MACHINE} = $App::Cpc::m32model;
 			  }},
 	    "-m64\$" => { TYPE => 'ALLARGS',
 			  RUN => sub {
 			      push @{$stub->{CILARGS}}, "--envmachine";
-			      $ENV{CIL_MACHINE} = $App::Cilly::m64model;
+			      $ENV{CIL_MACHINE} = $App::Cpc::m64model;
 			  }},
             "-m" => { TYPE => 'ALLARGS', ONEMORE => 1 },
 	    "-pthread\$" => { TYPE => 'ALLARGS' },
@@ -2199,9 +2198,9 @@ sub compileOutputFile {
         || ($self->{OPERATION} eq 'TOASM')) {
 	if (defined $self->{OUTARG} 
             && "@{$self->{OUTARG}}" =~ m|^-o\s*(\S.+)$|) {
-	    return new App::Cilly::OutputFile($src, $1);
+	    return new App::Cpc::OutputFile($src, $1);
 	} else {
-	    return new App::Cilly::KeptFile($src, $self->{OBJEXT}, '.');
+	    return new App::Cpc::KeptFile($src, $self->{OBJEXT}, '.');
 	}
     } else {
 	return $self->outputFile($src, $self->{OBJEXT});

@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# A simple use of the Cilly module
+# A simple use of the Cpc module
 #
 #
 #
@@ -39,15 +39,16 @@
 use strict;
 use Data::Dumper;
 use FindBin;
-use lib "$FindBin::RealBin";
+use lib "$FindBin::RealBin/../lib"; # to use without installing
+use lib "$FindBin::RealBin/../lib/perl5"; # to install with INSTALL_BASE set
 
 # Read the configuration script
-use App::Cilly::CilConfig;
+use App::Cpc::CilConfig;
 
-use App::Cilly;
+use App::Cpc;
 
 $::default_is_merge = 0;
-my $stub = App::Cilly::CilCompiler->new(@ARGV);
+my $stub = App::Cpc::CilCompiler->new(@ARGV);
 
 $stub->setVersion ();
 
@@ -56,23 +57,27 @@ $stub->doit();
 
 
 # Define here your favorite compiler by overriding Merger methods
-package App::Cilly::CilCompiler;
+package App::Cpc::CilCompiler;
 use File::Basename;
 use strict;
 BEGIN {
-    @App::Cilly::CilCompiler::ISA = qw(App::Cilly);
-    $App::Cilly::CilCompiler::base = "$::cilbindir/cpc";
+    @App::Cpc::CilCompiler::ISA = qw(App::Cpc);
+    $App::Cpc::CilCompiler::base =
+      "$FindBin::RealBin/$FindBin::RealScript";
     # Use the most recent version of cilly
-    $App::Cilly::CilCompiler::mtime_asm = int((stat("$App::Cilly::CilCompiler::base.asm.exe"))[9]);
-    $App::Cilly::CilCompiler::mtime_byte = int((stat("$App::Cilly::CilCompiler::base.byte.exe"))[9]);
-    $App::Cilly::CilCompiler::use_debug = 
+    $App::Cpc::CilCompiler::mtime_native =
+    int((stat("$App::Cpc::CilCompiler::base.native" . $::exeext))[9]);
+    $App::Cpc::CilCompiler::mtime_byte =
+    int((stat("$App::Cpc::CilCompiler::base.byte" . $::exeext))[9]);
+    $App::Cpc::CilCompiler::use_debug = 
          grep(/--bytecode/, @ARGV) ||
          grep(/--ocamldebug/, @ARGV) ||
-        ($App::Cilly::CilCompiler::mtime_asm < $App::Cilly::CilCompiler::mtime_byte);
-    $App::Cilly::CilCompiler::compiler = 
-        $App::Cilly::CilCompiler::base . 
-            ($App::Cilly::CilCompiler::use_debug ? ".byte" : ".asm") . ".exe";
-    if($App::Cilly::CilCompiler::use_debug) { 
+        ($App::Cpc::CilCompiler::mtime_native < $App::Cpc::CilCompiler::mtime_byte);
+    $App::Cpc::CilCompiler::compiler = 
+        $App::Cpc::CilCompiler::base . 
+            ($App::Cpc::CilCompiler::use_debug ? ".byte" : ".native") .
+            $::exeext;
+    if($App::Cpc::CilCompiler::use_debug) { 
         $ENV{"OCAMLRUNPARAM"} = "b" . $ENV{"OCAMLRUNPARAM"};
     } 
 }
@@ -94,7 +99,7 @@ sub collectOneArgument {
 }
 
 sub usage {
-    print "Usage: cpc [options] [gcc_or_mscl arguments]\n";
+    print "Usage: $FindBin::Script [options] [gcc_or_mscl arguments]\n";
 }
 
 sub helpMessage {
@@ -103,27 +108,27 @@ sub helpMessage {
     $self->SUPER::helpMessage();
     print <<EOF;
 
-  All other arguments starting with -- are passed to the Cilly process.
+  All other arguments starting with -- are passed to the Cpc process.
 
-The following are the arguments of the Cilly process
+The following are the arguments of the Cpc process
 EOF
-   my @cmd = ($App::Cilly::CilCompiler::compiler, '-help');
+   my @cmd = ($App::Cpc::CilCompiler::compiler, '-help');
    $self->runShell(@cmd); 
 }
 
 
-sub CillyCommand {
+sub CpcCommand {
     my ($self, $ppsrc, $dest) = @_;
 
     my $aftercil;
-    my @cmd = ($App::Cilly::CilCompiler::compiler);
+    my @cmd = ($App::Cpc::CilCompiler::compiler);
 
     if(defined $ENV{OCAMLDEBUG} || $self->{OCAMLDEBUG}) {
         print "OCAMLDEBUG is on\n";
         my @idirs = (".", "src", "src/frontc", "src/ext",
                      "ocamlutil", 
                      "obj/");
-	my @iflags = map { ('-I', "$::cilbindir/../$_") } @idirs;
+	my @iflags = map { ('-I', "$FindBin::RealBin/../$_") } @idirs;
         unshift @cmd, 'ocamldebug', '-emacs', @iflags;
     }
     if($::docxx) {
@@ -134,7 +139,7 @@ sub CillyCommand {
         push @cmd, '--cabsonly', $aftercil;
     } else {
         if(defined $self->{CILLY_OUT}) {
-            $aftercil = new App::Cilly::OutputFile($dest, $self->{CILLY_OUT});
+            $aftercil = new App::Cpc::OutputFile($dest, $self->{CILLY_OUT});
             return ($aftercil, @cmd);
         }
 	$aftercil = $self->cilOutputFile($dest, 'cil.c');
@@ -145,7 +150,7 @@ sub CillyCommand {
 sub MergeCommand {
     my ($self, $ppsrc, $dir, $base) = @_;
 
-    return ('', $App::Cilly::CilCompiler::compiler);
+    return ('', $App::Cpc::CilCompiler::compiler);
 }
 
 

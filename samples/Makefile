@@ -1,4 +1,4 @@
-CPC='../obj/cpc.asm.exe'
+CPC='../bin/cpc'
 
 CDEBUGFLAGS=-Wall -g
 CLIBS=-I ../include
@@ -30,8 +30,8 @@ test/%: % %.output
         || (echo $@: FAIL; false)
 	@ echo $@: SUCCESS
 
-static-httpd.cpi: trivial-httpd.cpc
-	$(CPP) -x c $(CFLAGS) $(CLIBS) -DSTATIC -o $@ $<
+static-httpd.o: trivial-httpd.cpc
+	$(CPC) $(CPCOPTS) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
 
 static-httpd-fork.o: trivial-httpd-fork.c
 	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
@@ -52,14 +52,11 @@ static-httpd-pth.o: trivial-httpd-pth.c
 	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
 
 clean:
-	rm -f *.o *~ *.cpi *.output core
-	for x in *.cpc; do rm -f $${x%.cpc}.c; done;
+	rm -f *.o *~ *.cpc.* *.output core
 	rm -f $(BASICS) $(EXTENDED) $(SERVERS)
 
-%.cpi: %.cpc
-	$(CPP) -x c $(CFLAGS) $(CLIBS) -o $@ $<
-%.c: %.cpi
-	$(CPC) $(CPCOPTS) $< --out $@
+%.o: %.cpc
+	$(CPC) $(CPCOPTS) $(CFLAGS) $(CLIBS) -o $@ -c $<
 
 %.output: %.cpc
 	@grep -q "EXPECTED OUTPUT" $< || (echo $<: missing expected output; false)

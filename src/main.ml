@@ -65,8 +65,27 @@ let parseOneFile (fname: string) : C.file =
 (** These are the statically-configured features. To these we append the 
   * features defined in Feature_config.ml (from Makefile) *)
   
+let makeCFGFeature : C.featureDescr = 
+  { C.fd_name = "makeCFG";
+    C.fd_enabled = Cilutil.makeCFG;
+    C.fd_description = "make the program look more like a CFG" ;
+    C.fd_extraopt = [];
+    C.fd_doit = (fun f -> 
+      ignore (Partial.calls_end_basic_blocks f) ; 
+      ignore (Partial.globally_unique_vids f) ; 
+      Cil.iterGlobals f (fun glob -> match glob with
+        Cil.GFun(fd,_) -> Cil.prepareCFG fd ;
+                      (* jc: blockinggraph depends on this "true" arg *)
+                      ignore (Cil.computeCFGInfo fd true)
+      | _ -> ()) 
+    );
+    C.fd_post_check = true;
+  } 
+
 let features : C.featureDescr list = 
-  [ Cpc.feature ]
+  [ Simplify.feature;
+    makeCFGFeature;
+    Cpc.feature ]
 
 let rec processOneFile (cil: C.file) =
   begin
@@ -180,42 +199,39 @@ let theMain () =
 
     Ciloptions.fileNames := List.rev !Ciloptions.fileNames;
 
-    if !Cilutil.testcil <> "" then begin
-      Testcil.doit !Cilutil.testcil
-    end else
-      (* parse each of the files named on the command line, to CIL *)
-      let files = Util.list_map parseOneFile !Ciloptions.fileNames in
+    (* parse each of the files named on the command line, to CIL *)
+    let files = Util.list_map parseOneFile !Ciloptions.fileNames in
 
-      (* if there's more than one source file, merge them together; *)
-      (* now we have just one CIL "file" to deal with *)
-      let one =
-        match files with
-          [one] -> one
-        | [] -> E.s (E.error "No arguments for CIL")
-        | _ ->
-            let merged =
-              Stats.time "merge" (Mergecil.merge files)
-                (if !outName = "" then "stdout" else !outName) in
-            if !E.hadErrors then
-              E.s (E.error "There were errors during merging");
-            (* See if we must save the merged file *)
-            (match !mergedChannel with
-              None -> ()
-            | Some mc -> begin
-                let oldpci = !C.print_CIL_Input in
-                C.print_CIL_Input := true;
-                Stats.time "printMerged"
-                  (C.dumpFile !C.printerForMaincil mc.fchan mc.fname) merged;
-                C.print_CIL_Input := oldpci
-            end);
-            merged
-      in
+    (* if there's more than one source file, merge them together; *)
+    (* now we have just one CIL "file" to deal with *)
+    let one =
+      match files with
+        [one] -> one
+      | [] -> E.s (E.error "No arguments for CIL")
+      | _ ->
+          let merged =
+            Stats.time "merge" (Mergecil.merge files)
+              (if !outName = "" then "stdout" else !outName) in
+          if !E.hadErrors then
+            E.s (E.error "There were errors during merging");
+          (* See if we must save the merged file *)
+          (match !mergedChannel with
+            None -> ()
+          | Some mc -> begin
+              let oldpci = !C.print_CIL_Input in
+              C.print_CIL_Input := true;
+              Stats.time "printMerged"
+                (C.dumpFile !C.printerForMaincil mc.fchan mc.fname) merged;
+              C.print_CIL_Input := oldpci
+          end);
+          merged
+    in
 
-      if !E.hadErrors then
-        E.s (E.error "Cabs2cil had some errors");
+    if !E.hadErrors then
+      E.s (E.error "Cabs2cil had some errors");
 
-      (* process the CIL file (merged if necessary) *)
-      processOneFile one
+    (* process the CIL file (merged if necessary) *)
+    processOneFile one
   end
 ;;
                                         (* Define a wrapper for main to 

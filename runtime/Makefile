@@ -1,4 +1,4 @@
-CPC='../obj/cpc.asm.exe'
+CPC='../bin/cpc'
 
 CDEBUGFLAGS=-Wall -g -O2 -Wno-unknown-pragmas
 CLIBS=-I ../include/cpc
@@ -18,7 +18,7 @@ LDLIBS=-pthread
 
 PREFIX=/usr/local
 
-.SUFFIXES: .cpc .cpi
+.SUFFIXES: .cpc .o
 
 .PHONY: all clean compact
 
@@ -45,15 +45,10 @@ libcpcfull.a: cpc_libev.o threadpool/threadpool.o  cpc_barrier.o cpc_io.o
 
 clean:
 	rm -f *~
-	rm -f cpc_runtime.o cpc_libev.o threadpool/threadpool.o
+	$(MAKE) -C threadpool clean
 	rm -f libcpc.a libcpcfull.a
-	rm -f cpc_barrier.o cpc_io.o
-	rm -f cpc_barrier.cpi cpc_io.cpi
-	rm -f cpc_barrier.c cpc_io.c
+	rm -f *.o *.cpc.*
 
-.cpc.cpi:
-	$(CC) -E -x c $(CFLAGS) $(CLIBS) -o $@ $<
-
-.cpi.c:
-	$(CPC) $(CPCOPTS) $< --out $@
+.cpc.o:
+	$(CPC) $(CPCOPTS) $(CFLAGS) $(CLIBS) -o $@ -c $<
 
