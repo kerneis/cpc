@@ -308,11 +308,11 @@ exec_prefix = @exec_prefix@
 datarootdir = @datarootdir@
 bindir = @bindir@
 
-install: $(CILLY) install-findlib
+install: $(CILLY)
 	$(MAKE) -C $(CILLYDIR) pure_install
 	$(INSTALL) -m 0755 $(BINDIR)/$(CILLY).* $(DESTDIR)$(bindir)
 
-uninstall: $(CILLYDIR)/Makefile uninstall-findlib
+uninstall: $(CILLYDIR)/Makefile
 	-rm -f $(DESTDIR)$(bindir)/$(CILLY).*
 	$(MAKE) -C $(CILLYDIR) force_uninstall
 
