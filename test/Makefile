@@ -103,19 +103,13 @@ ifdef CABSONLY
   CILLY+= --cabsonly
 endif
 ifdef COMPUTEDGOTO
-  CILLY+= --useComputedGoto
+  CILLY+= --useComputedGoto --dontcpc
 endif
 ifdef LOCALINIT
   CILLY+= --noMakeStaticGlobal
 endif
 ifdef OPTIMIZE
 	CILLY+= $(OPT_O2)
-endif
-
-
-# Disable CPC specific options when running the regular tests
-ifndef CPC
-  CILLY+= --dontcpc --nokeepunused
 endif
 
 # This is a way to enable the stats, allowing the command line to override it
@@ -274,7 +268,7 @@ combine%: $(SMALL1)/combine%_1.c
 
 arcombine: mustbegcc
 	cd $(SMALL1); $(CILLY) -c array1.c array2.c
-	cd $(SMALL1); $(CILHOME)/bin/cilly \
+	cd $(SMALL1); $(CILHOME)/bin/cpc \
                            --mode=AR --merge --verbose crv array.a array1.o array2.o
 	cd $(SMALL1); $(CILLY) -o matrix.exe array.a matrix.c
 	cd $(SMALL1); ./matrix.exe
@@ -388,9 +382,9 @@ testdir/% :
 
 
 merge-ar:
-	cd small2; $(CILHOME)/bin/cilly --merge -c merge-ar.c merge-twice-1.c
-	cd small2; $(CILHOME)/bin/cilly --merge --mode=AR cr libmerge.a merge-ar.o merge-twice-1.o
-	cd small2; $(CILHOME)/bin/cilly --merge libmerge.a -o merge-ar
+	cd small2; $(CILHOME)/bin/cpc --merge -c merge-ar.c merge-twice-1.c
+	cd small2; $(CILHOME)/bin/cpc --merge --mode=AR cr libmerge.a merge-ar.o merge-twice-1.o
+	cd small2; $(CILHOME)/bin/cpc --merge libmerge.a -o merge-ar
 
 
 
