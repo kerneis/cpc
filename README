@@ -39,7 +39,7 @@ At last, if you want to clean everything:
 How to use:
 -----------
 You can either use cpc.asm.exe directly in your Makefiles (see e.g.
-samples/Makefile and runtime/Makefile) or use the cpc wrapper (in cilly/cpc).
+samples/Makefile and runtime/Makefile) or use the cpc wrapper (in bin/cpc).
 
 If you choose to install cpc, you should add:
     -I cpc

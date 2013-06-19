@@ -47,7 +47,7 @@ distclean: clean
 	rm -f cil.log*
 
 CILHOME := $(CURDIR)/..
-CILLY := $(CILHOME)/bin/cilly
+CILLY := $(CILHOME)/bin/cpc
 
 ifdef _MSVC
 	include Makefile.msvc

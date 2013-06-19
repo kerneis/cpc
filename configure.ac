@@ -268,7 +268,7 @@ AC_SUBST(UNDERSCORE_NAME)
 AC_SUBST(EXTRAFEATURES)
 AC_SUBST(EXTRASRCDIRS)
 
-AC_ARG_VAR(FORCE_PERL_PREFIX, [Install cilly wrapper in PREFIX/bin and PREFIX/lib])
+AC_ARG_VAR(FORCE_PERL_PREFIX, [Install cpc wrapper in PREFIX/bin and PREFIX/lib])
 
 # finish the configure script and generate various files; ./configure
 # will apply variable substitutions to <filename>.in to generate <filename>;
