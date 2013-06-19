@@ -36,6 +36,12 @@ CIL_VERSION_MINOR=7
 CIL_VERSION_REV=1
 CIL_VERSION=$CIL_VERSION_MAJOR.$CIL_VERSION_MINOR.$CIL_VERSION_REV
 
+# Assign here the CPC version numbers
+CPC_VERSION_MAJOR=0
+CPC_VERSION_MINOR=9
+CPC_VERSION_REV=0
+CPC_VERSION=$CPC_VERSION_MAJOR.$CPC_VERSION_MINOR.$CPC_VERSION_REV
+
 # make sure I haven't forgotten to run autoconf
 if test configure -ot configure.in; then
   AC_MSG_ERROR(configure is older than configure.in; you forgot to run autoconf)
@@ -58,6 +64,8 @@ AC_CANONICAL_TARGET
 # Check if executables should end with .exe (windows)
 AC_EXEEXT
 
+# Detech ranlib (for CPC runtime)
+AC_PROG_RANLIB
 
 # -------------- portable configuration ----------------
 
@@ -262,6 +270,10 @@ AC_SUBST(CIL_VERSION_MAJOR)
 AC_SUBST(CIL_VERSION_MINOR)
 AC_SUBST(CIL_VERSION_REV)
 AC_SUBST(CIL_VERSION)
+AC_SUBST(CPC_VERSION_MAJOR)
+AC_SUBST(CPC_VERSION_MINOR)
+AC_SUBST(CPC_VERSION_REV)
+AC_SUBST(CPC_VERSION)
 AC_SUBST(HAVE_BUILTIN_VA_LIST)
 AC_SUBST(THREAD_IS_KEYWORD)
 AC_SUBST(UNDERSCORE_NAME)
@@ -292,6 +304,7 @@ CIL configuration:
   gcc to use                  CC                 $CC
   default compiler            DEFAULT_COMPILER   $DEFAULT_COMPILER
   CIL version                 CIL_VERSION        $CIL_VERSION
+  CPC version                 CPC_VERSION        $CPC_VERSION
   CIL features                CIL_FEATURES       $CIL_FEATURES
   Extra source directories    EXTRASRCDIRS       $EXTRASRCDIRS
 EOF
