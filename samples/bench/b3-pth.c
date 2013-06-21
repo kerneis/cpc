@@ -27,7 +27,7 @@ main()
     arg = -1;
     res = -1;
     pth_init();
-    thread = pth_spawn(pth_attr_new(), thread_routine, NULL);
+    thread = pth_spawn(PTH_ATTR_DEFAULT, thread_routine, NULL);
 
     for(i = 0; i < 10; i++) {
         s = 0;

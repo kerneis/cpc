@@ -30,12 +30,18 @@ main()
         for(j = 0; j < 10000; j++) {
             res = -1;
             arg = j;
+#ifdef JOIN
             thread = st_thread_create(thread_routine, NULL, 1, 0);
+#else
+            thread = st_thread_create(thread_routine, NULL, 0, 0);
+#endif
             st_sleep(0);
             while(res < 0)
                 st_sleep(0);
             s += res;
+#ifdef JOIN
             st_thread_join(thread, NULL);
+#endif
             arg = -1;
         }
     }

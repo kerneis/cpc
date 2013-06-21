@@ -19,6 +19,13 @@ int
 main()
 {
     pth_t thread;
+    pth_attr_t attr = pth_attr_new();
+    pth_attr_init(attr);
+#ifdef JOIN
+    pth_attr_set(attr, PTH_ATTR_JOINABLE, 1);
+#else
+    pth_attr_set(attr, PTH_ATTR_JOINABLE, 0);
+#endif
     int rc;
     int i, j, s;
 
@@ -30,12 +37,14 @@ main()
         for(j = 0; j < 10000; j++) {
             res = -1;
             arg = j;
-            thread = pth_spawn(PTH_ATTR_DEFAULT, thread_routine, NULL);
+            thread = pth_spawn(attr, thread_routine, NULL);
             pth_yield(NULL);
             while(res < 0)
                 pth_yield(NULL);
             s += res;
+#ifdef JOIN
             pth_join(thread, NULL);
+#endif
             arg = -1;
         }
     }
