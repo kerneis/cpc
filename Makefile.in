@@ -307,14 +307,21 @@ INSTALL_DATA = @INSTALL_DATA@
 exec_prefix = @exec_prefix@
 datarootdir = @datarootdir@
 bindir = @bindir@
+libdir = @libdir@
+includedir = @includedir@
 
 install: $(CILLY)
 	$(MAKE) -C $(CILLYDIR) pure_install
 	$(INSTALL) -m 0755 $(BINDIR)/$(CILLY).* $(DESTDIR)$(bindir)
+	$(INSTALL) -d $(DESTDIR)$(includedir)/cpc
+	$(INSTALL_DATA) include/cpc/* $(DESTDIR)$(includedir)/cpc
+	$(INSTALL_DATA) runtime/libcpc.a $(DESTDIR)$(libdir)/libcpc.a
 
 uninstall: $(CILLYDIR)/Makefile
 	-rm -f $(DESTDIR)$(bindir)/$(CILLY).*
 	$(MAKE) -C $(CILLYDIR) force_uninstall
+	-rm -rf $(DESTDIR)$(includedir)/cpc
+	-rm -f $(DESTDIR)$(libdir)/libcpc.a
 
 .PHONY: install-findlib uninstall-findlib
 
