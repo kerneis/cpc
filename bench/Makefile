@@ -21,17 +21,17 @@ b2-indirect: b2-indirect.o b2b.o
 b2-manual-return: b2-manual-return.o b2b-manual-return.o
 
 b2-misaligned-cpc.c: CPCOPTS+=--packed
-# You must build cpc with compact continuations, and rename libcpcfull.a
-# into libcpcfullcompact.a for this to work.
+# You must build cpc with compact continuations, and rename libcpc.a
+# into libcpccompact.a for this to work.
 # If you have no idea how to do this, then you should not run this
 # benchmark.
-b2-misaligned-cpc: LDLIBS=-L../runtime -lm -pthread -lcpcfullcompact
+b2-misaligned-cpc: LDLIBS=-L../runtime -lm -pthread -lcpccompact
 
 b6-4kb-st.o: b6-st.c
 	$(CC) $(CFLAGS) $(CLIBS) -DSTACK=4096 -c $< -o $@
 
 %-nptl: LDLIBS+=-pthread
-%-cpc: LDLIBS+=-L../runtime -lm -pthread -lcpcfull
+%-cpc: LDLIBS+=-L../runtime -lm -pthread -lcpc
 %-st: LDLIBS+=-lst
 %-pth: LDLIBS+=`pth-config --libs --ldflags`
 
