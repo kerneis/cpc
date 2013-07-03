@@ -60,14 +60,19 @@ g(char c)
 {
     int i;
 
-    void f(void) { printf("%c: %d\n", c, i); }
+    /* Inner functions can be cps or non-cps */
+    void print(void) { printf("%c: %d\n", c, i); }
+    void cps cps_print(void) { printf("%c: %d\n", c, i); }
 
     for(i = 0; i < 10; i++) {
         cpc_yield();
-        f();
-        if(i % 2 == 0)
-            f();
-        f();
+        print();
+        switch(i) {
+          case 0: case 2: case 4: case 6: case 8:
+            cps_print();
+          default:
+            cps_print();
+        }
     }
 }
 
