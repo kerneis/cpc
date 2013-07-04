@@ -98,6 +98,10 @@ class initLabelTbl = object(self)
       DoChildren
 end
 
+let initLabelTbl file =
+  labelTbl := [];
+  visitCilFileSameGlobals (new initLabelTbl) file
+
 module VS = Set.Make (struct
   type t = varinfo
   let compare v v' = compare v.vid v'.vid
@@ -2450,6 +2454,8 @@ let rec functionalize start f =
       trace (dprintf "found escaping break or continue: trivializing\n%a\n" d_stmt s);
       eliminate_switch_loop s;
       trace (dprintf "***\nresult:\n%a\n" d_stmt s);
+      (* XXX workaround eliminate_switch_loop bug *)
+      initLabelTbl f;
   | Not_found -> E.s (E.bug "no enclosing function found\n")
       end
 
@@ -2490,6 +2496,8 @@ let rec cps_marking f =
   | TrivializeStmt s ->
       trace (dprintf "TrivializeStmt %a\n" d_stmt s);
       eliminate_switch_loop s;
+      (* XXX workaround eliminate_switch_loop bug *)
+      initLabelTbl f;
       cps_marking f
   | AddGoto {last_stmt = src; next_stmt = dst} ->
       add_goto src dst;
@@ -2519,6 +2527,8 @@ let rec cps_marking f =
       | Switch _ | Loop _ ->
           trace (dprintf "enclosing is a switch or a loop: trivializing first\n");
           eliminate_switch_loop c.enclosing_stmt;
+          (* XXX workaround eliminate_switch_loop bug *)
+          initLabelTbl f;
           cps_marking f
       | _ -> functionalize start f; cps_marking f
       end
@@ -2536,7 +2546,7 @@ let stages () = [
   visitCilFile (new lambdaLifter) file;
   visitCilFileSameGlobals (new uniqueVarinfo) file);
   ("Initialize label table\n", fun file ->
-  visitCilFileSameGlobals (new initLabelTbl) file);
+  initLabelTbl file);
   ] @
   (if !use_environments
   then
