@@ -147,7 +147,7 @@ module ColoredG = struct
     let color =
       if !should_be_cps v != is_cps_type v.vtype
       then 0xff0000 else 0x000000 in
-    let style = 
+    let style =
       if !should_be_cps v != is_cps_type v.vtype
       then `Dashed else `Solid in
     [`Shape shape; `Color color; `Style style]
@@ -163,6 +163,14 @@ let draw filename g =
   Draw.output_graph chan g;
   close_out chan
 
+let print_warnings () =
+  VS.iter (function v ->
+    match !should_be_cps v, is_cps_type v.vtype with
+    | true, false -> E.warn "missing cps annotation: %s" v.vname
+    | false, true -> E.warn "spurious cps annotation: %s" v.vname
+    | _, _ -> ()
+  ) (VS.union !decl !def)
+
 let doit file =
   (* work on a copy of the file, with unused variables removed *)
   let file = { (file) with fileName = file.fileName } in
@@ -176,7 +184,8 @@ let doit file =
   let init_cps v =
     (VS.mem v no_def || v.vaddrof) && is_cps_type v.vtype in
   should_be_cps := Reachability.analyze init_cps g;
-  draw ((Filename.chop_extension file.fileName)^".dot") g
+  draw ((Filename.chop_extension file.fileName)^".dot") g;
+  print_warnings ()
 
 let feature : featureDescr =
   { fd_name = "cpsInference";
