@@ -91,7 +91,6 @@ let def = ref VS.empty
 
 (* vertex collecter *)
 let vregister var set =
-  E.log "vregister: %a\n" d_type var.vtype;
   G.add_vertex g var;
   set := VS.add var !set
 
@@ -172,7 +171,7 @@ let doit file =
   (* start with cps functions that are declared but not defined *)
   let init_cps v = VS.mem v no_def && is_cps_type v.vtype in
   should_be_cps := Reachability.analyze init_cps g;
-  draw "cps.dot" g
+  draw ((Filename.chop_extension file.fileName)^".dot") g
 
 let feature : featureDescr =
   { fd_name = "cpsInference";
