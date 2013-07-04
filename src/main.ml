@@ -85,6 +85,7 @@ let makeCFGFeature : C.featureDescr =
 let features : C.featureDescr list = 
   [ Simplify.feature;
     makeCFGFeature;
+    Cps_infer.feature;
     Cpc.feature ]
 
 let rec processOneFile (cil: C.file) =

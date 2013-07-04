@@ -65,7 +65,7 @@ endif
 EXE = $(EXEMODE)$(EXEEXT)
 
 OCAMLBUILD = @OCAMLBUILD@
-OCAMLBUILD += -build-dir $(OBJDIR) -no-links -classic-display
+OCAMLBUILD += -build-dir $(OBJDIR) -no-links -classic-display -use-ocamlfind
 
 OCAMLFIND = @OCAMLFIND@
 

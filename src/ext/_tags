@@ -1,2 +1,3 @@
 # subdirectories containing source code
 "pta": include
+<cps_infer.ml>: package(ocamlgraph)
