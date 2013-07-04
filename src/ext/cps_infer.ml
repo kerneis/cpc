@@ -170,8 +170,11 @@ let doit file =
   visitCilFileSameGlobals (new vcollect) file;
   visitCilFileSameGlobals (new ecollect) file;
   let no_def = VS.diff !decl !def in
-  (* start with cps functions that are declared but not defined *)
-  let init_cps v = VS.mem v no_def && is_cps_type v.vtype in
+  (* start with cps functions that are declared but not defined,
+   * as well as function the address of which is taken to be
+   * conservative *)
+  let init_cps v =
+    (VS.mem v no_def || v.vaddrof) && is_cps_type v.vtype in
   should_be_cps := Reachability.analyze init_cps g;
   draw ((Filename.chop_extension file.fileName)^".dot") g
 
