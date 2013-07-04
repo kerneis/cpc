@@ -138,6 +138,8 @@ module ColoredG = struct
   let graph_attributes g = []
   let default_vertex_attributes g = []
   let vertex_name v =
+    Printf.sprintf "\"%s%s\""
+    (if is_cps_type v.vtype then "cps " else "")
     v.vname
   let vertex_attributes v =
     let shape =
