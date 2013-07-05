@@ -95,12 +95,22 @@ let vregister var set =
   G.add_vertex g var;
   set := VS.add var !set
 
-(* Whether to register native function declarations.
+(* Whether to display native function declarations.
  * Ignoring them makes the graph more readable, and
  * does not change the result. *)
 let full_graph = ref false
 
-class vcollect =
+(* XXX could fail with composed suffixes such as .cil.i,
+ * but we shouldn't have any in practice *)
+let same_file f f' =
+  let chop x = try Filename.chop_extension x with _ -> x in
+  let fc = chop (Filename.basename f) in
+  let fc' = chop (Filename.basename f') in
+  assert(chop fc = fc);
+  assert(chop fc' = fc');
+  fc = fc'
+
+class vcollect = fun filename ->
   object(self)
   inherit nopCilVisitor
 
@@ -113,7 +123,13 @@ class vcollect =
       if  (!full_graph || is_cps_type v.vtype) then
       vregister v decl;
       SkipChildren
-  | GFun ({svar=v},_) -> vregister v def; DoChildren
+  | GFun ({svar=v},{file = f}) ->
+      (* XXX if an included definition misses cps declaration, we will ignore it
+       * --- but CPC will refuse to compile anyway; use --fullgraph if you want
+       * to be sure *)
+      if (!full_graph || is_cps_type v.vtype || same_file f filename) then
+        vregister v def;
+      DoChildren
   | _ -> SkipChildren
 end
 
@@ -190,7 +206,7 @@ let doit file =
   (* work on a copy of the file, with unused variables removed *)
   let file = { (file) with fileName = file.fileName } in
   Rmtmps.removeUnusedTemps file;
-  visitCilFileSameGlobals (new vcollect) file;
+  visitCilFileSameGlobals (new vcollect file.fileName) file;
   all_fun := VS.union !decl !def;
   visitCilFileSameGlobals (new ecollect) file;
   let no_def = VS.diff !decl !def in
