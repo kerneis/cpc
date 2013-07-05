@@ -88,11 +88,17 @@ let g = G.create()
 module VS = Set.Make(V)
 let decl = ref VS.empty
 let def = ref VS.empty
+let all_fun = ref VS.empty
 
 (* vertex collecter *)
 let vregister var set =
   G.add_vertex g var;
   set := VS.add var !set
+
+(* Whether to register native function declarations.
+ * Ignoring them makes the graph more readable, and
+ * does not change the result. *)
+let full_graph = ref false
 
 class vcollect =
   object(self)
@@ -103,12 +109,21 @@ class vcollect =
   | _ -> DoChildren
 
   method vglob = function
-  | GVarDecl(v,_) when isFunctionType v.vtype -> vregister v decl; SkipChildren
+  | GVarDecl(v,_) when isFunctionType v.vtype ->
+      if  (!full_graph || is_cps_type v.vtype) then
+      vregister v decl;
+      SkipChildren
   | GFun ({svar=v},_) -> vregister v def; DoChildren
   | _ -> SkipChildren
 end
 
 (* edge collecter *)
+
+let add_edge src dst =
+  (* avoid implicit creation of vertices *)
+  if(VS.mem src !all_fun && VS.mem dst !all_fun)
+  then G.add_edge g src dst
+
 class ecollect =
   object(self)
   inherit nopCilVisitor
@@ -120,12 +135,12 @@ class ecollect =
 
   method vinst = function
   | Call(_, Lval(Var v, NoOffset), _, _) ->
-      G.add_edge g v ef.svar;
+      add_edge v ef.svar;
       SkipChildren
   | Call(_, e, _, _) ->
       let v = makeVarinfo false "indirect-call" (typeOf e) in
       vregister v decl;
-      G.add_edge g v ef.svar;
+      add_edge v ef.svar;
       SkipChildren
   | _ -> SkipChildren
 end
@@ -169,13 +184,14 @@ let print_warnings () =
     | true, false -> E.warn "missing cps annotation: %s" v.vname
     | false, true -> E.warn "spurious cps annotation: %s" v.vname
     | _, _ -> ()
-  ) (VS.union !decl !def)
+  ) !all_fun
 
 let doit file =
   (* work on a copy of the file, with unused variables removed *)
   let file = { (file) with fileName = file.fileName } in
   Rmtmps.removeUnusedTemps file;
   visitCilFileSameGlobals (new vcollect) file;
+  all_fun := VS.union !decl !def;
   visitCilFileSameGlobals (new ecollect) file;
   let no_def = VS.diff !decl !def in
   (* start with cps functions that are declared but not defined,
@@ -191,7 +207,9 @@ let feature : featureDescr =
   { fd_name = "cpsInference";
     fd_enabled = ref false;
     fd_description = "infer needed and spurious cps annotations";
-    fd_extraopt = [ ];
+    fd_extraopt = [
+       ("--fullInferenceGraph",Arg.Set full_graph," show all native functions in the call graph");
+    ];
     fd_doit = doit;
     fd_post_check = true;
   }
