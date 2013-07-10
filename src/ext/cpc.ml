@@ -1834,7 +1834,7 @@ let contains_nasty args =
 
 let rebind ef ftype args =
   let argstype =
-    match ftype with
+    match unrollType ftype with
     | TFun (_,x,_,_) -> argsToList x
     | _ -> assert false in
   let args' = Util.list_map (fun (s,t,_) -> makeTempVar ~name:s ef t) argstype in

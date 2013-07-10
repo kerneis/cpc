@@ -33,3 +33,17 @@ int main() {
 
   return 0;
 }
+
+/* Bug # 5 */
+typedef void cps CoroutineEntry(void *opaque);
+
+struct st {
+    CoroutineEntry *f;
+    void *n;
+};
+
+void cps h(struct st *s)
+{
+    /* s->n triggers an error in typedef unrolling */
+    s->f(s->n);
+}
