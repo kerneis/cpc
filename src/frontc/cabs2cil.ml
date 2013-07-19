@@ -453,6 +453,22 @@ let gnu_body_result : (A.statement * ((exp * typ) option ref)) ref
 let currentReturnType : typ ref = ref (TVoid([]))
 let currentFunctionFDEC: fundec ref = ref dummyFunDec
 
+(* Is the current function a CPS function? *)
+let currentFunctionIsCPS () =
+  let cps_attr = ref false in
+  let visitor = object(self)
+      inherit nopCilVisitor
+      method vtype t = match t with
+      | TFun _ -> SkipChildren
+      | _ -> DoChildren
+      method vattr (Attr (a, _)) = if a = "cps" then cps_attr := true; SkipChildren
+  end in
+  match !currentFunctionFDEC.svar.vtype with
+  | TFun(rt, _, _, a) ->
+      ignore(visitCilType visitor rt);
+      ignore(visitCilAttributes visitor a);
+      !cps_attr
+  | _ -> assert false
   
 let lastStructId = ref 0
 let anonStructName (k: string) (suggested: string) = 
@@ -5492,7 +5508,7 @@ and createLocal ((_, sto, _, _) as specs)
       addLocalToEnv n (EnvVar vi);
       empty
     
-  | _ when sto = Static && !makeStaticGlobal ->
+  | _ when sto = Static && (!makeStaticGlobal || currentFunctionIsCPS ()) ->
       if debugGlobal then 
         ignore (E.log "createGlobal (local static): %s\n" n);
 
@@ -5614,7 +5630,7 @@ and createLocal ((_, sto, _, _) as specs)
                                   Some (integer (String.length s + 1)),
                                   a)
         | _, _, _ -> ());
-        if vi.vstorage = Static && not !makeStaticGlobal then begin
+        if vi.vstorage = Static && not (!makeStaticGlobal || currentFunctionIsCPS ()) then begin
             (* For static variables, use initializer *)
             if isNotEmpty se4 then
               E.s (error "local static initializer has side-effect");
