@@ -42,7 +42,7 @@ let visitReturnType visitor t = match unrollType t with
       TFun(visitCilType visitor rt, args, isva, visitCilAttributes visitor a)
   | _ -> E.s (E.bug "visitReturnType called on a non-function type")
 
-let is_cps_type ft =
+let check_type_attr attr ft =
   let cps_attr = ref false in
   ignore(visitReturnType
     (object(self)
@@ -50,10 +50,13 @@ let is_cps_type ft =
       method vtype t = match t with
       | TFun _ -> SkipChildren
       | _ -> DoChildren
-      method vattr (Attr (a, _)) = if a = "cps" then cps_attr := true; SkipChildren
+      method vattr (Attr (a, _)) = if a = attr then cps_attr := true; SkipChildren
     end)
     ft);
   !cps_attr
+
+let is_cps_type = check_type_attr "cps"
+let is_nocps_type = check_type_attr "nocps"
 
 (* Common operations on varinfo *)
 module V = struct
@@ -120,14 +123,14 @@ class vcollect = fun filename ->
 
   method vglob = function
   | GVarDecl(v,_) when isFunctionType v.vtype ->
-      if  (!full_graph || is_cps_type v.vtype) then
+      if  (!full_graph || is_cps_type v.vtype || is_nocps_type v.vtype) then
       vregister v decl;
       SkipChildren
   | GFun ({svar=v},{file = f}) ->
       (* XXX if an included definition misses cps declaration, we will ignore it
        * --- but CPC will refuse to compile anyway; use --fullgraph if you want
        * to be sure *)
-      if (!full_graph || is_cps_type v.vtype || same_file f filename) then
+      if (!full_graph || is_cps_type v.vtype || is_nocps_type v.vtype || same_file f filename) then
         vregister v def;
       DoChildren
   | _ -> SkipChildren
@@ -169,8 +172,9 @@ module ColoredG = struct
   let graph_attributes g = []
   let default_vertex_attributes g = []
   let vertex_name v =
-    Printf.sprintf "\"%s%s\""
+    Printf.sprintf "\"%s%s%s\""
     (if is_cps_type v.vtype then "cps " else "")
+    (if is_nocps_type v.vtype then "nocps " else "")
     v.vname
   let vertex_attributes v =
     let shape =
@@ -184,7 +188,11 @@ module ColoredG = struct
     [`Shape shape; `Color color; `Style style]
   let get_subgraph v = None
   let default_edge_attributes g = []
-  let edge_attributes (src, dst) = []
+  let edge_attributes (src, dst) =
+    if is_nocps_type src.vtype &&
+    (!should_be_cps dst || is_cps_type dst.vtype)
+    then [ `Style `Dashed; `Color 0xff0000 ]
+    else []
 end
 
 module Draw = Graph.Graphviz.Dot(ColoredG) ;;
@@ -194,13 +202,25 @@ let draw filename g =
   Draw.output_graph chan g;
   close_out chan
 
+let check_nocps v =
+  let callers = G.succ g v in
+  List.iter (fun c -> match !should_be_cps c, is_cps_type c.vtype with
+    | true, true -> E.warn "forbidden call: nocps %s called by cps %s" v.vname c.vname
+    | true, false -> E.warn "suspicious call: nocps %s called by (missing) cps %s" v.vname c.vname
+    | false, true -> E.warn "suspicious call: nocps %s called by (spurious) cps %s" v.vname c.vname
+    | false, false -> ()
+  ) callers
+
 let print_warnings () =
-  VS.iter (function v ->
-    match !should_be_cps v, is_cps_type v.vtype with
-    | true, false -> E.warn "missing cps annotation: %s" v.vname
-    | false, true -> E.warn "spurious cps annotation: %s" v.vname
-    | _, _ -> ()
-  ) !all_fun
+  G.iter_vertex (function v ->
+    match !should_be_cps v, is_cps_type v.vtype, is_nocps_type v.vtype with
+    | _, true, true -> E.warn "conflicting cps/nocps annotation: %s" v.vname
+    | true, false, false -> E.warn "missing cps annotation: %s" v.vname
+    | false, true, false -> E.warn "spurious cps annotation: %s" v.vname
+    | true, false, true -> E.warn "wrong nocps annotation: %s" v.vname; check_nocps v
+    | _, _, true -> check_nocps v
+    | _, _, _ -> ()
+  ) g
 
 let doit file =
   (* work on a copy of the file, with unused variables removed *)
