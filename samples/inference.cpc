@@ -1,0 +1,46 @@
+#define cps __attribute__((__cps__))
+#define nocps __attribute__((__nocps__))
+
+/* Roots */
+cps extern void f();
+nocps extern void g();
+
+/* spurious cps */
+cps void f1() { }
+
+/* cps ok */
+cps void f2() { f(); }
+
+/* missing cps */
+void f3() { f(); }
+
+/* missing cps but ok because f1 is spurious */
+void f4() { f1(); }
+
+/* spurious cps, but in fact ok because f3 is missing */
+cps void f5() { f3(); }
+
+/* Deeper, just to check it works */
+cps void f6() { f5(); }
+void f7() { f4(); }
+
+/* nocps ok */
+nocps void g1() { g(); }
+
+/* conflicting annotation */
+nocps cps void g2() { }
+
+/* nocps inferred as cps */
+nocps void g3() { f(); }
+
+/* nocps called from native: ok */
+void g4() { g(); }
+
+/* nocps called from cps: bad */
+cps void f8() { f(); g(); g1(); }
+
+/* nocps called from spurious cps: suspicious */
+cps void f9() { g(); }
+
+/* nocps called from missing cps: suspicious */
+void f10() { f(); g(); }

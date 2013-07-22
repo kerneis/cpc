@@ -51,8 +51,14 @@ static-httpd-pth: LDLIBS+=`pth-config --libs --ldflags`
 static-httpd-pth.o: trivial-httpd-pth.c
 	$(CC) $(CFLAGS) $(CLIBS) -c -DSTATIC $< -o $@
 
+inference.dot: inference.cpc
+	$(CPC) $(CPCOPTS) $(CFLAGS) $(CLIBS) --save-temps --dontcpc --docpsInference -c $<
+
+inference.pdf: inference.dot
+	dot -Tpdf -o $@ $<
+
 clean:
-	rm -f *.o *~ *.cpc.* *.output core
+	rm -f *.o *.i *~ *.cpc.* *.cil.* *.output *.dot *.pdf core
 	rm -f $(BASICS) $(EXTENDED) $(SERVERS)
 
 %.o: %.cpc
