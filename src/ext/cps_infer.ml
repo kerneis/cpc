@@ -91,7 +91,6 @@ let g = G.create()
 module VS = Set.Make(V)
 let decl = ref VS.empty
 let def = ref VS.empty
-let all_fun = ref VS.empty
 
 (* vertex collecter *)
 let vregister var set =
@@ -140,7 +139,8 @@ end
 
 let add_edge src dst =
   (* avoid implicit creation of vertices *)
-  if(VS.mem src !all_fun && VS.mem dst !all_fun)
+  let all_fun = VS.union !decl !def in
+  if(VS.mem src all_fun && VS.mem dst all_fun)
   then G.add_edge g src dst
 
 class ecollect =
@@ -157,7 +157,7 @@ class ecollect =
       add_edge v ef.svar;
       SkipChildren
   | Call(_, e, _, _) ->
-      let v = makeVarinfo false "indirect-call" (typeOf e) in
+      let v = makeVarinfo false (sprint 20 (dn_exp () e)) (typeOf e) in
       vregister v decl;
       add_edge v ef.svar;
       SkipChildren
@@ -227,7 +227,6 @@ let doit file =
   let file = { (file) with fileName = file.fileName } in
   Rmtmps.removeUnusedTemps file;
   visitCilFileSameGlobals (new vcollect file.fileName) file;
-  all_fun := VS.union !decl !def;
   visitCilFileSameGlobals (new ecollect) file;
   let no_def = VS.diff !decl !def in
   (* start with cps functions that are declared but not defined,
