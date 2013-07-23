@@ -69,9 +69,9 @@ end
 (* Directed graph of varinfo *)
 module G = Graph.Imperative.Digraph.ConcreteBidirectional(V) ;;
 
-(* Reachability analysis for varinfo.
+(* Backward reachability analysis for varinfo.
  * If you initialize with a set of trusted (external for instance)
- * cps functions, and build called-by edges, the reachable varinfo
+ * cps functions, and build a call graph, the backward reachable varinfo
  * are the functions that should be cps *)
 module Reachability = Graph.Fixpoint.Make(G)
 (struct
@@ -79,7 +79,7 @@ module Reachability = Graph.Fixpoint.Make(G)
     type label = G.E.label
     type cfg = G.t
     type data = bool
-    let direction = Graph.Fixpoint.Forward
+    let direction = Graph.Fixpoint.Backward
     let equal = (=)
     let join = (||)
     let analyze _ = (fun x -> x)
@@ -137,11 +137,11 @@ end
 
 (* edge collecter *)
 
-let add_edge src dst =
+let add_call caller callee =
   (* avoid implicit creation of vertices *)
   let all_fun = VS.union !decl !def in
-  if(VS.mem src all_fun && VS.mem dst all_fun)
-  then G.add_edge g src dst
+  if(VS.mem caller all_fun && VS.mem callee all_fun)
+  then G.add_edge g caller callee
 
 class ecollect =
   object(self)
@@ -154,12 +154,12 @@ class ecollect =
 
   method vinst = function
   | Call(_, Lval(Var v, NoOffset), _, _) ->
-      add_edge v ef.svar;
+      add_call ef.svar v;
       SkipChildren
   | Call(_, e, _, _) ->
       let v = makeVarinfo false (sprint 20 (dn_exp () e)) (typeOf e) in
       vregister v decl;
-      add_edge v ef.svar;
+      add_call ef.svar v;
       SkipChildren
   | _ -> SkipChildren
 end
