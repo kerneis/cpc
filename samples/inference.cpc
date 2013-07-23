@@ -44,3 +44,14 @@ cps void f9() { g(); }
 
 /* nocps called from missing cps: suspicious */
 void f10() { f(); g(); }
+
+/* cps function pointer */
+typedef cps void cpsfun(void);
+cpsfun *p = f;
+
+/* missing cps here */
+void f11() { p(); }
+
+/* not spurious, because a pointer is taken so we should trust the annotation, just like extern functions */
+void f12() { }
+cpsfun *p2 = f12;
