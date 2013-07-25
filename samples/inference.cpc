@@ -4,6 +4,7 @@
 /* Roots */
 cps extern void f();
 nocps extern void g();
+void h() { };
 
 /* spurious cps */
 cps void f1() { }
@@ -53,5 +54,5 @@ cpsfun *p = f;
 void f11() { p(); }
 
 /* not spurious, because a pointer is taken so we should trust the annotation, just like extern functions */
-void f12() { }
+cps void f12() { h(); }
 cpsfun *p2 = f12;

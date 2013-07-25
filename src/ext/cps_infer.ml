@@ -66,8 +66,36 @@ module V = struct
   let equal x y = (=) x.vid y.vid
 end
 
-(* Directed graph of varinfo *)
-module G = Graph.Imperative.Digraph.ConcreteBidirectional(V) ;;
+(* Work-around a limitation of ocamlgraph <= 1.8.2 where Fixpoint works
+ * on labels of labeled graphs instead of edges: use a labeled graph and
+ * store src and dst in the label *)
+module Edge = struct
+  type t = V.t * V.t
+  let compare = compare
+  let default =
+    let dummy = makeVarinfo false "dummy" voidType in
+    (dummy, dummy)
+end
+
+(* Directed labeled graph of varinfo *)
+module G = Graph.Imperative.Digraph.ConcreteBidirectionalLabeled(V)(Edge) ;;
+
+(* work-around: store a copy of caller and callee in label *)
+let add_labeled_edge g src dst =
+  G.add_edge_e g (G.E.create src (src, dst) dst)
+
+let g = G.create()
+
+(* Sets of declared and defined functions *)
+module VS = Set.Make(V)
+let decl = ref VS.empty
+let def = ref VS.empty
+
+(* Specify which functions should be trusted as CPS. Those are the functions
+ * that are declared but not defined, as well as function the address of which
+ * is taken (to be conservative) *)
+let is_trusted_cps v =
+  is_cps_type v.vtype && (VS.mem v (VS.diff !decl !def) || v.vaddrof)
 
 (* Backward reachability analysis for varinfo.
  * If you initialize with a set of trusted (external for instance)
@@ -82,15 +110,9 @@ module Reachability = Graph.Fixpoint.Make(G)
     let direction = Graph.Fixpoint.Backward
     let equal = (=)
     let join = (||)
-    let analyze _ = (fun x -> x)
+    let analyze (src, dst) cps_callee =
+      is_trusted_cps src || cps_callee
 end)
-
-let g = G.create()
-
-(* Sets of declared and defined functions *)
-module VS = Set.Make(V)
-let decl = ref VS.empty
-let def = ref VS.empty
 
 (* vertex collecter *)
 let vregister var set =
@@ -127,8 +149,8 @@ class vcollect = fun filename ->
       SkipChildren
   | GFun ({svar=v},{file = f}) ->
       (* XXX if an included definition misses cps declaration, we will ignore it
-       * --- but CPC will refuse to compile anyway; use --fullgraph if you want
-       * to be sure *)
+       * --- but CPC will refuse to compile anyway; use --fullInferenceGraph
+       * if you want to be sure *)
       if (!full_graph || is_cps_type v.vtype || is_nocps_type v.vtype || same_file f filename) then
         vregister v def;
       DoChildren
@@ -141,7 +163,7 @@ let add_call caller callee =
   (* avoid implicit creation of vertices *)
   let all_fun = VS.union !decl !def in
   if(VS.mem caller all_fun && VS.mem callee all_fun)
-  then G.add_edge g caller callee
+  then add_labeled_edge g caller callee
 
 class ecollect =
   object(self)
@@ -188,7 +210,8 @@ module ColoredG = struct
     [`Shape shape; `Color color; `Style style]
   let get_subgraph v = None
   let default_edge_attributes g = []
-  let edge_attributes (src, dst) =
+  let edge_attributes e =
+    let src, dst = G.E.src e, G.E.dst e in
     if is_nocps_type src.vtype &&
     (!should_be_cps dst || is_cps_type dst.vtype)
     then [ `Style `Dashed; `Color 0xff0000 ]
@@ -228,13 +251,7 @@ let doit file =
   Rmtmps.removeUnusedTemps file;
   visitCilFileSameGlobals (new vcollect file.fileName) file;
   visitCilFileSameGlobals (new ecollect) file;
-  let no_def = VS.diff !decl !def in
-  (* start with cps functions that are declared but not defined,
-   * as well as function the address of which is taken to be
-   * conservative *)
-  let init_cps v =
-    (VS.mem v no_def || v.vaddrof) && is_cps_type v.vtype in
-  should_be_cps := Reachability.analyze init_cps g;
+  should_be_cps := Reachability.analyze is_trusted_cps g;
   draw ((Filename.chop_extension file.fileName)^".dot") g;
   print_warnings ()
 
