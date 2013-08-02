@@ -36,15 +36,16 @@ open Cil
 open Pretty
 module E = Errormsg
 
-(* Copied from cpc.ml *)
+(* Adapted from cpc.ml *)
 let visitReturnType visitor t = match unrollType t with
-  | TFun(rt, args, isva, a) ->
-      TFun(visitCilType visitor rt, args, isva, visitCilAttributes visitor a)
-  | _ -> E.s (E.bug "visitReturnType called on a non-function type")
+  | TFun(rt, _args, _isva, a) ->
+      ignore(visitCilType visitor rt);
+      ignore(visitCilAttributes visitor a)
+  | _ -> E.s (E.bug "expected a function type")
 
 let check_type_attr attr ft =
   let cps_attr = ref false in
-  ignore(visitReturnType
+  visitReturnType
     (object(self)
       inherit nopCilVisitor
       method vtype t = match t with
@@ -52,7 +53,7 @@ let check_type_attr attr ft =
       | _ -> DoChildren
       method vattr (Attr (a, _)) = if a = attr then cps_attr := true; SkipChildren
     end)
-    ft);
+    ft;
   !cps_attr
 
 let is_cps_type = check_type_attr "cps"
@@ -186,9 +187,42 @@ class ecollect =
   | _ -> SkipChildren
 end
 
-let should_be_cps = ref (fun _ -> failwith "run analysis first")
+(* Function pointer assignement checker *)
+
+let returnTypeOf e = match unrollType (typeOf e) with
+| TFun (rt, _, _, _) -> rt
+| _ -> E.s (E.bug "expected a function type")
+
+let rec broken_cast t t' = match unrollType t, unrollType t' with
+| TPtr (t, _), t' | t, TPtr (t', _) -> broken_cast t t'
+| (TFun _ as t), (TFun _ as t') -> is_cps_type t <> is_cps_type t'
+| _ -> false
+
+class cpsptrcheck =
+  object(self)
+  inherit nopCilVisitor
+
+  (* For initializers and Set, casts are inserted by CIL, no need to check in
+   * vinit *)
+  method vexpr = function
+  | CastE (t, e) when broken_cast (typeOf e) t ->
+      E.warn "wrong cps function pointer cast (at %a)" d_loc !currentLoc;
+      DoChildren
+  | _ -> DoChildren
+
+  (* For Call, the cast is left implicit and only pretty-printed,
+   * so we need to check separately *)
+  method vinst = function
+  | Call (Some lv, e, _, loc) when broken_cast (typeOfLval lv) (returnTypeOf e) ->
+        E.warn "wrong cps function pointer assignement (at %a)" d_loc !currentLoc;
+        DoChildren
+  | _ -> DoChildren
+end
 
 (* Graphviz rendering *)
+
+let should_be_cps = ref (fun _ -> failwith "run analysis first")
+
 module ColoredG = struct
   include G
   let graph_attributes g = []
@@ -245,10 +279,17 @@ let print_warnings () =
     | _, _, _ -> ()
   ) g
 
+let rmtmps f = Rmtmps.removeUnusedTemps f; f
+
 let doit file =
-  (* work on a copy of the file, with unused variables removed *)
-  let file = { (file) with fileName = file.fileName } in
-  Rmtmps.removeUnusedTemps file;
+  let file =
+    if !Rmtmps.keepUnused
+      (* work on a copy of the file, with unused variables removed *)
+      then rmtmps { (file) with fileName = file.fileName }
+      else file in
+  if not !insertImplicitCasts then
+    E.warn "use --insertImplicitCasts if you want to detect wrong function pointer assignments";
+  visitCilFileSameGlobals (new cpsptrcheck) file;
   visitCilFileSameGlobals (new vcollect file.fileName) file;
   visitCilFileSameGlobals (new ecollect) file;
   should_be_cps := Reachability.analyze is_trusted_cps g;

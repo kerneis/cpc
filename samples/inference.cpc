@@ -48,6 +48,7 @@ void f10() { f(); g(); }
 
 /* cps function pointer */
 typedef cps void cpsfun(void);
+typedef void nativefun(void);
 cpsfun *p = f;
 
 /* missing cps here */
@@ -56,3 +57,34 @@ void f11() { p(); }
 /* not spurious, because a pointer is taken so we should trust the annotation, just like extern functions */
 cps void f12() { h(); }
 cpsfun *p2 = f12;
+
+/* Checking wrong (implicit) casts */
+struct s {
+  void cps f(void);
+  void cps g(void);
+  void h(void);
+};
+
+void cps a(void);
+void b(void);
+
+struct s foo = {
+  .f = a,   /* Bad */
+  .g = b,   /* Bad */
+  .h = a,   /* OK  */
+};
+
+cpsfun *p3 = a; /* OK */
+nativefun *p4 = a; /* Bad */
+
+cpsfun *f13() {
+  return &a;
+}
+
+void f14() {
+  nativefun *p = a; /* Bad */
+  cpsfun *p2 = b;     /* Bad */
+
+  p = f13(); /* Bad */
+  p2 = f13(); /* OK */
+}
