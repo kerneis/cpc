@@ -1287,6 +1287,7 @@ let stringLiteralType = ref charPtrType
 let voidPtrType = TPtr(voidType, [])
 let intPtrType = TPtr(intType, [])
 let uintPtrType = TPtr(uintType, [])
+let boolPtrType = TPtr(boolType, [])
 
 let doubleType = TFloat(FDouble, [])
 
@@ -3110,6 +3111,33 @@ let initGccBuiltins () : unit =
   H.add h "__sync_synchronize" (voidType, [ ], true);
   H.add h "__sync_lock_test_and_set" (TVoid[Attr("overloaded",[])], [ ], true);
   H.add h "__sync_lock_release" (voidType, [ ], true);
+
+  H.add h "__atomic_load" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_store_n" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_store" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_exchange_n" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_exchange" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_compare_exchange_n" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_compare_exchange" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_add_fetch" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_sub_fetch" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_and_fetch" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_xor_fetch" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_or_fetch" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_nand_fetch" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_fetch_add" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_fetch_sub" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_fetch_and" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_fetch_xor" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_fetch_or" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_fetch_nand" (TVoid[Attr("overloaded",[])], [ ], true);
+  H.add h "__atomic_test_and_set" (boolType, [voidPtrType; intType], false);
+  H.add h "__atomic_clear" (voidType, [boolPtrType; intType], false);
+  H.add h "__atomic_thread_fence" (voidType, [intType], false);
+  H.add h "__atomic_signal_fence" (voidType, [intType], false);
+  H.add h "__atomic_always_lock_free" (boolType, [sizeType; voidPtrType], false);
+  H.add h "__atomic_is_lock_free" (boolType, [sizeType; voidPtrType], false);
+  H.add h "__atomic_load_n" (TVoid[Attr("overloaded",[])], [ ], true);
 
   if hasbva then begin
     H.add h "__builtin_va_end" (voidType, [ TBuiltin_va_list [] ], false);
