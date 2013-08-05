@@ -214,7 +214,7 @@ class cpsptrcheck =
    * so we need to check separately *)
   method vinst = function
   | Call (Some lv, e, _, loc) when broken_cast (typeOfLval lv) (returnTypeOf e) ->
-        E.warn "wrong cps function pointer assignement (at %a)" d_loc !currentLoc;
+        E.warn "wrong cps function pointer assignment (at %a)" d_loc !currentLoc;
         DoChildren
   | _ -> DoChildren
 end
