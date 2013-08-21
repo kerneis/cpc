@@ -280,8 +280,6 @@ AC_SUBST(UNDERSCORE_NAME)
 AC_SUBST(EXTRAFEATURES)
 AC_SUBST(EXTRASRCDIRS)
 
-AC_ARG_VAR(FORCE_PERL_PREFIX, [Install cpc wrapper in PREFIX/bin and PREFIX/lib])
-
 # finish the configure script and generate various files; ./configure
 # will apply variable substitutions to <filename>.in to generate <filename>;
 
@@ -293,6 +291,7 @@ CIL_CONFIG_FILES(lib/App/Cpc/CilConfig.pm)
 CIL_CONFIG_FILES(doc/index.html)
 CIL_CONFIG_FILES(doc/header.html)
 CIL_CONFIG_FILES(src/machdep-ml.c)
+CIL_CONFIG_FILES(src/cilversion.ml)
 
 AC_OUTPUT
 

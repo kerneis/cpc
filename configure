@@ -620,7 +620,6 @@ ac_includes_default="\
 #endif"
 
 ac_subst_vars='LTLIBOBJS
-FORCE_PERL_PREFIX
 EXTRASRCDIRS
 EXTRAFEATURES
 UNDERSCORE_NAME
@@ -736,8 +735,7 @@ CFLAGS
 LDFLAGS
 LIBS
 CPPFLAGS
-CPP
-FORCE_PERL_PREFIX'
+CPP'
 
 
 # Initialize some variables set by options.
@@ -1362,8 +1360,6 @@ Some influential environment variables:
   CPPFLAGS    (Objective) C/C++ preprocessor flags, e.g. -I<include dir> if
               you have headers in a nonstandard directory <include dir>
   CPP         C preprocessor
-  FORCE_PERL_PREFIX
-              Install cpc wrapper in PREFIX/bin and PREFIX/lib
 
 Use these variables to override the choices made by `configure' or to help
 it to find libraries and programs with nonstandard names/locations.
@@ -6255,8 +6251,6 @@ chmod -w Makefile.features
 
 
 
-
-
 # finish the configure script and generate various files; ./configure
 # will apply variable substitutions to <filename>.in to generate <filename>;
 
@@ -6330,6 +6324,15 @@ chmod -w Makefile.features
   else
     true
     #echo "skipping [src/machdep-ml.c] because it's not in this distribution"
+  fi
+}
+{
+  if test -f src/cilversion.ml.in; then
+    ac_config_files="$ac_config_files src/cilversion.ml"
+
+  else
+    true
+    #echo "skipping [src/cilversion.ml] because it's not in this distribution"
   fi
 }
 
@@ -7033,6 +7036,7 @@ do
     "doc/index.html") CONFIG_FILES="$CONFIG_FILES doc/index.html" ;;
     "doc/header.html") CONFIG_FILES="$CONFIG_FILES doc/header.html" ;;
     "src/machdep-ml.c") CONFIG_FILES="$CONFIG_FILES src/machdep-ml.c" ;;
+    "src/cilversion.ml") CONFIG_FILES="$CONFIG_FILES src/cilversion.ml" ;;
 
   *) as_fn_error $? "invalid argument: \`$ac_config_target'" "$LINENO" 5;;
   esac
@@ -7594,6 +7598,7 @@ $as_echo "$as_me: $ac_file is unchanged" >&6;}
     "doc/index.html":F) chmod a-w doc/index.html ;;
     "doc/header.html":F) chmod a-w doc/header.html ;;
     "src/machdep-ml.c":F) chmod a-w src/machdep-ml.c ;;
+    "src/cilversion.ml":F) chmod a-w src/cilversion.ml ;;
 
   esac
 done # for ac_tag
