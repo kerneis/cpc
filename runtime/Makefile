@@ -2,7 +2,7 @@ CPC='../bin/cpc'
 
 CDEBUGFLAGS=-Wall -g -Wno-unknown-pragmas
 CLIBS=-I ../include/cpc
-CFLAGS += $(CDEBUGFLAGS) $(EXTRA_DEFINES)
+CFLAGS += $(CDEBUGFLAGS) $(EXTRA_DEFINES) --save-temps
 
 # To build with compact continuations , disable the following lines
 # CFLAGS += -DCPC_COMPACT_CONTINUATIONS
