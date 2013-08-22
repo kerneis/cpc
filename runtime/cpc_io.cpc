@@ -424,7 +424,7 @@ cpc_setup_descriptor(HANDLE handle, int no_nagle)
         int64_t rc64;                                                   \
         DWORD nbytes;                                                   \
         rc = SysCall(handle->cpch_handle, buf, count,                   \
-                     &nbytes, (POVERLAPPED)ovl);                        \
+                     &nbytes, (OVERLAPPED*)ovl);                        \
         if(!rc) { /* asynchronous operation or error */                 \
             rc = GetLastError();                                        \
             if(rc != ERROR_IO_PENDING)                                  \
@@ -521,7 +521,7 @@ cpc_read_at_cond(cpc_handle_t handle, void *buf, size_t count,
         wsaBuffer.len = count;                                          \
         assert(handle->cpch_kind == CPC_HANDLE_SOCKET);                 \
         rc = SysCall((SOCKET)handle->cpch_handle, &wsaBuffer, 1,        \
-                     &nbytes, flags, (POVERLAPPED)ovl, NULL);           \
+                     &nbytes, flags, (OVERLAPPED*)ovl, NULL);           \
         if(rc == SOCKET_ERROR) { /* asynchronous operation or error */  \
             rc = WSAGetLastError();                                     \
             if(rc != WSA_IO_PENDING)                                    \
@@ -570,7 +570,7 @@ cpc_recv(cpc_handle_t handle, void *buf, size_t count)
         WSABUF *wsaBuffer = iobuf;                                      \
         assert(handle->cpch_kind == CPC_HANDLE_SOCKET);                 \
         rc = SysCall((SOCKET)handle->cpch_handle, wsaBuffer, iocount,   \
-                     &nbytes, flags, (POVERLAPPED)ovl, NULL);           \
+                     &nbytes, flags, (OVERLAPPED*)ovl, NULL);           \
         if(rc == SOCKET_ERROR) { /* asynchronous operation or error */  \
             rc = WSAGetLastError();                                     \
             if(rc != WSA_IO_PENDING)                                    \
@@ -623,7 +623,7 @@ cpc_recvv_cond(cpc_handle_t handle,
         wsaBuffer.len = count;                                          \
         assert(handle->cpch_kind == CPC_HANDLE_SOCKET);                 \
         rc = SysCall((SOCKET)handle->cpch_handle, &wsaBuffer, 1,        \
-                     &nbytes, flags, (POVERLAPPED)ovl, addr, addrlen, NULL); \
+                     &nbytes, flags, (OVERLAPPED*)ovl, addr, addrlen, NULL); \
         if(rc == SOCKET_ERROR) { /* asynchronous operation or error */  \
             rc = WSAGetLastError();                                     \
             if(rc != WSA_IO_PENDING)                                    \
@@ -704,7 +704,7 @@ cpc_accept(cpc_handle_t serverHandle, cpc_handle_t acceptedHandle,
                   LOCAL_ADDRESS_LENGTH,
                   REMOTE_ADDRESS_LENGTH,
                   &nbytes,
-                  (POVERLAPPED)ovl);
+                  (OVERLAPPED*)ovl);
     if(!rc) { /* asynchronous operation or error */
         rc = WSAGetLastError();
         /* msdn says AcceptEx returns ERROR_IO_PENDING with WSAGetLastError.
