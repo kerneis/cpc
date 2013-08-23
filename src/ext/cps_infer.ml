@@ -205,8 +205,8 @@ class cpsptrcheck =
   (* For initializers and Set, casts are inserted by CIL, no need to check in
    * vinit *)
   method vexpr = function
-  | CastE (t, e) when broken_cast (typeOf e) t ->
-      E.warn "wrong cps function pointer cast (at %a)" d_loc !currentLoc;
+  | (CastE (t, e) as exp) when broken_cast (typeOf e) t ->
+      E.warn "wrong cps function pointer cast (at %a):\n%a" d_loc !currentLoc dn_exp exp ;
       DoChildren
   | _ -> DoChildren
 
