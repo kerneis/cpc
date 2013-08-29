@@ -966,7 +966,7 @@ cpc_main_loop(void)
     struct cpc_thread_queue q;
     struct timeval when;
     int rc;
-    POVERLAPPED poverlapped;
+    OVERLAPPED *poverlapped;
     DWORD milliseconds;
     DWORD nbytes;
     int64_t io_rc;
