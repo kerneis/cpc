@@ -67,6 +67,14 @@ get_thread_from_overlapped(OVERLAPPED *o)
     return (cpc_thread *)(((char *)o) - offsetof(struct cpc_thread, overlapped));
 }
 
+#ifdef CPC_INDIRECT_PATCH
+#define RETVAL_FIELD(type) type* cpc_retval;
+#define RETVAL_SET(cont,args) do{(cont)->cpc_retval = (args)->cpc_retval;}while(0)
+#else
+#define RETVAL_FIELD(type)
+#define RETVAL_SET(cont,args) do{}while(0)
+#endif
+
 struct cpc_sched {
     threadpool_t *pool;
     struct cpc_sched *next;
