@@ -2131,6 +2131,7 @@ let remove_free_vars enclosing_fun loc =
         GVarDecl(enclosing_fun.svar,locUnknown) ::
         List.rev_append gfuns [GFun(remove_local_fun enclosing_fun,loc)]
     | fd :: tl ->
+        fd.svar.vstorage <- Static;
         GVarDecl(fd.svar,locUnknown) ::
           make_globals (GFun(remove_local_fun fd,locUnknown) :: gfuns) tl in
   let introduce_new_vars fd fv =
