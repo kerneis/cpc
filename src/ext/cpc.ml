@@ -1107,7 +1107,10 @@ class cpsConverter = fun file ->
   (* Special case: some functions need to be given the current continuation *)
   | Call(r, (Lval (Var f, NoOffset) as e), args, loc)
       when hasAttribute "cpc_need_cont" f.vattr ->
-         ChangeTo [Call(r, e, Lval (Var current_continuation, NoOffset) :: args, loc)] 
+        let cont = if current_continuation.vname = "dummyVar"
+          then mkCast (integer 0) voidPtrType
+          else Lval(Var current_continuation, NoOffset) in
+         ChangeTo [Call(r, e, cont :: args, loc)]
   | _ -> SkipChildren
 
   method vstmt (s: stmt) : stmt visitAction = match s.skind with
@@ -1205,6 +1208,7 @@ class cpsConverter = fun file ->
         l@g)
   | GFun _ ->
       cps_function <- false;
+      current_continuation <-  makeVarinfo false "dummyVar" voidType;
       DoChildren
   | _ -> DoChildren
 end
