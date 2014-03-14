@@ -202,19 +202,19 @@ $(OBJDIR)/feature_config.ml: config.status
 	echo "(* This module was generated automatically by code in Makefile.in *)" >$@
 	echo "open Cil"   >>$@
 	echo "let features : featureDescr list = [" >> $@
-ifdef USE_BLOCKINGGRAPH
+ifeq (USE_BLOCKINGGRAPH,yes)
 	echo "   Blockinggraph.feature;" >> $@
 endif
-ifdef USE_RAND
+ifeq (USE_RAND,yes)
 	echo "   Rand.feature;" >> $@
 endif
-ifdef USE_ARITHABS
+ifeq (USE_ARITHABS,yes)
 	echo "   Arithabs.feature;" >>$@
 endif
-ifdef USE_ZRAPP
+ifeq (USE_ZRAPP,yes)
 	echo "   Zrapp.feature;" >> $@
 endif
-ifdef USE_LLVM
+ifeq (USE_LLVM,yes)
 	echo "   Llvm.feature;" >> $@
 endif
 	echo " (* EXTRAFEATURES: *)" >> $@
@@ -300,7 +300,7 @@ cpc_runtime:
 cpc_clean:
 	$(MAKE) -C runtime clean
 	$(MAKE) -C samples clean
-	
+
 testcpc: cpc
 	$(MAKE) -C samples clean all test
 
