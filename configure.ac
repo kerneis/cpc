@@ -255,6 +255,11 @@ do
       f_up=`echo $f | tr a-z A-Z`
       echo "export USE_$f_up=yes">>Makefile.features
    fi
+   if test $curval = no ;then
+      CIL_FEATURES="$CIL_FEATURES $f"
+      f_up=`echo $f | tr a-z A-Z`
+      echo "export USE_$f_up=no">>Makefile.features
+   fi
 done
 chmod -w Makefile.features
 
